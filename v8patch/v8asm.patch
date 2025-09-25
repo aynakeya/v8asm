@@ -1,0 +1,871 @@
+diff --git a/BUILD.gn b/BUILD.gn
+index 9a2b2cdd94f..ea46bd473f9 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -7789,6 +7789,26 @@ v8_executable("v8_hello_world") {
+   }
+ }
+ 
++v8_executable("v8asm") {
++  sources = [ "src/disassembler/main.cc" ]
++
++  # This config allows us to include V8's internal headers,
++  # which is necessary for accessing i::CodeSerializer, i::Isolate, etc.
++  configs = [ ":internal_config_base" ]
++
++  # Define the direct dependencies for our tool.
++  # :v8      - The main V8 public API library.
++  # :v8_libbase and :v8_libplatform are essential support libraries.
++  deps = [
++    ":v8",
++    ":v8_base",
++    ":v8_snapshot",
++    ":v8_libbase",
++    ":v8_libplatform",
++    "//build/win:default_exe_manifest", # Required for Windows builds.
++  ]
++}
++
+ v8_executable("v8_sample_process") {
+   sources = [ "samples/process.cc" ]
+ 
+diff --git a/src/d8/d8.cc b/src/d8/d8.cc
+index 38810cacee6..1ca8b537163 100644
+--- a/src/d8/d8.cc
++++ b/src/d8/d8.cc
+@@ -930,6 +930,7 @@ void D8WasmAsyncResolvePromiseCallback(
+ 
+ }  // namespace
+ 
++
+ // Executes a string within the current v8 context.
+ bool Shell::ExecuteString(Isolate* isolate, Local<String> source,
+                           Local<String> name,
+@@ -3903,6 +3904,10 @@ Local<ObjectTemplate> Shell::CreateGlobalTemplate(Isolate* isolate) {
+   global_template->Set(isolate, "performance",
+                        Shell::CreatePerformanceTemplate(isolate));
+   global_template->Set(isolate, "Worker", Shell::CreateWorkerTemplate(isolate));
++  global_template->Set(
++    v8::String::NewFromUtf8(isolate, "loadjsc", v8::NewStringType::kNormal)
++        .ToLocalChecked(),
++    v8::FunctionTemplate::New(isolate, v8::Shell::LoadJSC));
+ 
+   // Prevent fuzzers from creating side effects.
+   if (!i::v8_flags.fuzzing) {
+@@ -6873,3 +6878,105 @@ int main(int argc, char* argv[]) { return v8::Shell::Main(argc, argv); }
+ 
+ #undef CHECK
+ #undef DCHECK
++
++
++static void Disassemble(v8::internal::Isolate* isolate, 
++                        v8::internal::Tagged<v8::internal::BytecodeArray> bytecode, 
++                        std::unordered_set<uintptr_t>& visited,
++                        int depth) {
++  if (depth > 100) { 
++    v8::internal::PrintF("Recursion depth limit reached, aborting disassembly for this path.\n");
++    fflush(stdout);
++    return;
++  }
++
++  uintptr_t key = reinterpret_cast<uintptr_t>(bytecode.ptr());
++  if (visited.count(key)) {
++    return;
++  }
++  visited.insert(key);
++  for (int val = 0; val < depth; ++val) v8::internal::PrintF("  ");
++  v8::internal::PrintF("Disassembling BytecodeArray at: %p\n", reinterpret_cast<void*>(bytecode.ptr()));
++  fflush(stdout);
++  v8::internal::OFStream os(stdout);
++  bytecode->Disassemble(os);
++
++  auto consts = bytecode->constant_pool();
++
++  for (int val = 0; val < depth; ++val) {
++    v8::internal::PrintF("  ");
++  }
++  v8::internal::PrintF("Constant pool size: %d\n", consts->length());
++  fflush(stdout);
++
++  for (int val = 0; val < consts->length(); val++) {
++    auto obj = consts->get(val);
++    if (v8::internal::IsSharedFunctionInfo(obj)) {
++      auto shared = v8::internal::Cast<v8::internal::SharedFunctionInfo>(obj);
++
++      for (int val1 = 0; val1 < depth; ++val1) v8::internal::PrintF("  ");
++      v8::internal::PrintF("--> Found SFI in constant pool at index %d: ", val);
++
++      auto function_name = shared->Name();
++      if (function_name->length() > 0) {
++          v8::internal::PrintF("%s\n", function_name->ToCString().get());
++      } else {
++          v8::internal::PrintF("(anonymous)\n");
++      }
++      fflush(stdout);
++
++      if (shared->HasBytecodeArray()) {
++          Disassemble(isolate, shared->GetBytecodeArray(isolate), visited, depth + 1);
++      } else {
++          for (int val1 = 0; val1 < depth; ++val1) v8::internal::PrintF("  ");
++          v8::internal::PrintF("    (SFI has no bytecode array, skipping)\n");
++          fflush(stdout);
++      }
++    }
++  }
++}
++
++void v8::Shell::LoadJSC(const v8::FunctionCallbackInfo<v8::Value>& args) {
++  auto isolate = reinterpret_cast<v8::internal::Isolate*>(args.GetIsolate());
++  for (int i = 0; i < args.Length(); i++) {
++    v8::String::Utf8Value filename(args.GetIsolate(), args[i]);
++    if (*filename == NULL) {
++      args.GetIsolate()->ThrowException(v8::Exception::Error(
++          v8::String::NewFromUtf8(args.GetIsolate(), "Error loading file").ToLocalChecked()));
++      return;
++    }
++    int length = 0;
++    auto filedata = reinterpret_cast<uint8_t*>(ReadChars(*filename, &length));
++    if (filedata == NULL) {
++      args.GetIsolate()->ThrowException(v8::Exception::Error(
++          v8::String::NewFromUtf8(args.GetIsolate(), "Error reading file").ToLocalChecked()));
++      return;
++    }
++    v8::internal::AlignedCachedData cached_data(filedata, length);
++    auto source = isolate->factory()
++                      ->NewStringFromUtf8(base::CStrVector("source"))
++                      .ToHandleChecked();
++    v8::internal::ScriptDetails script_details;
++    v8::internal::MaybeDirectHandle<v8::internal::SharedFunctionInfo> maybe_fun =
++        v8::internal::CodeSerializer::Deserialize(isolate, &cached_data, source, script_details);
++
++    v8::internal::DirectHandle<v8::internal::SharedFunctionInfo> fun;
++    if (!maybe_fun.ToHandle(&fun)) {
++      args.GetIsolate()->ThrowException(v8::Exception::Error(
++          v8::String::NewFromUtf8(args.GetIsolate(), "Deserialize failed, possibly version mismatch or invalid .jsc file").ToLocalChecked()));
++      delete[] filedata;
++      return;
++    }
++
++    v8::internal::PrintF("---- Starting disassembly of %s ----\n", *filename);
++    fflush(stdout);
++
++    std::unordered_set<uintptr_t> visited;
++    Disassemble(isolate, fun->GetBytecodeArray(isolate), visited, 0); 
++
++    v8::internal::PrintF("---- Finished disassembly of %s ----\n", *filename);
++    fflush(stdout);
++
++    delete[] filedata;
++  }
++}
+\ No newline at end of file
+diff --git a/src/d8/d8.h b/src/d8/d8.h
+index 6fb139446e3..da5f525e63f 100644
+--- a/src/d8/d8.h
++++ b/src/d8/d8.h
+@@ -560,6 +560,8 @@ class Shell : public i::AllStatic {
+   static bool CompleteMessageLoop(Isolate* isolate);
+   static bool FinishExecuting(Isolate* isolate, const Global<Context>& context);
+ 
++  static void LoadJSC(const v8::FunctionCallbackInfo<v8::Value>& args);
++
+   static bool HandleUnhandledPromiseRejections(Isolate* isolate);
+ 
+   static std::unique_ptr<SerializationData> SerializeValue(
+diff --git a/src/diagnostics/objects-printer.cc b/src/diagnostics/objects-printer.cc
+index d3e5ec68657..2cba6fd6fa2 100644
+--- a/src/diagnostics/objects-printer.cc
++++ b/src/diagnostics/objects-printer.cc
+@@ -34,6 +34,11 @@
+ #include "src/utils/ostreams.h"
+ #include "third_party/fp16/src/include/fp16.h"
+ 
++
++#include <csignal>
++#include <csetjmp>
++#include <unistd.h>
++
+ #if V8_ENABLE_WEBASSEMBLY
+ #include "src/debug/debug-wasm-objects-inl.h"
+ #include "src/wasm/wasm-code-manager.h"
+@@ -157,7 +162,7 @@ namespace {
+ void PrintHeapObjectHeaderWithoutMap(Tagged<HeapObject> object,
+                                      std::ostream& os, const char* id) {
+   PtrComprCageBase cage_base = GetPtrComprCageBase();
+-  os << reinterpret_cast<void*>(object.ptr()) << ": [";
++  os << AsHex::Address(object.ptr()) << ": [";
+   if (id != nullptr) {
+     os << id;
+   } else {
+@@ -3368,15 +3373,30 @@ void HeapObject::Print(Tagged<Object> obj, std::ostream& os) {
+   v8::internal::Print(obj, os);
+ }
+ 
++static sigjmp_buf g_jump_buffer;
++void segfault_jumper(int signal_number) {
++    siglongjmp(g_jump_buffer, 1);
++}
++
+ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+   PtrComprCageBase cage_base = GetPtrComprCageBase();
+   os << AsHex::Address(this->ptr()) << " ";
+ 
++  void (*old_handler)(int);
++  old_handler = signal(SIGSEGV, segfault_jumper);
++  if (sigsetjmp(g_jump_buffer, 1) != 0) {
++    os << "<undefined: segmentfault, might outside scope>";
++    signal(SIGSEGV, old_handler);
++    return;
++  }
++
++
+   if (IsString(*this, cage_base)) {
+     HeapStringAllocator allocator;
+     StringStream accumulator(&allocator);
+     Cast<String>(*this)->StringShortPrint(&accumulator);
+     os << accumulator.ToCString().get();
++    signal(SIGSEGV, old_handler);
+     return;
+   }
+   if (IsJSObject(*this, cage_base)) {
+@@ -3384,6 +3404,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+     StringStream accumulator(&allocator);
+     Cast<JSObject>(*this)->JSObjectShortPrint(&accumulator);
+     os << accumulator.ToCString().get();
++    signal(SIGSEGV, old_handler);
+     return;
+   }
+ 
+@@ -3395,6 +3416,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+   if (InstanceTypeChecker::IsTrustedObject(instance_type) &&
+       !OutsideSandboxOrInReadonlySpace(*this)) {
+     os << "<Invalid TrustedObject (outside trusted space)>\n";
++    signal(SIGSEGV, old_handler);
+     return;
+   }
+ 
+@@ -3750,6 +3772,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+       os << "<Other heap object (" << map()->instance_type() << ")>";
+       break;
+   }
++  signal(SIGSEGV, old_handler);
+ }
+ 
+ void HeapNumber::HeapNumberShortPrint(std::ostream& os) {
+diff --git a/src/disassembler/main.cc b/src/disassembler/main.cc
+new file mode 100644
+index 00000000000..40817ff1b3c
+--- /dev/null
++++ b/src/disassembler/main.cc
+@@ -0,0 +1,480 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <fstream> 
++#include <string.h>
++
++#include "include/libplatform/libplatform.h"
++#include "include/v8-context.h"
++#include "include/v8-initialization.h"
++#include "include/v8-isolate.h"
++#include "include/v8-local-handle.h"
++#include "include/v8-primitive.h"
++#include "include/v8-script.h"
++
++#include "src/objects/managed-inl.h"
++#include "src/objects/literal-objects-inl.h"
++#include "src/snapshot/code-serializer.h"
++#include "src/utils/ostreams.h"
++
++#include <csignal>
++#include <csetjmp>
++#include <unistd.h>
++
++
++class V8ObjectExplorer {
++public:
++    explicit V8ObjectExplorer(v8::internal::Isolate* isolate) : isolate_(isolate) {}
++
++    void Disassemble(v8::internal::Tagged<v8::internal::Object> start_obj) {
++        // printf("before traversal\n");
++        DiscoverReachableObjects(start_obj);
++        // printf("traversal done!\n");
++        PrintDiscoveredObjects();
++    }
++private:
++    void DiscoverReachableObjects(v8::internal::Tagged<v8::internal::Object> obj) {
++        if (v8::internal::IsHeapObject(obj)) {
++            Traverse(v8::internal::Cast<v8::internal::HeapObject>(obj));
++        }
++    }
++
++    void Traverse(v8::internal::Tagged<v8::internal::HeapObject> obj) {
++        // if compiled by node, sometimes the object will point to an address outside current bytecode scope, 
++        // which is normally located in snapshot_blob.bin (?).
++        // if this happen, we are not able to read the data of the object, neither the type of the object.
++        // so so we need to check if the object is readable here, if not, we need to stop here so that program doesnt crash.
++        {
++          {
++            // might works, place here just in case
++            v8::internal::Tagged<v8::internal::Map> map_handle = obj->map();
++            if (map_handle.ptr() == v8::internal::kNullAddress) {
++              // printf("wtf is going on\n");
++              return;
++            }
++          }
++          // {
++          //   // this will also exclue ReadOnlySpace Data
++          //   // not used
++          //   v8::internal::Isolate* tmpisolate = nullptr;
++          //   if (!v8::internal::GetIsolateFromHeapObject(obj, &tmpisolate)) {
++          //     // printf("not able to get isolate\n");
++          //     return;
++          //   }
++          // }
++          {
++            // works
++            // some object might have forwarding address.
++            v8::internal::MapWord map_word = obj->map_word(v8::kRelaxedLoad);
++            if (map_word.IsForwardingAddress()) {
++                // printf("kRelaxedLoad\n");
++                return;
++            }
++            // v8::internal::Tagged<v8::internal::Map> map_handle = map_word.ToMap();
++            // v8::internal::InstanceType instance_type = map_handle->instance_type();
++            // v8::internal::OFStream os(stdout);
++            // os << instance_type;
++          }
++          // in other case, the container object is readable, but object inside, for example objects inside 
++          // TrustedFixArray is not readable. in this case, we need handle it inside object-printer.cc
++        }
++
++        if (!discovered_objects_.insert({obj.ptr(), obj}).second) {
++            return;
++        }
++
++        if (v8::internal::IsBytecodeArray(obj)) {
++            auto bytecode = v8::internal::Cast<v8::internal::BytecodeArray>(obj);
++            auto consts = bytecode->constant_pool();
++            for (int i = 0; i < consts->length(); i++) {
++              DiscoverReachableObjects(consts->get(i));
++            }
++        } else if (v8::internal::IsSharedFunctionInfo(obj)) {
++            auto sfi = v8::internal::Cast<v8::internal::SharedFunctionInfo>(obj);
++            if (sfi->HasBytecodeArray()) {
++                DiscoverReachableObjects(sfi->GetBytecodeArray(isolate_));
++            }
++        } else if (v8::internal::IsFixedArray(obj)) {
++            auto fixed_array = v8::internal::Cast<v8::internal::FixedArray>(obj);
++            for (int i = 0; i < fixed_array->length(); ++i) {
++                DiscoverReachableObjects(fixed_array->get(i));
++            }
++        } else if (v8::internal::IsArrayBoilerplateDescription(obj)) {
++            auto abd = v8::internal::Cast<v8::internal::ArrayBoilerplateDescription>(obj);
++            DiscoverReachableObjects(abd->constant_elements());
++        } else if (v8::internal::IsObjectBoilerplateDescription(obj)) {
++            auto obd = v8::internal::Cast<v8::internal::ObjectBoilerplateDescription>(obj);
++            for (int i = 0; i < obd->length(); i++) {
++                DiscoverReachableObjects(obd->get(i));
++            }
++        }
++    }
++    static void segfault_jumper(int signal_number) {
++        siglongjmp(V8ObjectExplorer::jump_buffer_, 1);
++    }
++
++    void PrintDiscoveredObjects() {
++        v8::internal::OFStream os(stdout);
++
++        void (*old_handler)(int);
++        
++        old_handler = signal(SIGSEGV, segfault_jumper);
++
++        for (const auto& pair : discovered_objects_) {
++            auto obj = pair.second;
++            if (sigsetjmp(jump_buffer_, 1) == 0) {
++              currently_printing_obj_addr_ = pair.first;
++              v8::internal::Print(obj, os);
++              currently_printing_obj_addr_ = 0;
++            } else {
++              fflush(stdout);
++              os << std::endl << "!" <<v8::internal::AsHex::Address(currently_printing_obj_addr_) << ": segmentfault, disassemble stop" << std::endl;
++              currently_printing_obj_addr_ = 0;
++            }
++            fflush(stdout);
++        }
++        signal(SIGSEGV, old_handler);
++        fflush(stdout);
++    }
++private:
++    static sigjmp_buf jump_buffer_;
++    static volatile v8::internal::Address currently_printing_obj_addr_;
++    v8::internal::Isolate* isolate_;
++    std::map<v8::internal::Address, v8::internal::Tagged<v8::internal::HeapObject>> discovered_objects_;
++};
++volatile v8::internal::Address V8ObjectExplorer::currently_printing_obj_addr_ = 0;
++sigjmp_buf V8ObjectExplorer::jump_buffer_;
++
++
++// todo: do not disassemble duplicated memory address
++static void disassemble(v8::internal::Isolate* isolate,
++                                    v8::internal::Tagged<v8::internal::Object> obj) {
++
++    v8::internal::OFStream os(stdout);
++    // os << "->" << std::endl;
++    v8::internal::Print(obj,os);
++
++    if (v8::internal::IsBytecodeArray(obj)) {
++      auto bytecode = v8::internal::Cast<v8::internal::BytecodeArray>(obj);
++      // v8::internal::PrintF("0x%012llx: [BytecodeArray]\n", static_cast<unsigned long long>(bytecode.ptr()));
++      // bytecode->Disassemble(os);
++      auto consts = bytecode->constant_pool();
++      for (int i = 0; i < consts->length(); i++) {
++        auto inner = consts->get(i);
++        if (v8::internal::IsHeapObject(inner)) {
++          auto shared = v8::internal::Cast<v8::internal::HeapObject>(inner);
++          disassemble(isolate,shared);
++        }else {
++          // smi
++          // v8::internal::Print(inner,os);
++        }
++      }
++    }
++
++    if (v8::internal::IsSharedFunctionInfo(obj)) {
++        auto sfi = v8::internal::Cast<v8::internal::SharedFunctionInfo>(obj);
++        if (sfi->HasBytecodeArray()) {
++            disassemble(isolate, sfi->GetBytecodeArray(isolate));
++        }
++    }
++
++    if (v8::internal::IsFixedArray(obj)) {
++        auto fixed_array = v8::internal::Cast<v8::internal::FixedArray>(obj);
++        for (int i = 0; i < fixed_array->length(); ++i) {
++            auto objn = fixed_array->get(i);
++            if (v8::internal::IsHeapObject(objn)) {
++              disassemble(isolate,objn);
++            }else {
++            // smi
++            }
++        }
++    }
++
++    if (v8::internal::IsArrayBoilerplateDescription(obj)) {
++      auto abd = v8::internal::Cast<v8::internal::ArrayBoilerplateDescription>(obj);
++      disassemble(isolate,abd->constant_elements());
++    }
++
++    if (v8::internal::IsObjectBoilerplateDescription(obj)) {
++      auto obd = v8::internal::Cast<v8::internal::ObjectBoilerplateDescription>(obj);
++      for (int i = 0; i < obd->capacity(); i++) {
++        auto inner = obd->get(i);
++        if (v8::internal::IsHeapObject(inner)) {
++          auto shared = v8::internal::Cast<v8::internal::HeapObject>(inner);
++          disassemble(isolate,shared);
++        }else {
++          // smi
++          // v8::internal::Print(inner,os);
++        }
++    }}
++    // os << "<-" << std::endl;
++    fflush(stdout);
++    return;
++}
++
++bool read_file_to_buffer(const char* file, std::vector<uint8_t>& buffer) {
++  std::ifstream infile(file, std::ifstream::binary);
++  if (!infile) return false;
++  infile.seekg(0, infile.end);
++  std::streamoff length = infile.tellg();
++  infile.seekg(0, infile.beg);
++  if (length <= 0) {
++    buffer.clear();
++    return true;
++  }
++  buffer.resize(static_cast<size_t>(length));
++  infile.read(reinterpret_cast<char*>(buffer.data()), length);
++  return true;
++}
++
++bool write_file_to_buffer(const char* file, const uint8_t* data, size_t len) {
++  std::ofstream out(file, std::ios::binary);
++  if (!out) return false;
++  out.write(reinterpret_cast<const char*>(data), len);
++  out.close();
++  return true;
++}
++
++struct VersionTuple {
++  int major;
++  int minor;
++  int build;
++  int patch;
++};
++
++VersionTuple bruteforce_v8_version(uint32_t target_hash,
++                                   int max_major = 20,
++                                   int max_minor = 20,
++                                   int max_build = 500,
++                                   int max_patch = 200) {
++  for (int major = 0; major < max_major; ++major) {
++    for (int minor = 0; minor < max_minor; ++minor) {
++      for (int build = 0; build < max_build; ++build) {
++        for (int patch = 0; patch < max_patch; ++patch) {
++          uint32_t h = static_cast<uint32_t>(v8::base::hash_combine(major, minor,  build, patch));
++          if (h == target_hash) {
++            return VersionTuple{major, minor, build, patch};
++          }
++        }
++      }
++    }
++  }
++  return VersionTuple{-1, -1, -1, -1};
++}
++
++int do_checkversion(const char* filename) {
++  std::vector<uint8_t> data;
++  if (!read_file_to_buffer(filename, data)) {
++    fprintf(stderr, "Error reading file: %s\n", filename);
++    return 1;
++  }
++
++  const uint32_t offset = v8::internal::SerializedCodeData::kVersionHashOffset;
++  if (data.size() < offset + sizeof(uint32_t)) {
++    fprintf(stderr, "File too small to contain version hash at offset %u\n", offset);
++    return 1;
++  }
++
++  uint8_t * version_addr = (uint8_t *) data.data() + offset;
++
++  // read as little-endian uint32_t
++  uint32_t version_hash = *(uint32_t *) version_addr;
++  printf("Version hash: hex = %x%x%x%x , uint32 = 0x%08x (%u)\n", version_addr[0], version_addr[1], version_addr[2], version_addr[3], version_hash, version_hash);
++  printf("Starting brute-force search (0-20.0-20.0-500.0-200)...\n");
++
++  VersionTuple found = bruteforce_v8_version(version_hash, 20, 20, 500, 200);
++  if (found.major >= 0) {
++    printf("Found matching version: %d.%d.%d.%d\n", found.major, found.minor, found.build, found.patch);
++    return 0;
++  } else {
++    printf("No matching version found in the searched ranges.\n");
++    return 0;
++  }
++}
++
++int do_asm(int argc, char* argv[], v8::Isolate* isolate) {
++  if (argc < 3) {
++    fprintf(stderr, "Usage: %s asm input.js [-o out.jsc]\n", argv[0]);
++    return 1;
++  }
++  const char* input_js = argv[2];
++  std::string out_filename;
++  // default out: input.js -> input.jsc
++  {
++    std::string in = input_js;
++    size_t pos = in.rfind('.');
++    if (pos == std::string::npos) out_filename = in + ".jsc";
++    else out_filename = in.substr(0, pos) + ".jsc";
++  }
++  // parse optional -o
++  for (int i = 3; i < argc - 1; ++i) {
++    if (strcmp(argv[i], "-o") == 0) {
++      out_filename = argv[i+1];
++    }
++  }
++
++  std::string source_code;
++  {
++    std::ifstream infile(input_js);
++    if (!infile) {
++      fprintf(stderr, "Error opening input js: %s\n", input_js);
++      return 1;
++    }
++    std::string tmp((std::istreambuf_iterator<char>(infile)),
++                    std::istreambuf_iterator<char>());
++    source_code.swap(tmp);
++  }
++
++  // Compile the source in current isolate and create code cache
++  v8::Isolate::Scope isolate_scope(isolate);
++  v8::HandleScope handle_scope(isolate);
++  v8::Local<v8::Context> context = v8::Context::New(isolate);
++  v8::Context::Scope context_scope(context);
++
++  v8::Local<v8::String> src = v8::String::NewFromUtf8(isolate, source_code.c_str(),
++                                          v8::NewStringType::kNormal,
++                                          static_cast<int>(source_code.size()))
++                         .ToLocalChecked();
++
++  v8::ScriptOrigin origin(v8::String::NewFromUtf8Literal(isolate, "v8utils-asm"));
++  v8::Local<v8::Script> script;
++  if (!v8::Script::Compile(context, src).ToLocal(&script)) {
++    fprintf(stderr, "Failed to compile source\n");
++    return 1;
++  }
++
++  v8::Local<v8::UnboundScript> unbound = script->GetUnboundScript();
++  std::unique_ptr<v8::ScriptCompiler::CachedData> cache(v8::ScriptCompiler::CreateCodeCache(unbound));
++  if (!cache) {
++    fprintf(stderr, "Failed to create code cache\n");
++    return 1;
++  }
++
++  if (!write_file_to_buffer(out_filename.c_str(), cache->data, static_cast<size_t>(cache->length))) {
++    fprintf(stderr, "Failed to write out file: %s\n", out_filename.c_str());
++    return 1;
++  }
++
++  printf("Wrote %zu bytes to %s\n", static_cast<size_t>(cache->length), out_filename.c_str());
++  return 0;
++}
++
++
++int do_disasm(const char* filename, v8::Isolate* isolate) {
++  std::vector<uint8_t> data;
++  if (!read_file_to_buffer(filename, data)) {
++    fprintf(stderr, "Error reading file: %s\n", filename);
++    return 1;
++  }
++  v8::Isolate::Scope isolate_scope(isolate);
++  v8::HandleScope handle_scope(isolate);
++  auto i_isolate = reinterpret_cast<v8::internal::Isolate*>(isolate);
++
++  v8::internal::AlignedCachedData cached_data(data.data(), static_cast<int>(data.size()));
++  auto source = i_isolate->factory()->NewStringFromAsciiChecked("source");
++  v8::internal::ScriptDetails script_details(source);
++  v8::internal::MaybeDirectHandle<v8::internal::SharedFunctionInfo> maybe_sfi =
++      v8::internal::CodeSerializer::Deserialize(i_isolate, &cached_data, source, script_details);
++
++  v8::internal::DirectHandle<v8::internal::SharedFunctionInfo> sfi_handle;
++  if (!maybe_sfi.ToHandle(&sfi_handle)) {
++    fprintf(stderr, "Failed to deserialize shared function info (maybe incompatible version).\n");
++    return 1;
++  }
++
++  if (!sfi_handle->HasBytecodeArray()) {
++    fprintf(stderr, "Deserialized SFI has no bytecode array.\n");
++    return 1;
++  }
++
++  auto bytecode = sfi_handle->GetBytecodeArray(i_isolate);
++  // disassemble(i_isolate, bytecode);
++  V8ObjectExplorer explorer(i_isolate);
++  explorer.Disassemble(bytecode);
++  return 0;
++}
++
++
++void print_compiled_args() {
++  #ifdef DEBUG
++  printf("is_debug=true\n");
++  #else
++  printf("is_debug=false\n");
++  #endif
++  #ifdef OBJECT_PRINT
++  printf("v8_enable_object_print=true\n");
++  #else
++  printf("v8_enable_object_print=false\n");
++  #endif
++  #ifdef ENABLE_DISASSEMBLER
++  printf("v8_enable_disassembler=true\n");
++  #else
++  printf("v8_enable_disassembler=false\n");
++  #endif
++  #ifdef V8_COMPRESS_POINTERS
++  printf("v8_enable_pointer_compression=true\n");
++  #else
++  printf("v8_enable_pointer_compression=false\n");
++  #endif
++}
++
++int main(int argc, char* argv[]) {
++  if (argc < 2) {
++    fprintf(stderr, "Usage: %s <asm|disasm|checkversion|version|build-args> ...\n", argv[0]);
++    return 1;
++  }
++
++  const char* cmd = argv[1];
++
++  v8::V8::SetFlagsFromString("--no-lazy --no-flush-bytecode");
++  v8::V8::InitializeICUDefaultLocation(argv[0]);
++  v8::V8::InitializeExternalStartupData(argv[0]);
++  std::unique_ptr<v8::Platform> platform = v8::platform::NewDefaultPlatform();
++  v8::V8::InitializePlatform(platform.get());
++  v8::V8::Initialize();
++
++  v8::Isolate::CreateParams create_params;
++  create_params.array_buffer_allocator = v8::ArrayBuffer::Allocator::NewDefaultAllocator();
++  v8::Isolate* isolate = v8::Isolate::New(create_params);
++
++  int ret = 0;
++  if (strcmp(cmd, "version") == 0) {
++    printf("%s\n", v8::V8::GetVersion());
++    ret = 0;
++    goto finish;
++  }
++  if (strcmp(cmd, "build-args") == 0) {
++    print_compiled_args();
++    goto finish;
++  }
++  if (strcmp(cmd, "checkversion") == 0) {
++    if (argc < 3) {
++      fprintf(stderr, "Usage: %s checkversion file.jsc\n", argv[0]);
++      ret = 1;
++      goto finish;
++    }
++    ret = do_checkversion(argv[2]);
++    goto finish;
++  } 
++  if (strcmp(cmd, "asm") == 0) {
++    ret = do_asm(argc, argv, isolate);
++    goto finish;
++  }
++  if (strcmp(cmd, "disasm") == 0) {
++    if (argc < 3) {
++      fprintf(stderr, "Usage: %s disasm file.jsc\n", argv[0]);
++      ret = 1;
++      goto finish;
++    }
++    ret = do_disasm(argv[2], isolate);
++    goto finish;
++  }
++  fprintf(stderr, "Unknown command: %s\n", cmd);
++  fprintf(stderr, "Usage: %s <asm|disasm|checkversion> ...\n", argv[0]);
++  ret = 1;
++finish:
++  isolate->Dispose();
++  v8::V8::Dispose();
++  v8::V8::DisposePlatform();
++  delete create_params.array_buffer_allocator;
++  return ret;
++}
+\ No newline at end of file
+diff --git a/src/objects/bytecode-array.cc b/src/objects/bytecode-array.cc
+index 36f0a691db3..6a22b43ab1f 100644
+--- a/src/objects/bytecode-array.cc
++++ b/src/objects/bytecode-array.cc
+@@ -158,11 +158,6 @@ void BytecodeArray::Disassemble(Handle<BytecodeArray> handle,
+   }
+ 
+   os << "Constant pool (size = " << handle->constant_pool()->length() << ")\n";
+-#ifdef OBJECT_PRINT
+-  if (handle->constant_pool()->length() > 0) {
+-    Print(handle->constant_pool(), os);
+-  }
+-#endif
+ 
+   os << "Handler Table (size = " << handle->handler_table()->length() << ")\n";
+ #ifdef ENABLE_DISASSEMBLER
+@@ -181,6 +176,11 @@ void BytecodeArray::Disassemble(Handle<BytecodeArray> handle,
+     os << Brief(source_position_table) << std::endl;
+   }
+ #endif
++#ifdef OBJECT_PRINT
++  if (handle->constant_pool()->length() > 0) {
++    Print(handle->constant_pool(), os);
++  }
++#endif
+ }
+ 
+ void BytecodeArray::CopyBytecodesTo(Tagged<BytecodeArray> to) {
+diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
+index 11ced93c085..de9f17c2889 100644
+--- a/src/snapshot/code-serializer.cc
++++ b/src/snapshot/code-serializer.cc
+@@ -763,10 +763,11 @@ SerializedCodeData::SerializedCodeData(const std::vector<uint8_t>* payload,
+ SerializedCodeSanityCheckResult SerializedCodeData::SanityCheck(
+     uint32_t expected_ro_snapshot_checksum,
+     uint32_t expected_source_hash) const {
+-  SerializedCodeSanityCheckResult result =
+-      SanityCheckWithoutSource(expected_ro_snapshot_checksum);
+-  if (result != SerializedCodeSanityCheckResult::kSuccess) return result;
+-  return SanityCheckJustSource(expected_source_hash);
++  return SerializedCodeSanityCheckResult::kSuccess; 
++  // SerializedCodeSanityCheckResult result =
++  //     SanityCheckWithoutSource(expected_ro_snapshot_checksum);
++  // if (result != SerializedCodeSanityCheckResult::kSuccess) return result;
++  // return SanityCheckJustSource(expected_source_hash);
+ }
+ 
+ SerializedCodeSanityCheckResult SerializedCodeData::SanityCheckJustSource(
+@@ -780,37 +781,37 @@ SerializedCodeSanityCheckResult SerializedCodeData::SanityCheckJustSource(
+ 
+ SerializedCodeSanityCheckResult SerializedCodeData::SanityCheckWithoutSource(
+     uint32_t expected_ro_snapshot_checksum) const {
+-  if (size_ < kHeaderSize) {
+-    return SerializedCodeSanityCheckResult::kInvalidHeader;
+-  }
+-  uint32_t magic_number = GetMagicNumber();
+-  if (magic_number != kMagicNumber) {
+-    return SerializedCodeSanityCheckResult::kMagicNumberMismatch;
+-  }
+-  uint32_t version_hash = GetHeaderValue(kVersionHashOffset);
+-  if (version_hash != Version::Hash()) {
+-    return SerializedCodeSanityCheckResult::kVersionMismatch;
+-  }
+-  uint32_t flags_hash = GetHeaderValue(kFlagHashOffset);
+-  if (flags_hash != FlagList::Hash()) {
+-    return SerializedCodeSanityCheckResult::kFlagsMismatch;
+-  }
+-  uint32_t ro_snapshot_checksum =
+-      GetHeaderValue(kReadOnlySnapshotChecksumOffset);
+-  if (ro_snapshot_checksum != expected_ro_snapshot_checksum) {
+-    return SerializedCodeSanityCheckResult::kReadOnlySnapshotChecksumMismatch;
+-  }
+-  uint32_t payload_length = GetHeaderValue(kPayloadLengthOffset);
+-  uint32_t max_payload_length = size_ - kHeaderSize;
+-  if (payload_length > max_payload_length) {
+-    return SerializedCodeSanityCheckResult::kLengthMismatch;
+-  }
+-  if (v8_flags.verify_snapshot_checksum) {
+-    uint32_t checksum = GetHeaderValue(kChecksumOffset);
+-    if (Checksum(ChecksummedContent()) != checksum) {
+-      return SerializedCodeSanityCheckResult::kChecksumMismatch;
+-    }
+-  }
++  // if (size_ < kHeaderSize) {
++  //   return SerializedCodeSanityCheckResult::kInvalidHeader;
++  // }
++  // uint32_t magic_number = GetMagicNumber();
++  // if (magic_number != kMagicNumber) {
++  //   return SerializedCodeSanityCheckResult::kMagicNumberMismatch;
++  // }
++  // uint32_t version_hash = GetHeaderValue(kVersionHashOffset);
++  // if (version_hash != Version::Hash()) {
++  //   return SerializedCodeSanityCheckResult::kVersionMismatch;
++  // }
++  // uint32_t flags_hash = GetHeaderValue(kFlagHashOffset);
++  // if (flags_hash != FlagList::Hash()) {
++  //   return SerializedCodeSanityCheckResult::kFlagsMismatch;
++  // }
++  // uint32_t ro_snapshot_checksum =
++  //     GetHeaderValue(kReadOnlySnapshotChecksumOffset);
++  // if (ro_snapshot_checksum != expected_ro_snapshot_checksum) {
++  //   return SerializedCodeSanityCheckResult::kReadOnlySnapshotChecksumMismatch;
++  // }
++  // uint32_t payload_length = GetHeaderValue(kPayloadLengthOffset);
++  // uint32_t max_payload_length = size_ - kHeaderSize;
++  // if (payload_length > max_payload_length) {
++  //   return SerializedCodeSanityCheckResult::kLengthMismatch;
++  // }
++  // if (v8_flags.verify_snapshot_checksum) {
++  //   uint32_t checksum = GetHeaderValue(kChecksumOffset);
++  //   if (Checksum(ChecksummedContent()) != checksum) {
++  //     return SerializedCodeSanityCheckResult::kChecksumMismatch;
++  //   }
++  // }
+   return SerializedCodeSanityCheckResult::kSuccess;
+ }
+ 
+diff --git a/src/snapshot/deserializer.cc b/src/snapshot/deserializer.cc
+index 114cb45c3a7..19ca8abd216 100644
+--- a/src/snapshot/deserializer.cc
++++ b/src/snapshot/deserializer.cc
+@@ -344,7 +344,7 @@ Deserializer<IsolateT>::Deserializer(IsolateT* isolate,
+ #ifdef DEBUG
+   num_api_references_ = GetNumApiReferences(isolate);
+ #endif  // DEBUG
+-  CHECK_EQ(magic_number_, SerializedData::kMagicNumber);
++  // CHECK_EQ(magic_number_, SerializedData::kMagicNumber);
+ }
+ 
+ template <typename IsolateT>

@@ -1,0 +1,319 @@
+0x06b305b818c1: [String] in ReadOnlySpace: #value
+0x06b305b863c1: [String] in ReadOnlySpace: #add
+0x06b305b86859: [String] in ReadOnlySpace: #console
+0x06b305b86ad1: [String] in ReadOnlySpace: #done
+0x06b305b87d51: [String] in ReadOnlySpace: #return
+0x06b305b894b9: [String] in ReadOnlySpace: #next
+0x06b305b8f071: [String] in ReadOnlySpace: #log
+0x1825352c0011: [BytecodeArray]
+ - map: 0x06b305b81089 <Map(BYTECODE_ARRAY_TYPE)>
+Parameter count 1
+Register count 6
+Frame size 48
+         0x1825352c0050 @    0 : 13 00             LdaConstant [0]
+         0x1825352c0052 @    2 : cd                Star1
+         0x1825352c0053 @    3 : 1b fe f7          Mov <closure>, r2
+         0x1825352c0056 @    6 : 6c 6a 01 f8 02    CallRuntime [DeclareGlobals], r1-r2
+         0x1825352c005b @   11 : 82 01 00 25       CreateArrayLiteral [1], [0], #37
+         0x1825352c005f @   15 : 29 03             StaCurrentScriptContextSlot [3]
+         0x1825352c0061 @   17 : 13 02             LdaConstant [2]
+         0x1825352c0063 @   19 : 29 04             StaCurrentScriptContextSlot [4]
+         0x1825352c0065 @   21 : 23 03 01          LdaGlobal [3], [1]
+         0x1825352c0068 @   24 : cc                Star2
+         0x1825352c0069 @   25 : 33 f7 04 03       GetNamedProperty r2, [4], [3]
+         0x1825352c006d @   29 : cd                Star1
+         0x1825352c006e @   30 : 13 05             LdaConstant [5]
+         0x1825352c0070 @   32 : cb                Star3
+         0x1825352c0071 @   33 : 23 06 05          LdaGlobal [6], [5]
+         0x1825352c0074 @   36 : ca                Star4
+         0x1825352c0075 @   37 : 19 03             LdaImmutableCurrentContextSlot [3]
+         0x1825352c0077 @   39 : c9                Star5
+         0x1825352c0078 @   40 : 69 f5 f4 07       CallUndefinedReceiver1 r4, r5, [7]
+         0x1825352c007c @   44 : ca                Star4
+         0x1825352c007d @   45 : 66 f8 f7 f6 f5 09 CallProperty2 r1, r2, r3, r4, [9]
+         0x1825352c0083 @   51 : ce                Star0
+         0x1825352c0084 @   52 : b3                Return
+Constant pool (size = 7)
+Handler Table (size = 0)
+Source Position Table (size = 0)
+0x1825352c0089: [TrustedFixedArray]
+ - map: 0x06b305b809e1 <Map(TRUSTED_FIXED_ARRAY_TYPE)>
+ - length: 7
+           0: 0x2734f6040069 <FixedArray[6]>
+           1: 0x2734f6040481 <ArrayBoilerplateDescription PACKED_SMI_ELEMENTS, 0x2734f6040499 <FixedArray[5]>>
+           2: 0x2734f60404d1 <String[1501]: #...<truncated>>>
+           3: 0x06b305b86859 <String[7]: #console>
+           4: 0x06b305b8f071 <String[3]: #log>
+           5: 0x2734f6040401 <String[4]: #sum:>
+           6: 0x2734f6040369 <String[7]: #listSum>
+0x1825352c00d1: [BytecodeArray]
+ - map: 0x06b305b81089 <Map(BYTECODE_ARRAY_TYPE)>
+Parameter count 3
+Register count 0
+Frame size 0
+         0x1825352c0110 @    0 : 0b 04             Ldar a1
+         0x1825352c0112 @    2 : 3f 03 00          Add a0, [0]
+         0x1825352c0115 @    5 : b3                Return
+Constant pool (size = 0)
+Handler Table (size = 0)
+Source Position Table (size = 0)
+0x1825352c0119: [BytecodeArray]
+ - map: 0x06b305b81089 <Map(BYTECODE_ARRAY_TYPE)>
+Parameter count 2
+Register count 14
+Frame size 112
+         0x1825352c0158 @    0 : 0c                LdaZero
+         0x1825352c0159 @    1 : ce                Star0
+         0x1825352c015a @    2 : bb 03 00 02       GetIterator a0, [0], [2]
+         0x1825352c015e @    6 : c9                Star5
+         0x1825352c015f @    7 : 33 f4 00 04       GetNamedProperty r5, [0], [4]
+         0x1825352c0163 @   11 : ca                Star4
+         0x1825352c0164 @   12 : 12                LdaFalse
+         0x1825352c0165 @   13 : c8                Star6
+         0x1825352c0166 @   14 : 10                LdaTheHole
+         0x1825352c0167 @   15 : c5                Star9
+         0x1825352c0168 @   16 : 1b ff ef          Mov <context>, r10
+         0x1825352c016b @   19 : 11                LdaTrue
+         0x1825352c016c @   20 : c8                Star6
+         0x1825352c016d @   21 : 64 f5 f4 06       CallProperty0 r4, r5, [6]
+         0x1825352c0171 @   25 : c3                Star11
+         0x1825352c0172 @   26 : a9 07             JumpIfJSReceiver [7] (0x1825352c0179 @ 33)
+         0x1825352c0174 @   28 : 6c a4 00 ee 01    CallRuntime [ThrowIteratorResultNotAnObject], r11-r11
+         0x1825352c0179 @   33 : 33 ee 01 08       GetNamedProperty r11, [1], [8]
+         0x1825352c017d @   37 : a0 1c             JumpIfToBooleanTrue [28] (0x1825352c0199 @ 65)
+         0x1825352c017f @   39 : 33 ee 02 0a       GetNamedProperty r11, [2], [10]
+         0x1825352c0183 @   43 : c3                Star11
+         0x1825352c0184 @   44 : 12                LdaFalse
+         0x1825352c0185 @   45 : c8                Star6
+         0x1825352c0186 @   46 : 1b ee f8          Mov r11, r1
+         0x1825352c0189 @   49 : 1b f8 f6          Mov r1, r3
+         0x1825352c018c @   52 : 0b f8             Ldar r1
+         0x1825352c018e @   54 : 3f f9 0c          Add r0, [12]
+         0x1825352c0191 @   57 : 1b f9 ee          Mov r0, r11
+         0x1825352c0194 @   60 : ce                Star0
+         0x1825352c0195 @   61 : 92 2a 00 0d       JumpLoop [42], [0], [13] (0x1825352c016b @ 19)
+         0x1825352c0199 @   65 : 0d ff             LdaSmi [-1]
+         0x1825352c019b @   67 : c6                Star8
+         0x1825352c019c @   68 : c7                Star7
+         0x1825352c019d @   69 : 93 08             Jump [8] (0x1825352c01a5 @ 77)
+         0x1825352c019f @   71 : c6                Star8
+         0x1825352c01a0 @   72 : 0c                LdaZero
+         0x1825352c01a1 @   73 : c7                Star7
+         0x1825352c01a2 @   74 : 10                LdaTheHole
+         0x1825352c01a3 @   75 : b0                SetPendingMessage
+         0x1825352c01a4 @   76 : c5                Star9
+         0x1825352c01a5 @   77 : 0b f3             Ldar r6
+         0x1825352c01a7 @   79 : a0 23             JumpIfToBooleanTrue [35] (0x1825352c01ca @ 114)
+         0x1825352c01a9 @   81 : 1b ff ee          Mov <context>, r11
+         0x1825352c01ac @   84 : 33 f4 03 0e       GetNamedProperty r5, [3], [14]
+         0x1825352c01b0 @   88 : a8 1a             JumpIfUndefinedOrNull [26] (0x1825352c01ca @ 114)
+         0x1825352c01b2 @   90 : c2                Star12
+         0x1825352c01b3 @   91 : 64 ed f4 10       CallProperty0 r12, r5, [16]
+         0x1825352c01b7 @   95 : a9 13             JumpIfJSReceiver [19] (0x1825352c01ca @ 114)
+         0x1825352c01b9 @   97 : c1                Star13
+         0x1825352c01ba @   98 : 6c a4 00 ec 01    CallRuntime [ThrowIteratorResultNotAnObject], r13-r13
+         0x1825352c01bf @  103 : 93 0b             Jump [11] (0x1825352c01ca @ 114)
+         0x1825352c01c1 @  105 : c3                Star11
+         0x1825352c01c2 @  106 : 0c                LdaZero
+         0x1825352c01c3 @  107 : 1e f2             TestReferenceEqual r7
+         0x1825352c01c5 @  109 : a2 05             JumpIfTrue [5] (0x1825352c01ca @ 114)
+         0x1825352c01c7 @  111 : 0b ee             Ldar r11
+         0x1825352c01c9 @  113 : b2                ReThrow
+         0x1825352c01ca @  114 : 0c                LdaZero
+         0x1825352c01cb @  115 : 1e f2             TestReferenceEqual r7
+         0x1825352c01cd @  117 : a3 08             JumpIfFalse [8] (0x1825352c01d5 @ 125)
+         0x1825352c01cf @  119 : 0b f0             Ldar r9
+         0x1825352c01d1 @  121 : b0                SetPendingMessage
+         0x1825352c01d2 @  122 : 0b f1             Ldar r8
+         0x1825352c01d4 @  124 : b2                ReThrow
+         0x1825352c01d5 @  125 : 23 04 12          LdaGlobal [4], [18]
+         0x1825352c01d8 @  128 : ca                Star4
+         0x1825352c01d9 @  129 : 0d 01             LdaSmi [1]
+         0x1825352c01db @  131 : c9                Star5
+         0x1825352c01dc @  132 : 0d 02             LdaSmi [2]
+         0x1825352c01de @  134 : c8                Star6
+         0x1825352c01df @  135 : 6a f5 f4 f3 14    CallUndefinedReceiver2 r4, r5, r6, [20]
+         0x1825352c01e4 @  140 : 23 05 16          LdaGlobal [5], [22]
+         0x1825352c01e7 @  143 : ca                Star4
+         0x1825352c01e8 @  144 : 68 f5 18          CallUndefinedReceiver0 r4, [24]
+         0x1825352c01eb @  147 : 0b f9             Ldar r0
+         0x1825352c01ed @  149 : b3                Return
+Constant pool (size = 6)
+Handler Table (size = 32)
+   from   to       hdlr (prediction,   data)
+  (  19,  65)  ->    71 (prediction=0, data=10)
+  (  84, 103)  ->   105 (prediction=0, data=11)
+Source Position Table (size = 0)
+0x1825352c0221: [TrustedFixedArray]
+ - map: 0x06b305b809e1 <Map(TRUSTED_FIXED_ARRAY_TYPE)>
+ - length: 6
+           0: 0x06b305b894b9 <String[4]: #next>
+           1: 0x06b305b86ad1 <String[4]: #done>
+           2: 0x06b305b818c1 <String[5]: #value>
+           3: 0x06b305b87d51 <String[6]: #return>
+           4: 0x06b305b863c1 <String[3]: #add>
+           5: 0x06b305b8f071 <String[3]: #log>
+0x1825352c0261: [BytecodeArray]
+ - map: 0x06b305b81089 <Map(BYTECODE_ARRAY_TYPE)>
+Parameter count 1
+Register count 5
+Frame size 40
+         0x1825352c02a0 @    0 : 23 00 00          LdaGlobal [0], [0]
+         0x1825352c02a3 @    3 : cd                Star1
+         0x1825352c02a4 @    4 : 33 f8 01 02       GetNamedProperty r1, [1], [2]
+         0x1825352c02a8 @    8 : ce                Star0
+         0x1825352c02a9 @    9 : 13 02             LdaConstant [2]
+         0x1825352c02ab @   11 : cc                Star2
+         0x1825352c02ac @   12 : 23 03 04          LdaGlobal [3], [4]
+         0x1825352c02af @   15 : cb                Star3
+         0x1825352c02b0 @   16 : 19 03             LdaImmutableCurrentContextSlot [3]
+         0x1825352c02b2 @   18 : b4 04             ThrowReferenceErrorIfHole [4]
+         0x1825352c02b4 @   20 : ca                Star4
+         0x1825352c02b5 @   21 : 69 f6 f5 06       CallUndefinedReceiver1 r3, r4, [6]
+         0x1825352c02b9 @   25 : cb                Star3
+         0x1825352c02ba @   26 : 66 f9 f8 f7 f6 08 CallProperty2 r0, r1, r2, r3, [8]
+         0x1825352c02c0 @   32 : 0e                LdaUndefined
+         0x1825352c02c1 @   33 : b3                Return
+Constant pool (size = 5)
+Handler Table (size = 0)
+Source Position Table (size = 0)
+0x1825352c02c9: [TrustedFixedArray]
+ - map: 0x06b305b809e1 <Map(TRUSTED_FIXED_ARRAY_TYPE)>
+ - length: 5
+           0: 0x06b305b86859 <String[7]: #console>
+           1: 0x06b305b8f071 <String[3]: #log>
+           2: 0x2734f6040401 <String[4]: #sum:>
+           3: 0x2734f6040369 <String[7]: #listSum>
+           4: 0x2734f60401b1 <String[4]: #nums>
+0x2734f6040069: [FixedArray]
+ - map: 0x06b305b80999 <Map(FIXED_ARRAY_TYPE)>
+ - length: 6
+           0: 0x2734f60400a9 <SharedFunctionInfo add>
+           1: 0
+           2: 0x2734f60402c1 <SharedFunctionInfo listSum>
+           3: 1
+           4: 0x2734f60403a9 <SharedFunctionInfo log>
+           5: 2
+0x2734f60400a9: [SharedFunctionInfo]
+ - map: 0x06b305b817a1 <Map[72](SHARED_FUNCTION_INFO_TYPE)>
+ - name: 0x06b305b863c1 <String[3]: #add>
+ - inferred name: 0x06b305b80071 <String[0]: #>
+ - kind: NormalFunction
+ - syntax kind: Declaration
+ - function_map_index: 217
+ - formal_parameter_count: 3
+ - expected_nof_properties: 2
+ - language_mode: sloppy
+ - trusted_function_data: 0x1825352c00d1 <BytecodeArray[6]>
+ - untrusted_function_data: -1
+ - code (from function_data): 0x26ce9a841ec1 <Code BUILTIN InterpreterEntryTrampoline>
+ - source code:                           
+ - script: 0x2734f6040201 <Script>
+ - function token position: 15
+ - start position: 27
+ - end position: 53
+ - scope info: 0x2734f6040101 <ScopeInfo FUNCTION_SCOPE>
+ - outer scope info: 0x2734f6040151 <ScopeInfo SCRIPT_SCOPE>
+ - length: 2
+ - feedback_metadata: 0x2734f60401e9: [FeedbackMetadata]
+ - map: 0x06b305b80fb1 <Map(FEEDBACK_METADATA_TYPE)>
+ - slot_count: 1
+ - create_closure_slot_count: 0
+ Slot #0 BinaryOp
+
+ - function_literal_id: 1
+ - unique_id: 778
+ - age: 0
+0x2734f60401b1: [String]: #nums
+0x2734f60402c1: [SharedFunctionInfo]
+ - map: 0x06b305b817a1 <Map[72](SHARED_FUNCTION_INFO_TYPE)>
+ - name: 0x2734f6040369 <String[7]: #listSum>
+ - inferred name: 0x06b305b80071 <String[0]: #>
+ - kind: NormalFunction
+ - syntax kind: Declaration
+ - function_map_index: 217
+ - formal_parameter_count: 2
+ - expected_nof_properties: 2
+ - language_mode: sloppy
+ - trusted_function_data: 0x1825352c0119 <BytecodeArray[150]>
+ - untrusted_function_data: -1
+ - code (from function_data): 0x26ce9a841ec1 <Code BUILTIN InterpreterEntryTrampoline>
+ - source code:                                                                                                   
+ - script: 0x2734f6040201 <Script>
+ - function token position: 55
+ - start position: 71
+ - end position: 169
+ - scope info: 0x2734f6040319 <ScopeInfo FUNCTION_SCOPE>
+ - outer scope info: 0x2734f6040151 <ScopeInfo SCRIPT_SCOPE>
+ - length: 1
+ - feedback_metadata: 0x2734f6040381: [FeedbackMetadata]
+ - map: 0x06b305b80fb1 <Map(FEEDBACK_METADATA_TYPE)>
+ - slot_count: 26
+ - create_closure_slot_count: 0
+ Slot #0 LoadProperty
+ Slot #2 Call
+ Slot #4 LoadProperty
+ Slot #6 Call
+ Slot #8 LoadProperty
+ Slot #10 LoadProperty
+ Slot #12 BinaryOp
+ Slot #13 JumpLoop
+ Slot #14 LoadProperty
+ Slot #16 Call
+ Slot #18 LoadGlobalNotInsideTypeof
+ Slot #20 Call
+ Slot #22 LoadGlobalNotInsideTypeof
+ Slot #24 Call
+
+ - function_literal_id: 2
+ - unique_id: 776
+ - age: 0
+0x2734f6040369: [String]: #listSum
+0x2734f60403a9: [SharedFunctionInfo]
+ - map: 0x06b305b817a1 <Map[72](SHARED_FUNCTION_INFO_TYPE)>
+ - name: 0x06b305b8f071 <String[3]: #log>
+ - inferred name: 0x06b305b80071 <String[0]: #>
+ - kind: NormalFunction
+ - syntax kind: Declaration
+ - function_map_index: 217
+ - formal_parameter_count: 1
+ - expected_nof_properties: 2
+ - language_mode: sloppy
+ - trusted_function_data: 0x1825352c0261 <BytecodeArray[34]>
+ - untrusted_function_data: -1
+ - code (from function_data): 0x26ce9a841ec1 <Code BUILTIN InterpreterEntryTrampoline>
+ - source code:                                             
+ - script: 0x2734f6040201 <Script>
+ - function token position: 202
+ - start position: 214
+ - end position: 258
+ - scope info: 0x2734f6040419 <ScopeInfo FUNCTION_SCOPE>
+ - outer scope info: 0x2734f6040151 <ScopeInfo SCRIPT_SCOPE>
+ - length: 0
+ - feedback_metadata: 0x2734f6040469: [FeedbackMetadata]
+ - map: 0x06b305b80fb1 <Map(FEEDBACK_METADATA_TYPE)>
+ - slot_count: 10
+ - create_closure_slot_count: 0
+ Slot #0 LoadGlobalNotInsideTypeof
+ Slot #2 LoadProperty
+ Slot #4 LoadGlobalNotInsideTypeof
+ Slot #6 Call
+ Slot #8 Call
+
+ - function_literal_id: 3
+ - unique_id: 777
+ - age: 0
+0x2734f6040401: [String]: #sum:
+0x2734f6040481: [ArrayBoilerplateDescription]
+ - map: 0x06b305b81d59 <Map[24](ARRAY_BOILERPLATE_DESCRIPTION_TYPE)>
+ - elements kind: PACKED_SMI_ELEMENTS
+ - constant elements: 0x2734f6040499 <FixedArray[5]>
+0x2734f6040499: [FixedArray]
+ - map: 0x06b305b80b91 <Map(FIXED_ARRAY_TYPE)>
+ - length: 5
+           0: 1
+           1: 2
+           2: 3
+           3: 4
+           4: 5
+0x2734f60404d1: [String]: #AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\x0aAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
