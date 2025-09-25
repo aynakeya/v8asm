@@ -7,7 +7,7 @@ blog (chinese only): [a-quick-guide-to-disassemble-v8-bytecode](https://www.ayna
 ## Todo
 
 - [x] disassembler
-- [ ] version brute force
+- [x] version brute force
 - [ ] checksum rewrite: allow modify bytecode
 - [ ] rewrite header
 - [ ] decompiler
