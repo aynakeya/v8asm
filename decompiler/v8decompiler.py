@@ -29,7 +29,24 @@ def _format_constant_pool(ctx: DecompilerContext, bytecode: V8BytecodeArray) -> 
     return lines
 
 
-def decompile_bytecode(ctx: DecompilerContext, bytecode: V8BytecodeArray) -> str:
+def render_level1(translator: InstructionTranslator, instructions: List[Instruction]) -> List[str]:
+    lines: List[str] = []
+    for instr in instructions:
+        translated = translator.translate(instr)
+        offset = instr.offset if instr.offset >= 0 else -1
+        lines.append(f"  [{offset:4d}] {translated}")
+    return lines
+
+
+def render_level2(translator: InstructionTranslator, instructions: List[Instruction]) -> List[str]:
+    statements = decompile_to_statements(translator, instructions)
+    lines: List[str] = []
+    for stmt in statements:
+        lines.extend(stmt.render(1))
+    return lines
+
+
+def decompile_bytecode(ctx: DecompilerContext, bytecode: V8BytecodeArray, level: int) -> str:
     owner = ctx.get_function_for_bytecode(bytecode)
     if owner:
         fn_name = ctx.get_function_name(owner)
@@ -45,11 +62,11 @@ def decompile_bytecode(ctx: DecompilerContext, bytecode: V8BytecodeArray) -> str
 
     translator = InstructionTranslator(ctx, bytecode)
     instructions = [Instruction.from_codeline(raw) for raw in bytecode.instructions]
-    statements = decompile_to_statements(translator, instructions)
 
-    body_lines: List[str] = []
-    for stmt in statements:
-        body_lines.extend(stmt.render(1))
+    if level == 1:
+        body_lines = render_level1(translator, instructions)
+    else:
+        body_lines = render_level2(translator, instructions)
 
     lines: List[str] = [header, metadata]
     lines.extend(_format_constant_pool(ctx, bytecode))
@@ -58,7 +75,7 @@ def decompile_bytecode(ctx: DecompilerContext, bytecode: V8BytecodeArray) -> str
     return "\n".join(lines)
 
 
-def decompile_file(path: Path) -> str:
+def decompile_file(path: Path, level: int) -> str:
     data = path.read_text().splitlines()
     objects = parse_objects(data)
     ctx = DecompilerContext(objects)
@@ -66,7 +83,7 @@ def decompile_file(path: Path) -> str:
     outputs: List[str] = []
     for obj in objects:
         if isinstance(obj, V8BytecodeArray):
-            outputs.append(decompile_bytecode(ctx, obj))
+            outputs.append(decompile_bytecode(ctx, obj, level))
     return "\n\n".join(outputs)
 
 
@@ -80,11 +97,18 @@ def main() -> None:
         default=str(default_input),
         help="path to disassembled bytecode dump",
     )
+    parser.add_argument(
+        "--level",
+        type=int,
+        choices=(1, 2),
+        default=2,
+        help="Select decompilation level: 1 = linear instructions, 2 = structured control flow",
+    )
     args = parser.parse_args()
     path = Path(args.input)
     if not path.exists():
         raise SystemExit(f"{path} does not exist")
-    print(decompile_file(path))
+    print(decompile_file(path, args.level))
 
 
 if __name__ == "__main__":
