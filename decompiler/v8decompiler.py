@@ -9,6 +9,7 @@ from objects.bytecode import V8BytecodeArray
 from context import DecompilerContext
 from instruction import Instruction
 from parser import parse_objects
+from structurer import decompile_to_statements
 from translator import InstructionTranslator
 
 
@@ -43,12 +44,12 @@ def decompile_bytecode(ctx: DecompilerContext, bytecode: V8BytecodeArray) -> str
     )
 
     translator = InstructionTranslator(ctx, bytecode)
-    body_lines = []
-    for raw in bytecode.instructions:
-        instr = Instruction.from_codeline(raw)
-        translated = translator.translate(instr)
-        offset = instr.offset if instr.offset >= 0 else -1
-        body_lines.append(f"  [{offset:4d}] {translated}")
+    instructions = [Instruction.from_codeline(raw) for raw in bytecode.instructions]
+    statements = decompile_to_statements(translator, instructions)
+
+    body_lines: List[str] = []
+    for stmt in statements:
+        body_lines.extend(stmt.render(1))
 
     lines: List[str] = [header, metadata]
     lines.extend(_format_constant_pool(ctx, bytecode))

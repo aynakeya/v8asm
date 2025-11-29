@@ -1,16 +1,29 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from objects.bytecode import V8BytecodeArray
 
 from context import ConstantPoolEntry, DecompilerContext
 from instruction import Instruction
+from utils import parse_jump_target
 
 CONST_INDEX_RE = re.compile(r"^\[(\-?\d+)\]$")
 RANGE_RE = re.compile(r"^([ra])(\d+)-([ra])(\d+)$")
-JUMP_TARGET_RE = re.compile(r"@ (\d+)\)")
+
+CONDITION_MAP: Dict[str, Tuple[str, bool]] = {
+    "JumpIfTrue": ("truthy(ACCU)", True),
+    "JumpIfFalse": ("truthy(ACCU)", False),
+    "JumpIfToBooleanTrue": ("truthy(ACCU)", True),
+    "JumpIfToBooleanFalse": ("truthy(ACCU)", False),
+    "JumpIfToBooleanTrueConstant": ("truthy(ACCU)", True),
+    "JumpIfToBooleanFalseConstant": ("truthy(ACCU)", False),
+    "JumpIfUndefinedOrNull": ("isNullish(ACCU)", True),
+    "JumpIfUndefinedOrNullConstant": ("isNullish(ACCU)", True),
+    "JumpIfJSReceiver": ("isJSReceiver(ACCU)", True),
+    "JumpIfJSReceiverConstant": ("isJSReceiver(ACCU)", True),
+}
 
 
 def _parse_bracket_number(token: str) -> Optional[int]:
@@ -18,13 +31,6 @@ def _parse_bracket_number(token: str) -> Optional[int]:
     if not m:
         return None
     return int(m.group(1))
-
-
-def _parse_jump_target(token: str) -> Optional[int]:
-    match = JUMP_TARGET_RE.search(token)
-    if match:
-        return int(match.group(1))
-    return None
 
 
 class InstructionTranslator:
@@ -52,6 +58,21 @@ class InstructionTranslator:
             return f"ACCU = {self._reg_name(f'r{reg_id}')}"
 
         return f"// {instr.raw_line.strip()}"
+
+    def branch_condition(self, instr: Instruction) -> Optional[Tuple[str, bool]]:
+        info = CONDITION_MAP.get(instr.mnemonic)
+        if not info:
+            return None
+        return info
+
+    def fallthrough_condition(self, instr: Instruction) -> Optional[str]:
+        info = self.branch_condition(instr)
+        if not info:
+            return None
+        expr, branch_on_true = info
+        if branch_on_true:
+            return f"!({expr})"
+        return expr
 
     def _const(self, idx: int) -> str:
         entry = self.constants.get(idx)
@@ -273,49 +294,49 @@ class InstructionTranslator:
         return "return ACCU"
 
     def _op_Jump(self, instr: Instruction) -> str:
-        target = self._find_target(instr.args)
+        target = self._find_target(instr)
         if target is None:
             return "// jump ?"
         return f"goto offset_{target}"
 
     def _op_JumpLoop(self, instr: Instruction) -> str:
-        target = self._find_target(instr.args)
+        target = self._find_target(instr)
         if target is None:
             return "// jump_loop ?"
         return f"loop goto offset_{target}"
 
     def _op_JumpIfToBooleanTrue(self, instr: Instruction) -> str:
-        target = self._find_target(instr.args)
+        target = self._find_target(instr)
         if target is None:
             return "if (ACCU) goto ?"
         return f"if (truthy(ACCU)) goto offset_{target}"
 
     def _op_JumpIfToBooleanFalse(self, instr: Instruction) -> str:
-        target = self._find_target(instr.args)
+        target = self._find_target(instr)
         if target is None:
             return "if (!ACCU) goto ?"
         return f"if (!truthy(ACCU)) goto offset_{target}"
 
     def _op_JumpIfTrue(self, instr: Instruction) -> str:
-        target = self._find_target(instr.args)
+        target = self._find_target(instr)
         if target is None:
             return "if (ACCU) goto ?"
         return f"if (ACCU) goto offset_{target}"
 
     def _op_JumpIfFalse(self, instr: Instruction) -> str:
-        target = self._find_target(instr.args)
+        target = self._find_target(instr)
         if target is None:
             return "if (!ACCU) goto ?"
         return f"if (!ACCU) goto offset_{target}"
 
     def _op_JumpIfUndefinedOrNull(self, instr: Instruction) -> str:
-        target = self._find_target(instr.args)
+        target = self._find_target(instr)
         if target is None:
             return "if (ACCU == nullish) goto ?"
         return f"if (ACCU == null || ACCU == undefined) goto offset_{target}"
 
     def _op_JumpIfJSReceiver(self, instr: Instruction) -> str:
-        target = self._find_target(instr.args)
+        target = self._find_target(instr)
         if target is None:
             return "if (isJSReceiver(ACCU)) goto ?"
         return f"if (isJSReceiver(ACCU)) goto offset_{target}"
@@ -335,12 +356,8 @@ class InstructionTranslator:
     def _op_LdaGlobalInsideTypeofIC(self, instr: Instruction) -> str:
         return self._op_LdaGlobal(instr)
 
-    def _find_target(self, args: List[str]) -> Optional[int]:
-        for token in args:
-            tgt = _parse_jump_target(token)
-            if tgt is not None:
-                return tgt
-        return None
+    def _find_target(self, instr: Instruction) -> Optional[int]:
+        return parse_jump_target(instr)
 
     def _op_TestReferenceEqual(self, instr: Instruction) -> str:
         if not instr.args:
