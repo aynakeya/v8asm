@@ -9,6 +9,7 @@ from objects.bytecode import V8BytecodeArray
 from context import DecompilerContext
 from instruction import Instruction
 from parser import parse_objects
+from postprocess import simplify_lines
 from structurer import decompile_to_statements
 from translator import InstructionTranslator
 
@@ -46,6 +47,10 @@ def render_level2(translator: InstructionTranslator, instructions: List[Instruct
     return lines
 
 
+def render_level3(translator: InstructionTranslator, instructions: List[Instruction]) -> List[str]:
+    return simplify_lines(render_level2(translator, instructions))
+
+
 def decompile_bytecode(ctx: DecompilerContext, bytecode: V8BytecodeArray, level: int) -> str:
     owner = ctx.get_function_for_bytecode(bytecode)
     if owner:
@@ -65,8 +70,10 @@ def decompile_bytecode(ctx: DecompilerContext, bytecode: V8BytecodeArray, level:
 
     if level == 1:
         body_lines = render_level1(translator, instructions)
-    else:
+    elif level == 2:
         body_lines = render_level2(translator, instructions)
+    else:
+        body_lines = render_level3(translator, instructions)
 
     lines: List[str] = [header, metadata]
     lines.extend(_format_constant_pool(ctx, bytecode))
@@ -100,9 +107,9 @@ def main() -> None:
     parser.add_argument(
         "--level",
         type=int,
-        choices=(1, 2),
+        choices=(1, 2, 3),
         default=2,
-        help="Select decompilation level: 1 = linear instructions, 2 = structured control flow",
+        help="Select decompilation level: 1 = linear, 2 = structured, 3 = structured + simple substitutions",
     )
     args = parser.parse_args()
     path = Path(args.input)
