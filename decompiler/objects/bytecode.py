@@ -24,7 +24,8 @@ class CodeLine:
             parts = rest.split()
             # 先取 hex 部分
             bytes_list = []
-            while parts and all(c in "0123456789abcdef" for c in parts[0].lower()):
+            hex_token = re.compile(r"^[0-9a-f]{2}$")
+            while parts and hex_token.match(parts[0]):
                 bytes_list.append(parts.pop(0))
             bytestr = " ".join(bytes_list)
             mnemonic = parts[0] if parts else ""

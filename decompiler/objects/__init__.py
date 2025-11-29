@@ -1,6 +1,6 @@
 from typing import List
 
-from objects.base import V8HeapObject
+from objects.base import V8HeapObject, V8Address, V8Smi
 from objects.boilerplate import V8ArrayBoilerplateDescription
 from objects.bytecode import V8BytecodeArray,CodeLine
 from objects.fixed_array import V8TrustedFixedArray, V8FixedArray

@@ -1,1 +1,0 @@
-from decompiler.parser import parse_object

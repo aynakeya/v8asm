@@ -12,9 +12,12 @@ class V8FixedArray(V8HeapObject):
         for ln in self.raw_asm_lines:
             if "- length:" in ln:
                 self.length = int(ln.split(":", 1)[1].strip())
-            elif ":" in ln and ln.strip()[0].isdigit():
+            elif ":" in ln:
+                left = ln.strip().split(":", 1)[0]
+                if not left.isdigit():
+                    continue
                 # e.g. "0: 0x12345 <SharedFunctionInfo foo>" or "0: 3"
-                idx, rest = ln.split(":", 1)
+                _, rest = ln.split(":", 1)
                 rest = rest.strip()
                 # case 1: address
                 if rest.startswith("0x"):
