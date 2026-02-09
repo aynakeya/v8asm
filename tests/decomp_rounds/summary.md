@@ -18,6 +18,8 @@
 | 07_try_catch | bytenode | 0 | 0 | 0 | 0 | 0 |
 | 08_switch | v8asm | 4 | 10 | 0 | 0 | 2 |
 | 08_switch | bytenode | 2 | 9 | 0 | 0 | 2 |
+| 09_all_features | v8asm | 53 | 117 | 3 | 3 | 6 |
+| 09_all_features | bytenode | 0 | 0 | 0 | 0 | 0 |
 
 ## Quick Inspection Targets
 - Prefer cases with highest `accu_lines` and `reg_refs` for next cleanups.
