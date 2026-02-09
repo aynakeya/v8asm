@@ -97,11 +97,11 @@ class DecompilerContext:
                     return f"<bytecode {self.get_function_name(owner)}>"
                 return f"<Bytecode 0x{target.address:012x}>"
             if target:
-                return f"<{target.i_type} 0x{target.address:012x}>"
-            return raw.desc or f"0x{raw.address:012x}"
+                return json.dumps(f"<{target.i_type} 0x{target.address:012x}>")
+            return json.dumps(raw.desc or f"0x{raw.address:012x}")
 
         if isinstance(raw, str):
-            return raw
+            return json.dumps(raw)
 
         if raw is None:
             return "undefined"

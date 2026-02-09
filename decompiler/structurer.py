@@ -25,6 +25,7 @@ class Structurer:
         }
         self.loop_regions = find_loop_regions(blocks)
         self.active_loops: Set[int] = set()
+        self.active_if_builds: Set[int] = set()
 
     def build(self) -> List[Statement]:
         if not self.blocks:
@@ -38,11 +39,17 @@ class Structurer:
     ) -> Tuple[List[Statement], int]:
         idx = self.offset_to_index.get(start_offset, 0)
         statements: List[Statement] = []
+        seen_indices: Set[int] = set()
         while idx < len(self.blocks):
+            if idx in seen_indices:
+                break
+            seen_indices.add(idx)
             block = self.blocks[idx]
             if stop_offset is not None and block.start >= stop_offset:
                 break
             produced, idx = self._emit_block(idx, stop_offset)
+            if idx in seen_indices:
+                idx += 1
             statements.extend(produced)
         return statements, idx
 
@@ -134,6 +141,18 @@ class Structurer:
         return "true"
 
     def _build_if(
+        self, block_idx: int, stop_offset: Optional[int]
+    ) -> Optional[Tuple[Statement, int]]:
+        guard_key = block_idx
+        if guard_key in self.active_if_builds:
+            return None
+        self.active_if_builds.add(guard_key)
+        try:
+            return self._build_if_inner(block_idx, stop_offset)
+        finally:
+            self.active_if_builds.remove(guard_key)
+
+    def _build_if_inner(
         self, block_idx: int, stop_offset: Optional[int]
     ) -> Optional[Tuple[Statement, int]]:
         block = self.blocks[block_idx]

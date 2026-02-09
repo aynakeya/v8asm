@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Dict, List, Optional, Tuple
 
@@ -11,6 +12,7 @@ from utils import parse_jump_target
 
 CONST_INDEX_RE = re.compile(r"^\[(\-?\d+)\]$")
 RANGE_RE = re.compile(r"^([ra])(\d+)-([ra])(\d+)$")
+IDENT_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 
 CONDITION_MAP: Dict[str, Tuple[str, bool]] = {
     "JumpIfTrue": ("truthy(ACCU)", True),
@@ -77,7 +79,7 @@ class InstructionTranslator:
     def _const(self, idx: int) -> str:
         entry = self.constants.get(idx)
         if entry:
-            return entry.display
+            return self._display_to_expr(entry.display)
         return f"Const[{idx}]"
 
     def _const_token(self, token: str) -> str:
@@ -100,6 +102,63 @@ class InstructionTranslator:
         if token.startswith("CASE_"):
             return token
         return token
+
+    def _identifier_from_literal(self, token: str) -> Optional[str]:
+        token = token.strip()
+        if len(token) < 2 or token[0] != '"' or token[-1] != '"':
+            return None
+        try:
+            value = json.loads(token)
+        except json.JSONDecodeError:
+            return None
+        if IDENT_RE.match(value):
+            return value
+        return None
+
+    def _sanitize_identifier(self, token: str) -> Optional[str]:
+        cleaned = re.sub(r"[^A-Za-z0-9_$]", "_", token.strip())
+        cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+        if not cleaned:
+            return None
+        if cleaned[0].isdigit():
+            cleaned = f"fn_{cleaned}"
+        if IDENT_RE.match(cleaned):
+            return cleaned
+        return None
+
+    def _display_to_expr(self, display: str) -> str:
+        token = display.strip()
+        if not token:
+            return "undefined"
+        if token[0] in ('"', "'"):
+            return token
+        if token[0] in "[{":
+            return token
+        if token in {"true", "false", "null", "undefined", "HOLE"}:
+            return token
+        if re.fullmatch(r"[-+]?\d+", token):
+            return token
+        if IDENT_RE.match(token):
+            return token
+        sanitized = self._sanitize_identifier(token)
+        if sanitized:
+            return sanitized
+        return json.dumps(token)
+
+    def _format_property_access(self, obj_token: str, prop_token: str) -> str:
+        obj = self._reg_name(obj_token)
+        prop = self._const_token(prop_token)
+        ident = self._identifier_from_literal(prop)
+        if ident:
+            return f"{obj}.{ident}"
+        return f"{obj}[{prop}]"
+
+    def _format_global_access(self, token: str) -> str:
+        name = self._const_token(token)
+        ident = self._identifier_from_literal(name)
+        if ident:
+            return ident
+        return f"globalThis[{name}]"
 
     def _expand_range(self, token: str) -> List[str]:
         token = token.strip()
@@ -139,13 +198,12 @@ class InstructionTranslator:
         const_repr = self._const_token(instr.args[0])
         depth = instr.args[1] if len(instr.args) > 1 else "[0]"
         flags = instr.args[2] if len(instr.args) > 2 else "#0"
-        return f"ACCU = create_array_literal({const_repr}, depth={depth}, flags={flags})"
+        return f"ACCU = create_array_literal({const_repr}) /* depth={depth}, flags={flags} */"
 
     def _op_LdaGlobal(self, instr: Instruction) -> str:
         if not instr.args:
-            return "ACCU = global[?]"
-        name = self._const_token(instr.args[0])
-        return f"ACCU = global[{name}]"
+            return "ACCU = globalThis[undefined]"
+        return f"ACCU = {self._format_global_access(instr.args[0])}"
 
     def _op_LdaGlobalInsideTypeof(self, instr: Instruction) -> str:
         return self._op_LdaGlobal(instr)
@@ -184,7 +242,7 @@ class InstructionTranslator:
         return "ACCU = null"
 
     def _op_LdaTheHole(self, instr: Instruction) -> str:
-        return "ACCU = <hole>"
+        return "ACCU = HOLE"
 
     def _op_LdaSmi(self, instr: Instruction) -> str:
         if not instr.args:
@@ -210,9 +268,7 @@ class InstructionTranslator:
         args = self._drop_feedback(instr.args, 2)
         if len(args) < 2:
             return "ACCU = <named-property>"
-        obj = self._reg_name(args[0])
-        prop = self._const_token(args[1])
-        return f"ACCU = {obj}[{prop}]"
+        return f"ACCU = {self._format_property_access(args[0], args[1])}"
 
     def _op_GetIterator(self, instr: Instruction) -> str:
         if not instr.args:
@@ -258,7 +314,7 @@ class InstructionTranslator:
             return "ACCU = callProperty(?, receiver=?)"
         callee = self._reg_name(args[0])
         receiver = self._reg_name(args[1])
-        return f"ACCU = callProperty({callee}, receiver={receiver})"
+        return f"ACCU = {callee}.call({receiver})"
 
     def _op_CallProperty2(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 5)
@@ -268,9 +324,7 @@ class InstructionTranslator:
         receiver = self._reg_name(args[1])
         arg1 = self._reg_name(args[2])
         arg2 = self._reg_name(args[3])
-        return (
-            f"ACCU = callProperty({callee}, receiver={receiver}, args=[{arg1}, {arg2}])"
-        )
+        return f"ACCU = {callee}.call({receiver}, {arg1}, {arg2})"
 
     def _op_Add(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 1)
@@ -359,11 +413,39 @@ class InstructionTranslator:
     def _find_target(self, instr: Instruction) -> Optional[int]:
         return parse_jump_target(instr)
 
+    def _op_CreateClosure(self, instr: Instruction) -> str:
+        if not instr.args:
+            return "ACCU = create_closure(<anonymous>)"
+        callee = self._const_token(instr.args[0])
+        return f"ACCU = create_closure({callee})"
+
+    def _op_PushContext(self, instr: Instruction) -> str:
+        source = self._reg_name(instr.args[0]) if instr.args else "ACCU"
+        return f"context = pushContext({source})"
+
     def _op_TestReferenceEqual(self, instr: Instruction) -> str:
         if not instr.args:
             return "ACCU = (ACCU === ?)"
         ref = self._reg_name(instr.args[0])
         return f"ACCU = ({ref} === ACCU)"
+
+    def _op_TestEqualStrict(self, instr: Instruction) -> str:
+        if not instr.args:
+            return "ACCU = (ACCU === ?)"
+        ref = self._reg_name(instr.args[0])
+        return f"ACCU = ({ref} === ACCU)"
+
+    def _op_TestGreaterThan(self, instr: Instruction) -> str:
+        if not instr.args:
+            return "ACCU = (ACCU > ?)"
+        ref = self._reg_name(instr.args[0])
+        return f"ACCU = ({ref} > ACCU)"
+
+    def _op_TestLessThan(self, instr: Instruction) -> str:
+        if not instr.args:
+            return "ACCU = (ACCU < ?)"
+        ref = self._reg_name(instr.args[0])
+        return f"ACCU = ({ref} < ACCU)"
 
     def _op_SetPendingMessage(self, instr: Instruction) -> str:
         return "// SetPendingMessage"

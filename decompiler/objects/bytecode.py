@@ -98,8 +98,12 @@ class V8BytecodeArray(V8HeapObject):
             elif "Source Position Table (size =" in s:
                 self.source_position_table_size = int(s.split("=")[1].split(")")[0])
                 in_handler_table = False
-            elif s.startswith("0x") and "@" in s:
-                self.instructions.append(CodeLine.from_text(s))
+            elif "@" in s and "0x" in s:
+                # Some V8 builds prepend source-position markers like:
+                # "111 S> 0x... @   19 : ...". Keep only the instruction tail.
+                start = s.find("0x")
+                ins = s[start:] if start >= 0 else s
+                self.instructions.append(CodeLine.from_text(ins))
             elif in_handler_table and s.startswith("("):
                 entry = HandlerEntry.from_text(s)
                 self.handler_entries.append(entry)
