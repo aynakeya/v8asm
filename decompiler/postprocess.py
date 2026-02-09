@@ -126,6 +126,14 @@ def _compact_compound_assignments(lines: List[str]) -> List[str]:
                 out.append(f"{indent}{m.group(1)} += {expr}")
                 i += 3
                 continue
+            m2 = re.match(r"^ACCU = \(ACCU \+ ([-+]?\d+)\)$", s1)
+            if m2 and re.match(r"^r\d+ = ACCU$", s2):
+                dst = s2.split("=", 1)[0].strip()
+                if expr == dst:
+                    indent = _extract_indent(lines[i + 2])
+                    out.append(f"{indent}{dst} += {m2.group(1)}")
+                    i += 3
+                    continue
 
         if out and out[-1].strip() == s and s.startswith("ACCU = "):
             i += 1
@@ -225,7 +233,7 @@ def _recover_for_of(lines: List[str]) -> List[str]:
             loop_var = m.group(1)
             break
     if not loop_var:
-        return lines
+        loop_var = "item"
 
     filtered: List[str] = []
     for line in inner_body:
@@ -330,7 +338,9 @@ def recover_js_structures(lines: List[str]) -> List[str]:
             break
         current = nxt
     current = _strip_iterator_exception_guard(current)
+    current = _strip_pending_message_status_guard(current)
     current = _inline_single_use_registers(current)
+    current = _compact_accu_compare_if(current)
     current = _simplify_accu_return(current)
     current = _flatten_else_after_early_exit(current)
     current = _recover_two_case_switch(current)
@@ -356,6 +366,35 @@ def _strip_iterator_exception_guard(lines: List[str]) -> List[str]:
                     block_text = "\n".join(lines[i + 2 : end + 1])
                     if "// SetPendingMessage" in block_text and "throw ACCU" in block_text:
                         i = end + 1
+                        continue
+        out.append(lines[i])
+        i += 1
+    return out
+
+
+def _strip_pending_message_status_guard(lines: List[str]) -> List[str]:
+    out: List[str] = []
+    i = 0
+    while i < len(lines):
+        if i + 2 < len(lines):
+            s0 = lines[i].strip()
+            s1 = lines[i + 1].strip()
+            s2 = lines[i + 2].strip()
+            if (
+                s0 == "ACCU = 0"
+                and re.match(r"^ACCU = \(r\d+ === ACCU\)$", s1)
+                and s2 == "if (truthy(ACCU)) {"
+            ):
+                end = _find_block_end(lines, i + 2)
+                if end is not None:
+                    final_end = end
+                    if end + 1 < len(lines) and lines[end + 1].strip() == "else {":
+                        else_end = _find_block_end(lines, end + 1)
+                        if else_end is not None:
+                            final_end = else_end
+                    block = "\n".join(lines[i + 2 : final_end + 1])
+                    if "// SetPendingMessage" in block:
+                        i = final_end + 1
                         continue
         out.append(lines[i])
         i += 1
@@ -642,6 +681,27 @@ def _convert_unused_accu_assign_to_expr(lines: List[str]) -> List[str]:
                 break
         if not used:
             out[i] = f"{indent}{expr}"
+    return out
+
+
+def _compact_accu_compare_if(lines: List[str]) -> List[str]:
+    out: List[str] = []
+    i = 0
+    while i < len(lines):
+        if i + 2 < len(lines):
+            s0 = lines[i].strip()
+            s1 = lines[i + 1].strip()
+            s2 = lines[i + 2].strip()
+            m0 = re.match(r"^ACCU = ([-+]?\d+)$", s0)
+            m1 = re.match(r"^ACCU = \((.+)\s*([><]=?|===|!==)\s*ACCU\)$", s1)
+            if m0 and m1 and s2 == "if (truthy(ACCU)) {":
+                indent = _extract_indent(lines[i + 2])
+                lhs, op = m1.group(1).strip(), m1.group(2)
+                out.append(f"{indent}if ({lhs} {op} {m0.group(1)}) {{")
+                i += 3
+                continue
+        out.append(lines[i])
+        i += 1
     return out
 
 

@@ -1,2 +1,4 @@
 __pycache__
 .idea
+tests/decomp_rounds/out
+tests/decomp_rounds/tmp
