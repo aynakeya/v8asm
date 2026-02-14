@@ -19,6 +19,7 @@ blog (chinese only): [a-quick-guide-to-disassemble-v8-bytecode](https://www.ayna
 - checkversion: standalone bytecode version bruteforce
 - v8patch: v8 patches
 - decompiler: decompiler (in progress)
+- ghidra/v8-bytecode: experimental Ghidra SLEIGH processor module for V8 Ignition bytecode
 
 ## decompiler quick usage
 

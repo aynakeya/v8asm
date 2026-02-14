@@ -1,0 +1,120 @@
+define endian=little;
+define alignment=1;
+
+define space ram type=ram_space size=4 default;
+define space register type=register_space size=4;
+
+define register offset=0x000 size=4 [ pc ];
+define register offset=0x010 size=8 [ ACCU ];
+define register offset=0x020 size=8 [ sp ];
+define register offset=0x040 size=8 [ r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 ];
+
+define token opbyte (8)
+  op=(0,7)
+;
+
+define token b1 (8)
+  v1=(0,7)
+  s1=(0,7) signed
+;
+
+define token b2 (8)
+  v2=(0,7)
+  s2=(0,7) signed
+;
+
+define token b3 (8)
+  v3=(0,7)
+  s3=(0,7) signed
+;
+
+define token b4 (8)
+  v4=(0,7)
+  s4=(0,7) signed
+;
+
+define token b5 (8)
+  v5=(0,7)
+  s5=(0,7) signed
+;
+
+# Catch-all unknown byte
+:db op is opbyte [ op = op; ] { }
+
+# Constants / loads
+:LdaZero is op=0x0c { ACCU = 0; }
+:LdaSmi i1 is op=0x0d; b1 [ i1 = v1; ] { ACCU = i1; }
+:LdaUndefined is op=0x0e { }
+:LdaNull is op=0x0f { }
+:LdaTheHole is op=0x10 { }
+:LdaTrue is op=0x11 { ACCU = 1; }
+:LdaFalse is op=0x12 { ACCU = 0; }
+:LdaConstant c1 is op=0x13; b1 [ c1 = v1; ] { }
+:LdaImmutableCurrentContextSlot slot,depth is op=0x19; b1; b2 [ slot = v1; depth = v2; ] { }
+:LdaCurrentContextSlot slot,depth is op=0x18; b1; b2 [ slot = v1; depth = v2; ] { }
+:LdaGlobal name,slot is op=0x23; b1; b2 [ name = v1; slot = v2; ] { }
+:Ldar reg is op=0x0b; b1 [ reg = v1; ] { }
+
+# Stores / moves
+:Star reg is op=0x1a; b1 [ reg = v1; ] { }
+:Mov src,dst is op=0x1b; b1; b2 [ src = v1; dst = v2; ] { }
+:StaCurrentScriptContextSlot slot is op=0x29; b1 [ slot = v1; ] { }
+:StaCurrentContextSlot slot is op=0x28; b1 [ slot = v1; ] { }
+
+# StarN short forms frequently emitted by V8
+:Star15 is op=0xbf { r15 = ACCU; }
+:Star14 is op=0xc0 { r14 = ACCU; }
+:Star13 is op=0xc1 { r13 = ACCU; }
+:Star12 is op=0xc2 { r12 = ACCU; }
+:Star11 is op=0xc3 { r11 = ACCU; }
+:Star10 is op=0xc4 { r10 = ACCU; }
+:Star9  is op=0xc5 { r9 = ACCU; }
+:Star8  is op=0xc6 { r8 = ACCU; }
+:Star7  is op=0xc7 { r7 = ACCU; }
+:Star6  is op=0xc8 { r6 = ACCU; }
+:Star5  is op=0xc9 { r5 = ACCU; }
+:Star4  is op=0xca { r4 = ACCU; }
+:Star3  is op=0xcb { r3 = ACCU; }
+:Star2  is op=0xcc { r2 = ACCU; }
+:Star1  is op=0xcd { r1 = ACCU; }
+:Star0  is op=0xce { r0 = ACCU; }
+
+# Property / iterator
+:GetNamedProperty obj,name,slot is op=0x33; b1; b2; b3 [ obj=v1; name=v2; slot=v3; ] { }
+:GetIterator src is op=0xbb; b1 [ src=v1; ] { }
+
+# Calls (partial, common forms)
+:CallProperty0 fn,recv,slot is op=0x64; b1; b2; b3 [ fn=v1; recv=v2; slot=v3; ] { }
+:CallProperty2 fn,recv,a1,a2,slot is op=0x66; b1; b2; b3; b4; b5 [ fn=v1; recv=v2; a1=v3; a2=v4; slot=v5; ] { }
+:CallUndefinedReceiver0 fn,slot is op=0x68; b1; b2 [ fn=v1; slot=v2; ] { }
+:CallUndefinedReceiver1 fn,a1,slot is op=0x69; b1; b2; b3 [ fn=v1; a1=v2; slot=v3; ] { }
+:CallUndefinedReceiver2 fn,a1,a2,slot is op=0x6a; b1; b2; b3; b4 [ fn=v1; a1=v2; a2=v3; slot=v4; ] { }
+:CallRuntime id,args is op=0x6c; b1; b2 [ id=v1; args=v2; ] { }
+
+# Constructors / literals
+:CreateArrayLiteral id,flags,slot is op=0x82; b1; b2; b3 [ id=v1; flags=v2; slot=v3; ] { }
+:CreateObjectLiteral id,flags,slot is op=0x85; b1; b2; b3 [ id=v1; flags=v2; slot=v3; ] { }
+:CreateClosure id,flags,slot is op=0x89; b1; b2; b3 [ id=v1; flags=v2; slot=v3; ] { }
+
+# Arithmetic / comparison tests
+:Add lhs,slot is op=0x3f; b1; b2 [ lhs=v1; slot=v2; ] { }
+:ToString slot is op=0x7f; b1 [ slot=v1; ] { }
+:TestReferenceEqual rhs,slot is op=0x1e; b1; b2 [ rhs=v1; slot=v2; ] { }
+:TestEqualStrict rhs,slot is op=0x74; b1; b2 [ rhs=v1; slot=v2; ] { }
+:TestGreaterThan rhs,slot is op=0x76; b1; b2 [ rhs=v1; slot=v2; ] { }
+:TestLessThan rhs,slot is op=0x75; b1; b2 [ rhs=v1; slot=v2; ] { }
+
+# Branches
+:Jump rel is op=0x93; b1 [ rel=s1; ] { }
+:JumpLoop rel is op=0x92; b1 [ rel=s1; ] { }
+:JumpIfToBooleanTrue rel is op=0xa0; b1 [ rel=s1; ] { }
+:JumpIfToBooleanFalse rel is op=0xa1; b1 [ rel=s1; ] { }
+:JumpIfTrue rel is op=0xa2; b1 [ rel=s1; ] { }
+:JumpIfFalse rel is op=0xa3; b1 [ rel=s1; ] { }
+:JumpIfUndefinedOrNull rel is op=0xa8; b1 [ rel=s1; ] { }
+:JumpIfJSReceiver rel is op=0xa9; b1 [ rel=s1; ] { }
+
+# Exception / control
+:SetPendingMessage is op=0xb0 { }
+:ReThrow is op=0xb2 { }
+:Return is op=0xb3 { return [ACCU]; }
