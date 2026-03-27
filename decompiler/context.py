@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from typing import Any, Dict, Iterable, List, Optional
 
 from objects import (
@@ -10,6 +11,8 @@ from objects import (
     V8BytecodeArray,
     V8FixedArray,
     V8HeapObject,
+    V8ObjectBoilerplateDescription,
+    V8ScopeInfo,
     V8SharedFunctionInfo,
     V8String,
     V8TrustedFixedArray,
@@ -89,6 +92,8 @@ class DecompilerContext:
                 return self.get_function_name(target)
             if isinstance(target, V8ArrayBoilerplateDescription):
                 return self._format_array_boilerplate(target)
+            if isinstance(target, V8ObjectBoilerplateDescription):
+                return self._format_object_boilerplate(target)
             if isinstance(target, V8FixedArray):
                 return self._format_fixed_array(target)
             if isinstance(target, V8BytecodeArray):
@@ -96,6 +101,11 @@ class DecompilerContext:
                 if owner:
                     return f"<bytecode {self.get_function_name(owner)}>"
                 return f"<Bytecode 0x{target.address:012x}>"
+            if isinstance(target, V8ScopeInfo):
+                return self._format_scope_info(target)
+            desc_value = self._format_address_desc(raw.desc)
+            if desc_value is not None:
+                return desc_value
             if target:
                 return json.dumps(f"<{target.i_type} 0x{target.address:012x}>")
             return json.dumps(raw.desc or f"0x{raw.address:012x}")
@@ -122,3 +132,62 @@ class DecompilerContext:
         if isinstance(const, V8FixedArray):
             return self._format_fixed_array(const)
         return f"<ArrayBoilerplate {boilerplate.elements_kind}>"
+
+    def _format_address_desc(self, desc: str) -> Optional[str]:
+        text = desc.strip()
+        if not text:
+            return None
+        if text.startswith("<") and text.endswith(">"):
+            inner = text[1:-1]
+        else:
+            inner = text
+        if inner in {"true", "false", "null", "undefined"}:
+            return inner
+        return None
+
+    def _format_object_key(self, raw: Any) -> str:
+        key = self.format_value(raw)
+        if key.startswith('"') and key.endswith('"'):
+            try:
+                plain = json.loads(key)
+            except json.JSONDecodeError:
+                return key
+            if plain.isidentifier():
+                return plain
+        return key
+
+    def _format_object_boilerplate(
+        self, boilerplate: V8ObjectBoilerplateDescription
+    ) -> str:
+        parts: List[str] = []
+        entries = boilerplate.entries
+        for idx in range(0, len(entries), 2):
+            key = entries[idx]
+            value = entries[idx + 1] if idx + 1 < len(entries) else None
+            parts.append(f"{self._format_object_key(key)}: {self.format_value(value)}")
+        return "{ " + ", ".join(parts) + " }"
+
+    def _format_scope_info(self, scope: V8ScopeInfo) -> str:
+        scope_type = scope.scope_type or "Scope"
+        return f"<ScopeInfo {scope_type}>"
+
+    def scope_context_name(self, raw: Any, index: int = 0) -> Optional[str]:
+        if not isinstance(raw, V8Address):
+            return None
+        target = self.get_object(raw.address)
+        if not isinstance(target, V8ScopeInfo):
+            return None
+        if index < 0 or index >= len(target.context_slots):
+            return None
+        name = self.format_value(target.context_slots[index])
+        if name.startswith('"') and name.endswith('"'):
+            try:
+                return json.loads(name)
+            except json.JSONDecodeError:
+                return None
+        slot = target.context_slots[index]
+        if isinstance(slot, V8Address):
+            match = re.search(r"#([^>]+)", slot.desc)
+            if match:
+                return match.group(1)
+        return None

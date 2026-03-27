@@ -1,5 +1,7 @@
 # v8asm Agent Primer
 
+codex resume 019c42ba-60e2-7cb0-905b-0edd833425d3
+
 这个仓库是一个面向 V8 字节码（`.jsc`）的工具集，目标是：
 
 1. `v8asm`：把 JS 编译成字节码、反汇编字节码。

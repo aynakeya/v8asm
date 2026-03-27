@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import re
-from typing import List
+from typing import List, Optional
 
+from objects import V8Address
 from objects.bytecode import V8BytecodeArray
 
 from context import DecompilerContext
@@ -13,8 +14,10 @@ from parser import parse_objects
 from postprocess import simplify_lines
 from structurer import decompile_to_statements
 from translator import InstructionTranslator
+from utils import parse_jump_target
 
 IDENT_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
+INDENT = "  "
 
 
 def _format_params(bytecode: V8BytecodeArray) -> str:
@@ -71,8 +74,15 @@ function isJSReceiver(v) {
   return (t === "object" && v !== null) || t === "function";
 }
 function create_array_literal(v) { return Array.isArray(v) ? v.slice() : []; }
+function create_object_literal(v) { return v && typeof v === "object" ? { ...v } : {}; }
 function create_closure(fn) { return typeof fn === "function" ? fn : function () { return undefined; }; }
-function pushContext(v) { context = v; return context; }
+function create_function_context(scope, slots) { return { scope, slots: new Array(Number(slots) || 0) }; }
+function create_catch_context(value, scope) { return { value, scope, slots: [value] }; }
+function pushContext(v) {
+  const prev = context;
+  context = v;
+  return prev;
+}
 function GetIterator(v) { return v[Symbol.iterator](); }
 function DeclareGlobals() { return undefined; }
 function ensureDefined(name) {
@@ -107,8 +117,172 @@ def render_level3(translator: InstructionTranslator, instructions: List[Instruct
     return simplify_lines(render_level2(translator, instructions), recover_structures=False)
 
 
-def render_level4(translator: InstructionTranslator, instructions: List[Instruction]) -> List[str]:
+def _render_level4_fragment(
+    translator: InstructionTranslator, instructions: List[Instruction]
+) -> List[str]:
     return simplify_lines(render_level2(translator, instructions), recover_structures=True)
+
+
+def _indent_lines(lines: List[str]) -> List[str]:
+    return [f"{INDENT}{line}" if line else line for line in lines]
+
+
+def _instruction_index_at_or_after(
+    instructions: List[Instruction], offset: int
+) -> Optional[int]:
+    for idx, instr in enumerate(instructions):
+        if instr.offset >= offset:
+            return idx
+    return None
+
+
+def _catch_binding_name(
+    ctx: DecompilerContext,
+    translator: InstructionTranslator,
+    instr: Instruction,
+) -> str:
+    if len(instr.args) < 2:
+        return "e"
+    token = instr.args[1].strip()
+    if not (token.startswith("[") and token.endswith("]")):
+        return "e"
+    try:
+        idx = int(token[1:-1])
+    except ValueError:
+        return "e"
+    entry = translator.constants.get(idx)
+    if not entry or not isinstance(entry.raw, V8Address):
+        return "e"
+    name = ctx.scope_context_name(entry.raw)
+    if name and IDENT_RE.match(name):
+        return name
+    if name:
+        match = re.search(r"#([^>]+)", name)
+        if match and IDENT_RE.match(match.group(1)):
+            return match.group(1)
+    return name or "e"
+
+
+def _render_single_try_catch(
+    ctx: DecompilerContext,
+    translator: InstructionTranslator,
+    instructions: List[Instruction],
+    entry,
+) -> Optional[List[str]]:
+    try_start_idx = _instruction_index_at_or_after(instructions, entry.start)
+    try_end_idx = _instruction_index_at_or_after(instructions, entry.end)
+    handler_idx = _instruction_index_at_or_after(instructions, entry.handler)
+    if try_start_idx is None or try_end_idx is None or handler_idx is None:
+        return None
+
+    prefix_end_idx = try_start_idx
+    if try_start_idx > 0:
+        scaffold = instructions[try_start_idx - 1]
+        if (
+            scaffold.mnemonic == "Mov"
+            and scaffold.args
+            and scaffold.args[0] == "<context>"
+        ):
+            prefix_end_idx = try_start_idx - 1
+
+    skip_jump_idx = (
+        try_end_idx
+        if try_end_idx < len(instructions)
+        and instructions[try_end_idx].mnemonic in {"Jump", "JumpConstant"}
+        else None
+    )
+    resume_offset = (
+        parse_jump_target(instructions[skip_jump_idx]) if skip_jump_idx is not None else None
+    )
+    suffix_start_idx = (
+        _instruction_index_at_or_after(instructions, resume_offset)
+        if resume_offset is not None
+        else len(instructions)
+    )
+
+    try_instrs = instructions[try_start_idx:try_end_idx]
+    if not try_instrs:
+        return None
+    if skip_jump_idx is None and try_instrs[-1].mnemonic != "Return":
+        return None
+    catch_instrs = instructions[
+        handler_idx : suffix_start_idx if suffix_start_idx is not None else len(instructions)
+    ]
+    if not try_instrs or not catch_instrs:
+        return None
+
+    push_idx = next(
+        (idx for idx, instr in enumerate(catch_instrs) if instr.mnemonic == "PushContext"),
+        None,
+    )
+    if push_idx is None:
+        return None
+    pop_idx = next(
+        (
+            idx
+            for idx, instr in enumerate(catch_instrs[push_idx + 1 :], start=push_idx + 1)
+            if instr.mnemonic == "PopContext"
+        ),
+        None,
+    )
+    catch_body_instrs = catch_instrs[push_idx + 1 : pop_idx if pop_idx is not None else len(catch_instrs)]
+    if not catch_body_instrs:
+        return None
+
+    prefix_instrs = instructions[:prefix_end_idx]
+    suffix_instrs = instructions[suffix_start_idx:] if suffix_start_idx is not None else []
+
+    catch_ctx_instr = next(
+        (instr for instr in catch_instrs[:push_idx] if instr.mnemonic == "CreateCatchContext"),
+        None,
+    )
+    if catch_ctx_instr is None:
+        return None
+    catch_name = (
+        _catch_binding_name(ctx, translator, catch_ctx_instr)
+    )
+
+    try_lines = _render_level4_fragment(translator, try_instrs)
+    catch_lines = _render_level4_fragment(translator, catch_body_instrs)
+    if not try_lines or not catch_lines:
+        return None
+
+    out: List[str] = []
+    if prefix_instrs:
+        out.extend(_render_level4_fragment(translator, prefix_instrs))
+    out.append(f"{INDENT}try {{")
+    out.extend(_indent_lines(try_lines))
+    out.append(f"{INDENT}}} catch ({catch_name}) {{")
+    out.extend(_indent_lines(catch_lines))
+    out.append(f"{INDENT}}}")
+    if suffix_instrs:
+        out.extend(_render_level4_fragment(translator, suffix_instrs))
+    return out
+
+
+def _render_simple_try_catch(
+    ctx: DecompilerContext,
+    bytecode: V8BytecodeArray,
+    translator: InstructionTranslator,
+    instructions: List[Instruction],
+) -> Optional[List[str]]:
+    for entry in bytecode.handler_entries:
+        rendered = _render_single_try_catch(ctx, translator, instructions, entry)
+        if rendered is not None:
+            return rendered
+    return None
+
+
+def render_level4(
+    ctx: DecompilerContext,
+    bytecode: V8BytecodeArray,
+    translator: InstructionTranslator,
+    instructions: List[Instruction],
+) -> List[str]:
+    recovered = _render_simple_try_catch(ctx, bytecode, translator, instructions)
+    if recovered is not None:
+        return recovered
+    return _render_level4_fragment(translator, instructions)
 
 
 def decompile_bytecode(ctx: DecompilerContext, bytecode: V8BytecodeArray, level: int) -> str:
@@ -139,7 +313,7 @@ def decompile_bytecode(ctx: DecompilerContext, bytecode: V8BytecodeArray, level:
         elif level == 3:
             body_lines = render_level3(translator, instructions)
         else:
-            body_lines = render_level4(translator, instructions)
+            body_lines = render_level4(ctx, bytecode, translator, instructions)
     except RecursionError:
         note.append("  // WARNING: structurer recursion overflow, fallback to level-1 linear output")
         body_lines = render_level1(translator, instructions)

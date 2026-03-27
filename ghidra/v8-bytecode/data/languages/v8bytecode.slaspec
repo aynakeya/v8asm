@@ -8,6 +8,7 @@ define register offset=0x000 size=4 [ pc ];
 define register offset=0x010 size=8 [ ACCU ];
 define register offset=0x020 size=8 [ sp ];
 define register offset=0x040 size=8 [ r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 ];
+define register offset=0x140 size=8 [ context closure a0 a1 a2 a3 a4 a5 a6 a7 ];
 
 define token opbyte (8)
   op=(0,7)
@@ -16,21 +17,25 @@ define token opbyte (8)
 define token b1 (8)
   v1=(0,7)
   s1=(0,7) signed
+  n1=(7,7)
 ;
 
 define token b2 (8)
   v2=(0,7)
   s2=(0,7) signed
+  n2=(7,7)
 ;
 
 define token b3 (8)
   v3=(0,7)
   s3=(0,7) signed
+  n3=(7,7)
 ;
 
 define token b4 (8)
   v4=(0,7)
   s4=(0,7) signed
+  n4=(7,7)
 ;
 
 define token b5 (8)
@@ -38,28 +43,167 @@ define token b5 (8)
   s5=(0,7) signed
 ;
 
-# Catch-all unknown byte
-:db op is opbyte [ op = op; ] { }
+define token opwide (8)
+  opw=(0,7)
+;
+
+define token w1 (16)
+  vw1=(0,15)
+  sw1=(0,15) signed
+;
+
+define token d1 (32)
+  vd1=(0,31)
+  sd1=(0,31) signed
+;
+
+define token w2 (16)
+  vw2=(0,15)
+;
+
+define token w3 (16)
+  vw3=(0,15)
+;
+
+define token d2 (32)
+  vd2=(0,31)
+;
+
+define token d3 (32)
+  vd3=(0,31)
+;
+
+define pcodeop V8LdaConstant;
+define pcodeop V8LdaContextSlot;
+define pcodeop V8LdaGlobal;
+define pcodeop V8GetNamedProperty;
+define pcodeop V8GetIterator;
+define pcodeop V8CallProperty0;
+define pcodeop V8CallProperty1;
+define pcodeop V8CallProperty2;
+define pcodeop V8CallUndefinedReceiver0;
+define pcodeop V8CallUndefinedReceiver1;
+define pcodeop V8CallUndefinedReceiver2;
+define pcodeop V8CallRuntime;
+define pcodeop V8CreateArrayLiteral;
+define pcodeop V8CreateCatchContext;
+define pcodeop V8CreateObjectLiteral;
+define pcodeop V8CreateClosure;
+define pcodeop V8CreateFunctionContext;
+define pcodeop V8ContextStore;
+define pcodeop V8ToString;
+define pcodeop V8SetPendingMessage;
+define pcodeop V8ReThrow;
+
+u8_1: v1 is v1 { export *[const]:8 v1; }
+u8_2: v2 is v2 { export *[const]:8 v2; }
+u8_3: v3 is v3 { export *[const]:8 v3; }
+u8_4: v4 is v4 { export *[const]:8 v4; }
+u8_5: v5 is v5 { export *[const]:8 v5; }
+
+s8_1: s1 is s1 { export *[const]:8 s1; }
+
+u16_1: vw1 is vw1 { export *[const]:8 vw1; }
+u16_2: vw2 is vw2 { export *[const]:8 vw2; }
+u16_3: vw3 is vw3 { export *[const]:8 vw3; }
+
+s16_1: sw1 is sw1 { export *[const]:8 sw1; }
+
+u32_1: vd1 is vd1 { export *[const]:8 vd1; }
+u32_2: vd2 is vd2 { export *[const]:8 vd2; }
+u32_3: vd3 is vd3 { export *[const]:8 vd3; }
+
+s32_1: sd1 is sd1 { export *[const]:8 sd1; }
+
+reg1: "a0" reg is s1=3 [ reg = 0x150; ] { export *[register]:8 reg; }
+reg1: "a1" reg is s1=4 [ reg = 0x158; ] { export *[register]:8 reg; }
+reg1: "a2" reg is s1=5 [ reg = 0x160; ] { export *[register]:8 reg; }
+reg1: "a3" reg is s1=6 [ reg = 0x168; ] { export *[register]:8 reg; }
+reg1: "a4" reg is s1=7 [ reg = 0x170; ] { export *[register]:8 reg; }
+reg1: "a5" reg is s1=8 [ reg = 0x178; ] { export *[register]:8 reg; }
+reg1: "a6" reg is s1=9 [ reg = 0x180; ] { export *[register]:8 reg; }
+reg1: "a7" reg is s1=10 [ reg = 0x188; ] { export *[register]:8 reg; }
+reg1: "<closure>" reg is v1=0xfe [ reg = 0x148; ] { export *[register]:8 reg; }
+reg1: "<context>" reg is v1=0xff [ reg = 0x140; ] { export *[register]:8 reg; }
+reg1: reg is n1=1 & v1 [ reg = 0x40 + ((0xf9 - v1) * 8); ] { export *[register]:8 reg; }
+
+reg2: "a0" reg is s2=3 [ reg = 0x150; ] { export *[register]:8 reg; }
+reg2: "a1" reg is s2=4 [ reg = 0x158; ] { export *[register]:8 reg; }
+reg2: "a2" reg is s2=5 [ reg = 0x160; ] { export *[register]:8 reg; }
+reg2: "a3" reg is s2=6 [ reg = 0x168; ] { export *[register]:8 reg; }
+reg2: "a4" reg is s2=7 [ reg = 0x170; ] { export *[register]:8 reg; }
+reg2: "a5" reg is s2=8 [ reg = 0x178; ] { export *[register]:8 reg; }
+reg2: "a6" reg is s2=9 [ reg = 0x180; ] { export *[register]:8 reg; }
+reg2: "a7" reg is s2=10 [ reg = 0x188; ] { export *[register]:8 reg; }
+reg2: "<closure>" reg is v2=0xfe [ reg = 0x148; ] { export *[register]:8 reg; }
+reg2: "<context>" reg is v2=0xff [ reg = 0x140; ] { export *[register]:8 reg; }
+reg2: reg is n2=1 & v2 [ reg = 0x40 + ((0xf9 - v2) * 8); ] { export *[register]:8 reg; }
+
+reg3: "a0" reg is s3=3 [ reg = 0x150; ] { export *[register]:8 reg; }
+reg3: "a1" reg is s3=4 [ reg = 0x158; ] { export *[register]:8 reg; }
+reg3: "a2" reg is s3=5 [ reg = 0x160; ] { export *[register]:8 reg; }
+reg3: "a3" reg is s3=6 [ reg = 0x168; ] { export *[register]:8 reg; }
+reg3: "a4" reg is s3=7 [ reg = 0x170; ] { export *[register]:8 reg; }
+reg3: "a5" reg is s3=8 [ reg = 0x178; ] { export *[register]:8 reg; }
+reg3: "a6" reg is s3=9 [ reg = 0x180; ] { export *[register]:8 reg; }
+reg3: "a7" reg is s3=10 [ reg = 0x188; ] { export *[register]:8 reg; }
+reg3: "<closure>" reg is v3=0xfe [ reg = 0x148; ] { export *[register]:8 reg; }
+reg3: "<context>" reg is v3=0xff [ reg = 0x140; ] { export *[register]:8 reg; }
+reg3: reg is n3=1 & v3 [ reg = 0x40 + ((0xf9 - v3) * 8); ] { export *[register]:8 reg; }
+
+reg4: "a0" reg is s4=3 [ reg = 0x150; ] { export *[register]:8 reg; }
+reg4: "a1" reg is s4=4 [ reg = 0x158; ] { export *[register]:8 reg; }
+reg4: "a2" reg is s4=5 [ reg = 0x160; ] { export *[register]:8 reg; }
+reg4: "a3" reg is s4=6 [ reg = 0x168; ] { export *[register]:8 reg; }
+reg4: "a4" reg is s4=7 [ reg = 0x170; ] { export *[register]:8 reg; }
+reg4: "a5" reg is s4=8 [ reg = 0x178; ] { export *[register]:8 reg; }
+reg4: "a6" reg is s4=9 [ reg = 0x180; ] { export *[register]:8 reg; }
+reg4: "a7" reg is s4=10 [ reg = 0x188; ] { export *[register]:8 reg; }
+reg4: "<closure>" reg is v4=0xfe [ reg = 0x148; ] { export *[register]:8 reg; }
+reg4: "<context>" reg is v4=0xff [ reg = 0x140; ] { export *[register]:8 reg; }
+reg4: reg is n4=1 & v4 [ reg = 0x40 + ((0xf9 - v4) * 8); ] { export *[register]:8 reg; }
+
+jump8: target is v1 [ target = inst_start + v1; ] { export *[ram]:4 target; }
+jump16: target is vw1 [ target = inst_start + vw1; ] { export *[ram]:4 target; }
+jump32: target is vd1 [ target = inst_start + vd1; ] { export *[ram]:4 target; }
+
+loop8: target is v1 [ target = inst_start - v1; ] { export *[ram]:4 target; }
+loop16: target is vw1 [ target = inst_start - vw1; ] { export *[ram]:4 target; }
+loop32: target is vd1 [ target = inst_start - vd1; ] { export *[ram]:4 target; }
 
 # Constants / loads
 :LdaZero is op=0x0c { ACCU = 0; }
-:LdaSmi i1 is op=0x0d; b1 [ i1 = v1; ] { ACCU = i1; }
-:LdaUndefined is op=0x0e { }
-:LdaNull is op=0x0f { }
-:LdaTheHole is op=0x10 { }
+:LdaSmi s8_1 is op=0x0d; s8_1 { ACCU = s8_1; }
+:LdaUndefined is op=0x0e { ACCU = 0xfffffffffffffff1; }
+:LdaNull is op=0x0f { ACCU = 0xfffffffffffffff2; }
+:LdaTheHole is op=0x10 { ACCU = 0xfffffffffffffff3; }
 :LdaTrue is op=0x11 { ACCU = 1; }
 :LdaFalse is op=0x12 { ACCU = 0; }
-:LdaConstant c1 is op=0x13; b1 [ c1 = v1; ] { }
-:LdaImmutableCurrentContextSlot slot,depth is op=0x19; b1; b2 [ slot = v1; depth = v2; ] { }
-:LdaCurrentContextSlot slot,depth is op=0x18; b1; b2 [ slot = v1; depth = v2; ] { }
-:LdaGlobal name,slot is op=0x23; b1; b2 [ name = v1; slot = v2; ] { }
-:Ldar reg is op=0x0b; b1 [ reg = v1; ] { }
+:LdaConstant u8_1 is op=0x13; u8_1 {
+  local tmp:8 = V8LdaConstant(u8_1);
+  ACCU = tmp;
+}
+:LdaCurrentContextSlot u8_1,u8_2 is op=0x18; u8_1; u8_2 {
+  local tmp:8 = V8LdaContextSlot(u8_1, u8_2);
+  ACCU = tmp;
+}
+:LdaImmutableCurrentContextSlot u8_1,u8_2 is op=0x19; u8_1; u8_2 {
+  local tmp:8 = V8LdaContextSlot(u8_1, u8_2);
+  ACCU = tmp;
+}
+:LdaGlobal u8_1,u8_2 is op=0x23; u8_1; u8_2 {
+  local tmp:8 = V8LdaGlobal(u8_1, u8_2);
+  ACCU = tmp;
+}
+:Ldar reg1 is op=0x0b; reg1 { ACCU = reg1; }
 
 # Stores / moves
-:Star reg is op=0x1a; b1 [ reg = v1; ] { }
-:Mov src,dst is op=0x1b; b1; b2 [ src = v1; dst = v2; ] { }
-:StaCurrentScriptContextSlot slot is op=0x29; b1 [ slot = v1; ] { }
-:StaCurrentContextSlot slot is op=0x28; b1 [ slot = v1; ] { }
+:Star reg1 is op=0x1a; reg1 { reg1 = ACCU; }
+:Mov reg1,reg2 is op=0x1b; reg1; reg2 { reg2 = reg1; }
+:PushContext reg1 is op=0x1c; reg1 { context = reg1; }
+:PopContext reg1 is op=0x1d; reg1 { context = reg1; }
+:StaCurrentScriptContextSlot u8_1 is op=0x29; u8_1 { V8ContextStore(u8_1, ACCU); }
+:StaCurrentContextSlot u8_1 is op=0x28; u8_1 { V8ContextStore(u8_1, ACCU); }
 
 # StarN short forms frequently emitted by V8
 :Star15 is op=0xbf { r15 = ACCU; }
@@ -80,41 +224,124 @@ define token b5 (8)
 :Star0  is op=0xce { r0 = ACCU; }
 
 # Property / iterator
-:GetNamedProperty obj,name,slot is op=0x33; b1; b2; b3 [ obj=v1; name=v2; slot=v3; ] { }
-:GetIterator src is op=0xbb; b1 [ src=v1; ] { }
+:GetNamedProperty reg1,u8_2,u8_3 is op=0x33; reg1; u8_2; u8_3 {
+  local tmp:8 = V8GetNamedProperty(reg1, u8_2, u8_3);
+  ACCU = tmp;
+}
+:GetIterator reg1,u8_2,u8_3 is op=0xbb; reg1; u8_2; u8_3 {
+  local tmp:8 = V8GetIterator(reg1, u8_2, u8_3);
+  ACCU = tmp;
+}
 
 # Calls (partial, common forms)
-:CallProperty0 fn,recv,slot is op=0x64; b1; b2; b3 [ fn=v1; recv=v2; slot=v3; ] { }
-:CallProperty2 fn,recv,a1,a2,slot is op=0x66; b1; b2; b3; b4; b5 [ fn=v1; recv=v2; a1=v3; a2=v4; slot=v5; ] { }
-:CallUndefinedReceiver0 fn,slot is op=0x68; b1; b2 [ fn=v1; slot=v2; ] { }
-:CallUndefinedReceiver1 fn,a1,slot is op=0x69; b1; b2; b3 [ fn=v1; a1=v2; slot=v3; ] { }
-:CallUndefinedReceiver2 fn,a1,a2,slot is op=0x6a; b1; b2; b3; b4 [ fn=v1; a1=v2; a2=v3; slot=v4; ] { }
-:CallRuntime id,args is op=0x6c; b1; b2 [ id=v1; args=v2; ] { }
+:CallProperty0 reg1,reg2,u8_3 is op=0x64; reg1; reg2; u8_3 {
+  local tmp:8 = V8CallProperty0(reg1, reg2, u8_3);
+  ACCU = tmp;
+}
+:CallProperty1 reg1,reg2,reg3,u8_4 is op=0x65; reg1; reg2; reg3; u8_4 {
+  local tmp:8 = V8CallProperty1(reg1, reg2, reg3, u8_4);
+  ACCU = tmp;
+}
+:CallProperty2 reg1,reg2,reg3,reg4,u8_5 is op=0x66; reg1; reg2; reg3; reg4; u8_5 {
+  local tmp:8 = V8CallProperty2(reg1, reg2, reg3, reg4, u8_5);
+  ACCU = tmp;
+}
+:CallUndefinedReceiver0 reg1,u8_2 is op=0x68; reg1; u8_2 {
+  local tmp:8 = V8CallUndefinedReceiver0(reg1, u8_2);
+  ACCU = tmp;
+}
+:CallUndefinedReceiver1 reg1,reg2,u8_3 is op=0x69; reg1; reg2; u8_3 {
+  local tmp:8 = V8CallUndefinedReceiver1(reg1, reg2, u8_3);
+  ACCU = tmp;
+}
+:CallUndefinedReceiver2 reg1,reg2,reg3,u8_4 is op=0x6a; reg1; reg2; reg3; u8_4 {
+  local tmp:8 = V8CallUndefinedReceiver2(reg1, reg2, reg3, u8_4);
+  ACCU = tmp;
+}
+:CallRuntime u16_1,reg3,u8_4 is op=0x6c; u16_1; reg3; u8_4 {
+  local tmp:8 = V8CallRuntime(u16_1, reg3, u8_4);
+  ACCU = tmp;
+}
 
 # Constructors / literals
-:CreateArrayLiteral id,flags,slot is op=0x82; b1; b2; b3 [ id=v1; flags=v2; slot=v3; ] { }
-:CreateObjectLiteral id,flags,slot is op=0x85; b1; b2; b3 [ id=v1; flags=v2; slot=v3; ] { }
-:CreateClosure id,flags,slot is op=0x89; b1; b2; b3 [ id=v1; flags=v2; slot=v3; ] { }
+:CreateArrayLiteral u8_1,u8_2,u8_3 is op=0x82; u8_1; u8_2; u8_3 {
+  local tmp:8 = V8CreateArrayLiteral(u8_1, u8_2, u8_3);
+  ACCU = tmp;
+}
+:CreateCatchContext reg1,u8_2 is op=0x8b; reg1; u8_2 {
+  local tmp:8 = V8CreateCatchContext(reg1, u8_2);
+  ACCU = tmp;
+}
+:CreateFunctionContext u8_1,u8_2 is op=0x8c; u8_1; u8_2 {
+  local tmp:8 = V8CreateFunctionContext(u8_1, u8_2);
+  ACCU = tmp;
+}
+:CreateObjectLiteral u8_1,u8_2,u8_3 is op=0x85; u8_1; u8_2; u8_3 {
+  local tmp:8 = V8CreateObjectLiteral(u8_1, u8_2, u8_3);
+  ACCU = tmp;
+}
+:CreateClosure u8_1,u8_2,u8_3 is op=0x89; u8_1; u8_2; u8_3 {
+  local tmp:8 = V8CreateClosure(u8_1, u8_2, u8_3);
+  ACCU = tmp;
+}
 
 # Arithmetic / comparison tests
-:Add lhs,slot is op=0x3f; b1; b2 [ lhs=v1; slot=v2; ] { }
-:ToString slot is op=0x7f; b1 [ slot=v1; ] { }
-:TestReferenceEqual rhs,slot is op=0x1e; b1; b2 [ rhs=v1; slot=v2; ] { }
-:TestEqualStrict rhs,slot is op=0x74; b1; b2 [ rhs=v1; slot=v2; ] { }
-:TestGreaterThan rhs,slot is op=0x76; b1; b2 [ rhs=v1; slot=v2; ] { }
-:TestLessThan rhs,slot is op=0x75; b1; b2 [ rhs=v1; slot=v2; ] { }
+:Add reg1,u8_2 is op=0x3f; reg1; u8_2 { ACCU = reg1 + ACCU; }
+:AddSmi s8_1,u8_2 is op=0x4b; s8_1; u8_2 { ACCU = ACCU + s8_1; }
+:SubSmi s8_1,u8_2 is op=0x4c; s8_1; u8_2 { ACCU = ACCU - s8_1; }
+:ToString is op=0x7f {
+  local tmp:8 = V8ToString(ACCU);
+  ACCU = tmp;
+}
+:TestReferenceEqual reg1 is op=0x1e; reg1 { ACCU = zext(reg1 == ACCU); }
+:TestEqualStrict reg1,u8_2 is op=0x74; reg1; u8_2 { ACCU = zext(reg1 == ACCU); }
+:TestGreaterThan reg1,u8_2 is op=0x76; reg1; u8_2 { ACCU = zext(reg1 s> ACCU); }
+:TestLessThan reg1,u8_2 is op=0x75; reg1; u8_2 { ACCU = zext(reg1 s< ACCU); }
 
 # Branches
-:Jump rel is op=0x93; b1 [ rel=s1; ] { }
-:JumpLoop rel is op=0x92; b1 [ rel=s1; ] { }
-:JumpIfToBooleanTrue rel is op=0xa0; b1 [ rel=s1; ] { }
-:JumpIfToBooleanFalse rel is op=0xa1; b1 [ rel=s1; ] { }
-:JumpIfTrue rel is op=0xa2; b1 [ rel=s1; ] { }
-:JumpIfFalse rel is op=0xa3; b1 [ rel=s1; ] { }
-:JumpIfUndefinedOrNull rel is op=0xa8; b1 [ rel=s1; ] { }
-:JumpIfJSReceiver rel is op=0xa9; b1 [ rel=s1; ] { }
+:Jump jump8 is op=0x93; jump8 { goto jump8; }
+:JumpLoop loop8,u8_2,u8_3 is op=0x92; loop8; u8_2; u8_3 { goto loop8; }
+:JumpIfToBooleanTrue jump8 is op=0xa0; jump8 { if (ACCU != 0) goto jump8; }
+:JumpIfToBooleanFalse jump8 is op=0xa1; jump8 { if (ACCU == 0) goto jump8; }
+:JumpIfTrue jump8 is op=0xa2; jump8 { if (ACCU != 0) goto jump8; }
+:JumpIfFalse jump8 is op=0xa3; jump8 { if (ACCU == 0) goto jump8; }
+:JumpIfUndefinedOrNull jump8 is op=0xa8; jump8 {
+  if (ACCU == 0xfffffffffffffff1) goto jump8;
+  if (ACCU == 0xfffffffffffffff2) goto jump8;
+}
+:JumpIfJSReceiver jump8 is op=0xa9; jump8 { if (ACCU != 0) goto jump8; }
+
+# Wide / ExtraWide flow variants. This keeps instruction decoding aligned for
+# larger offsets and gives Ghidra actual branch edges for the common flow ops.
+:Jump jump16 is op=0x00; opw=0x93; jump16 { goto jump16; }
+:Jump jump32 is op=0x01; opw=0x93; jump32 { goto jump32; }
+
+:JumpLoop loop16,u16_2,u16_3 is op=0x00; opw=0x92; loop16; u16_2; u16_3 { goto loop16; }
+:JumpLoop loop32,u32_2,u32_3 is op=0x01; opw=0x92; loop32; u32_2; u32_3 { goto loop32; }
+
+:JumpIfToBooleanTrue jump16 is op=0x00; opw=0xa0; jump16 { if (ACCU != 0) goto jump16; }
+:JumpIfToBooleanTrue jump32 is op=0x01; opw=0xa0; jump32 { if (ACCU != 0) goto jump32; }
+:JumpIfToBooleanFalse jump16 is op=0x00; opw=0xa1; jump16 { if (ACCU == 0) goto jump16; }
+:JumpIfToBooleanFalse jump32 is op=0x01; opw=0xa1; jump32 { if (ACCU == 0) goto jump32; }
+:JumpIfTrue jump16 is op=0x00; opw=0xa2; jump16 { if (ACCU != 0) goto jump16; }
+:JumpIfTrue jump32 is op=0x01; opw=0xa2; jump32 { if (ACCU != 0) goto jump32; }
+:JumpIfFalse jump16 is op=0x00; opw=0xa3; jump16 { if (ACCU == 0) goto jump16; }
+:JumpIfFalse jump32 is op=0x01; opw=0xa3; jump32 { if (ACCU == 0) goto jump32; }
+:JumpIfUndefinedOrNull jump16 is op=0x00; opw=0xa8; jump16 {
+  if (ACCU == 0xfffffffffffffff1) goto jump16;
+  if (ACCU == 0xfffffffffffffff2) goto jump16;
+}
+:JumpIfUndefinedOrNull jump32 is op=0x01; opw=0xa8; jump32 {
+  if (ACCU == 0xfffffffffffffff1) goto jump32;
+  if (ACCU == 0xfffffffffffffff2) goto jump32;
+}
+:JumpIfJSReceiver jump16 is op=0x00; opw=0xa9; jump16 { if (ACCU != 0) goto jump16; }
+:JumpIfJSReceiver jump32 is op=0x01; opw=0xa9; jump32 { if (ACCU != 0) goto jump32; }
 
 # Exception / control
-:SetPendingMessage is op=0xb0 { }
-:ReThrow is op=0xb2 { }
-:Return is op=0xb3 { return [ACCU]; }
+:SetPendingMessage is op=0xb0 { V8SetPendingMessage(ACCU); }
+:ReThrow is op=0xb2 {
+  V8ReThrow(ACCU);
+  return [pc];
+}
+:Return is op=0xb3 { return [pc]; }

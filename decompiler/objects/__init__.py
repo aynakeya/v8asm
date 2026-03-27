@@ -1,7 +1,11 @@
 from typing import List
 
 from objects.base import V8HeapObject, V8Address, V8Smi
-from objects.boilerplate import V8ArrayBoilerplateDescription
+from objects.boilerplate import (
+    V8ArrayBoilerplateDescription,
+    V8ObjectBoilerplateDescription,
+    V8ScopeInfo,
+)
 from objects.bytecode import V8BytecodeArray,CodeLine
 from objects.fixed_array import V8TrustedFixedArray, V8FixedArray
 from objects.string import V8String
@@ -19,6 +23,10 @@ def parse_object(address:int, i_type:str, lines:List[str]) -> V8HeapObject:
         obj = V8FixedArray(address, i_type, lines)
     elif i_type == "ArrayBoilerplateDescription":
         obj = V8ArrayBoilerplateDescription(address, i_type, lines)
+    elif i_type == "ObjectBoilerplateDescription":
+        obj = V8ObjectBoilerplateDescription(address, i_type, lines)
+    elif i_type == "ScopeInfo":
+        obj = V8ScopeInfo(address, i_type, lines)
     elif i_type == "BytecodeArray":
         obj = V8BytecodeArray(address, i_type, lines)
     else:

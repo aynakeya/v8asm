@@ -7,8 +7,8 @@
             version="1.0"
             slafile="v8bytecode.sla"
             processorspec="v8bytecode.pspec"
-            id="V8Bytecode:LE:32:default"
-            description="V8 Ignition Bytecode (experimental)">
+            id="V8Bytecode:LE:32:default">
+    <description>V8 Ignition Bytecode (experimental)</description>
     <compiler name="default" spec="v8bytecode.cspec" id="default"/>
   </language>
 </language_definitions>

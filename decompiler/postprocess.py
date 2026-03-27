@@ -13,11 +13,15 @@ def _is_simple_expr(expr: str) -> bool:
         return False
     if expr.startswith(('"', "'")):
         return True
+    if expr[0] in "[{":
+        return True
     if expr[0].isdigit() or expr[0] in "-+" and expr[1:].isdigit():
         return True
     if expr.startswith(("global[", "context_slot[", "Const[", "undefined", "null", "true", "false")):
         return True
     if expr.startswith(("Scope[", "script_context[")):
+        return True
+    if expr.startswith(("String(", "create_object_literal(", "create_function_context(")):
         return True
     if IDENT_RE.match(expr):
         return True
@@ -341,6 +345,7 @@ def recover_js_structures(lines: List[str]) -> List[str]:
     current = _strip_pending_message_status_guard(current)
     current = _inline_single_use_registers(current)
     current = _compact_accu_compare_if(current)
+    current = _recover_switch_assignments(current)
     current = _simplify_accu_return(current)
     current = _flatten_else_after_early_exit(current)
     current = _recover_two_case_switch(current)
@@ -431,6 +436,8 @@ def _is_inline_safe_expr(expr: str) -> bool:
     if not expr:
         return False
     if expr.startswith(("true", "false", "null", "undefined", "HOLE", '"', "'")):
+        return True
+    if expr.startswith(("[", "{", "String(")):
         return True
     if re.fullmatch(r"[-+]?\d+", expr):
         return True
@@ -533,6 +540,8 @@ def _is_pure_expr_level4(expr: str) -> bool:
         return False
     if expr.startswith(("true", "false", "null", "undefined", "HOLE", '"', "'")):
         return True
+    if expr.startswith(("[", "{", "String(")):
+        return True
     if re.fullmatch(r"[-+]?\d+", expr):
         return True
     if re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*", expr):
@@ -542,6 +551,123 @@ def _is_pure_expr_level4(expr: str) -> bool:
     if expr.startswith("(") and expr.endswith(")") and "call(" not in expr:
         return True
     return False
+
+
+def _recover_switch_assignments(lines: List[str]) -> List[str]:
+    out: List[str] = []
+    i = 0
+    while i < len(lines):
+        replacement = _match_two_case_assignment_switch(lines, i)
+        if replacement is None:
+            out.append(lines[i])
+            i += 1
+            continue
+        rendered, consumed = replacement
+        out.extend(rendered)
+        i = consumed
+    return out
+
+
+def _match_two_case_assignment_switch(
+    lines: List[str], start: int
+) -> Optional[Tuple[List[str], int]]:
+    if start + 18 >= len(lines):
+        return None
+
+    def strip(idx: int) -> str:
+        return lines[idx].strip()
+
+    def assign(idx: int) -> Optional[Tuple[str, str]]:
+        match = re.match(r"^(r\d+)\s*=\s*(.+)$", strip(idx))
+        if not match:
+            return None
+        return match.group(1), match.group(2).strip()
+
+    case1_line = strip(start)
+    cmp1_line = strip(start + 1)
+    m_case1 = re.match(r"^ACCU = (.+)$", case1_line)
+    m_cmp1 = re.match(r"^ACCU = \((.+) === ACCU\)$", cmp1_line)
+    if not m_case1 or not m_cmp1:
+        return None
+
+    alias_reg = None
+    alias_value = None
+    cursor = start + 2
+    alias_match = assign(cursor)
+    if alias_match is not None and alias_match[1] == m_cmp1.group(1).strip():
+        alias_reg, alias_value = alias_match
+        cursor += 1
+
+    if strip(cursor) != "if (!(truthy(ACCU))) {":
+        return None
+    cursor += 1
+
+    m_case2 = re.match(r"^ACCU = (.+)$", strip(cursor))
+    m_cmp2 = re.match(r"^ACCU = \((.+) === ACCU\)$", strip(cursor + 1))
+    if not m_case2 or not m_cmp2:
+        return None
+    if strip(cursor + 2) != "if (!(truthy(ACCU))) {":
+        return None
+    if not strip(cursor + 3).startswith("// goto offset_"):
+        return None
+    if strip(cursor + 4) != "}":
+        return None
+    if strip(cursor + 5) != "else {":
+        return None
+    value2_line = strip(cursor + 6)
+    dst2 = assign(cursor + 7)
+    if strip(cursor + 8) != "}":
+        return None
+    if strip(cursor + 9) != "}":
+        return None
+    if strip(cursor + 10) != "else {":
+        return None
+    value1_line = strip(cursor + 11)
+    dst1 = assign(cursor + 12)
+    if not strip(cursor + 13).startswith("// goto offset_"):
+        return None
+    if strip(cursor + 14) != "}":
+        return None
+    default_line = strip(cursor + 15)
+    dst0 = assign(cursor + 16)
+    if not dst0 or not dst1 or not dst2:
+        return None
+
+    m_value1 = re.match(r"^ACCU = (.+)$", value1_line)
+    m_value2 = re.match(r"^ACCU = (.+)$", value2_line)
+    m_default = re.match(r"^ACCU = (.+)$", default_line)
+    if not m_value1 or not m_value2 or not m_default:
+        return None
+    if dst0[0] != dst1[0] or dst0[0] != dst2[0]:
+        return None
+    if dst0[1] != m_default.group(1).strip():
+        return None
+    if dst1[1] != m_value1.group(1).strip():
+        return None
+    if dst2[1] != m_value2.group(1).strip():
+        return None
+
+    subject1 = m_cmp1.group(1).strip()
+    subject2 = m_cmp2.group(1).strip()
+    if alias_reg and subject2 == alias_reg:
+        subject2 = alias_value or subject2
+    if subject1 != subject2:
+        return None
+
+    indent = _extract_indent(lines[start])
+    body_indent = indent + "  "
+    rendered = [
+        f"{indent}if ({subject1} === {m_case1.group(1).strip()}) {{",
+        f"{body_indent}{dst0[0]} = {m_value1.group(1).strip()}",
+        f"{indent}}}",
+        f"{indent}else if ({subject1} === {m_case2.group(1).strip()}) {{",
+        f"{body_indent}{dst0[0]} = {m_value2.group(1).strip()}",
+        f"{indent}}}",
+        f"{indent}else {{",
+        f"{body_indent}{dst0[0]} = {m_default.group(1).strip()}",
+        f"{indent}}}",
+    ]
+    return rendered, cursor + 17
 
 
 def _dead_store_eliminate_chunk(lines: List[str]) -> List[str]:
@@ -673,6 +799,9 @@ def _convert_unused_accu_assign_to_expr(lines: List[str]) -> List[str]:
         for j in range(i + 1, len(out)):
             s = out[j].strip()
             if re.match(r"^ACCU\s*=", s):
+                rhs = s.split("=", 1)[1].strip()
+                if re.search(r"\bACCU\b", rhs):
+                    used = True
                 break
             if re.search(r"\bACCU\b", s):
                 used = True

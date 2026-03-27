@@ -30,6 +30,18 @@
 python3 ghidra/v8-bytecode/tools/extract_bytecode_blob.py input.disasm.txt -o input.bytecode.bin
 ```
 
+如果一个 `disasm.txt` 里包含多个 `BytecodeArray`，可以先列出 block：
+
+```bash
+python3 ghidra/v8-bytecode/tools/extract_bytecode_blob.py input.disasm.txt --list-blocks
+```
+
+再用 `-i/--block-index` 选择具体函数：
+
+```bash
+python3 ghidra/v8-bytecode/tools/extract_bytecode_blob.py input.disasm.txt -i 1 -o input.bytecode.bin
+```
+
 3. 在 Ghidra 中安装该语言（两种方式任选其一）：
 
 方式 A（开发期，直接放 GHIDRA_HOME）：
@@ -42,25 +54,56 @@ python3 ghidra/v8-bytecode/tools/extract_bytecode_blob.py input.disasm.txt -o in
 4. 导入 `input.bytecode.bin`（Raw Binary）时选择语言：
 - `V8Bytecode:LE:32:default`
 
+## Headless Validation
+
+可以直接用 Ghidra headless 跑导入、反汇编和反编译导出：
+
+```bash
+XDG_CONFIG_HOME=/tmp/ghidra-home/.config \
+JAVA_HOME=/path/to/jdk \
+$GHIDRA_HOME/support/sleigh \
+ghidra/v8-bytecode/data/languages/v8bytecode.slaspec \
+/tmp/v8bytecode.sla
+```
+
+把生成的 `v8bytecode.sla` 与 `data/languages/*` 同步到一个本地扩展目录后，可执行：
+
+```bash
+XDG_CONFIG_HOME=/tmp/ghidra-home/.config \
+JAVA_HOME=/path/to/jdk \
+$GHIDRA_HOME/support/analyzeHeadless /tmp gh-v8-demo \
+  -import /tmp/input.bytecode.bin \
+  -processor V8Bytecode:LE:32:default \
+  -cspec default \
+  -overwrite \
+  -scriptPath ghidra/v8-bytecode/ghidra_scripts \
+  -postScript DumpV8Decompile.java /tmp/out.txt \
+  -deleteProject
+```
+
+导出的 `out.txt` 会同时包含 listing 和 decompile 结果。
+
 ## Opcode Coverage (current)
 
 已覆盖（高频）：
 - load/store: `LdaZero/LdaSmi/LdaConstant/LdaGlobal/Ldar/Star*/Mov/...`
-- property/call: `GetNamedProperty/CallProperty0/CallProperty2/CallUndefinedReceiver*/CallRuntime`
-- literals: `CreateArrayLiteral/CreateObjectLiteral/CreateClosure`
+- property/call: `GetNamedProperty/CallProperty0/CallProperty1/CallProperty2/CallUndefinedReceiver*/CallRuntime`
+- literals/context: `CreateArrayLiteral/CreateObjectLiteral/CreateClosure/CreateCatchContext/CreateFunctionContext/PushContext/PopContext`
 - flow: `Jump/JumpLoop/JumpIf*`
+  - `Jump/JumpLoop/JumpIf*` 已带基础 branch p-code，可在 Ghidra 中形成控制流边
+  - `Wide/ExtraWide` 已补上 flow opcode 的显式解码（当前聚焦分支类）
 - compare: `TestReferenceEqual/TestEqualStrict/TestGreaterThan/TestLessThan`
 - misc: `SetPendingMessage/ReThrow/Return/GetIterator/ToString`
 
 ## Limitations
 
-- 目前是 **实验版**：偏重指令识别，不保证完整/精确 p-code 语义。
-- V8 存在 `Wide/ExtraWide` 与版本差异，本规范暂未完整处理。
+- 目前是 **实验版**：偏重高频指令与控制流，不保证完整/精确 p-code 语义。
+- `Wide/ExtraWide` 目前优先覆盖 flow opcode；其余宽前缀指令仍需继续补全。
 - 复杂异常路径、上下文槽、运行时调用语义仍需继续补全。
 
 ## Suggested Next Steps
 
-- 为 `Jump/JumpIf` 增加精确分支 p-code。
 - 完整建模寄存器/参数编码（含 `aN`/`rN` 与 short form）。
-- 增加 `Wide/ExtraWide` 解码支持。
+- 扩展 `Wide/ExtraWide` 到 load/store/call 家族。
+- 细化 `JumpIfUndefinedOrNull` / `JumpIfJSReceiver` 的 p-code 条件语义。
 - 按 Node/V8 版本拆分 language variant。

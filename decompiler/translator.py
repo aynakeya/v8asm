@@ -184,6 +184,12 @@ class InstructionTranslator:
         arg_text = ", ".join(self._reg_name(arg) for arg in args)
         return f"ACCU = {self._reg_name(callee)}({arg_text})"
 
+    def _imm(self, token: str, fallback: str = "?") -> str:
+        value = _parse_bracket_number(token)
+        if value is None:
+            return fallback if token is None else token
+        return str(value)
+
     def _op_LdaConstant(self, instr: Instruction) -> str:
         if not instr.args:
             return "ACCU = Const[?]"
@@ -198,7 +204,19 @@ class InstructionTranslator:
         const_repr = self._const_token(instr.args[0])
         depth = instr.args[1] if len(instr.args) > 1 else "[0]"
         flags = instr.args[2] if len(instr.args) > 2 else "#0"
+        if const_repr.startswith("["):
+            return f"ACCU = {const_repr}"
         return f"ACCU = create_array_literal({const_repr}) /* depth={depth}, flags={flags} */"
+
+    def _op_CreateObjectLiteral(self, instr: Instruction) -> str:
+        if len(instr.args) < 1:
+            return "ACCU = create_object_literal({})"
+        const_repr = self._const_token(instr.args[0])
+        flags = self._imm(instr.args[1], "[0]") if len(instr.args) > 1 else "0"
+        slot = instr.args[2] if len(instr.args) > 2 else "#0"
+        if const_repr.startswith("{"):
+            return f"ACCU = {const_repr}"
+        return f"ACCU = create_object_literal({const_repr}) /* flags={flags}, slot={slot} */"
 
     def _op_LdaGlobal(self, instr: Instruction) -> str:
         if not instr.args:
@@ -308,6 +326,14 @@ class InstructionTranslator:
         arg2 = self._reg_name(args[2])
         return f"ACCU = {callee}({arg1}, {arg2})"
 
+    def _op_CallUndefinedReceiver(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 3)
+        if not args:
+            return "ACCU = call(undefined)"
+        callee = self._reg_name(args[0])
+        call_args = self._expand_range(args[1]) if len(args) > 1 else []
+        return self._format_call(callee, call_args)
+
     def _op_CallProperty0(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 3)
         if len(args) < 2:
@@ -326,6 +352,15 @@ class InstructionTranslator:
         arg2 = self._reg_name(args[3])
         return f"ACCU = {callee}.call({receiver}, {arg1}, {arg2})"
 
+    def _op_CallProperty1(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 4)
+        if len(args) < 3:
+            return "ACCU = callProperty(?, receiver=?, ?)"
+        callee = self._reg_name(args[0])
+        receiver = self._reg_name(args[1])
+        arg1 = self._reg_name(args[2])
+        return f"ACCU = {callee}.call({receiver}, {arg1})"
+
     def _op_Add(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 1)
         if not args:
@@ -336,6 +371,14 @@ class InstructionTranslator:
     def _op_AddSmi(self, instr: Instruction) -> str:
         value = _parse_bracket_number(instr.args[0]) if instr.args else None
         return f"ACCU = (ACCU + {value})"
+
+    def _op_SubSmi(self, instr: Instruction) -> str:
+        value = _parse_bracket_number(instr.args[0]) if instr.args else None
+        return f"ACCU = (ACCU - {value})"
+
+    def _op_MulSmi(self, instr: Instruction) -> str:
+        value = _parse_bracket_number(instr.args[0]) if instr.args else None
+        return f"ACCU = (ACCU * {value})"
 
     def _op_Mov(self, instr: Instruction) -> str:
         if len(instr.args) < 2:
@@ -420,8 +463,24 @@ class InstructionTranslator:
         return f"ACCU = create_closure({callee})"
 
     def _op_PushContext(self, instr: Instruction) -> str:
-        source = self._reg_name(instr.args[0]) if instr.args else "ACCU"
-        return f"context = pushContext({source})"
+        dest = self._reg_name(instr.args[0]) if instr.args else "context"
+        return f"{dest} = pushContext(ACCU)"
+
+    def _op_PopContext(self, instr: Instruction) -> str:
+        source = self._reg_name(instr.args[0]) if instr.args else "context"
+        return f"context = {source}"
+
+    def _op_CreateFunctionContext(self, instr: Instruction) -> str:
+        scope = self._const_token(instr.args[0]) if instr.args else "<ScopeInfo>"
+        slots = self._imm(instr.args[1], "?") if len(instr.args) > 1 else "?"
+        return f"ACCU = create_function_context({scope}, {slots})"
+
+    def _op_CreateCatchContext(self, instr: Instruction) -> str:
+        if not instr.args:
+            return "ACCU = create_catch_context(ACCU, <ScopeInfo>)"
+        exc = self._reg_name(instr.args[0])
+        scope = self._const_token(instr.args[1]) if len(instr.args) > 1 else "<ScopeInfo>"
+        return f"ACCU = create_catch_context({exc}, {scope})"
 
     def _op_TestReferenceEqual(self, instr: Instruction) -> str:
         if not instr.args:
@@ -459,3 +518,6 @@ class InstructionTranslator:
         idx = _parse_bracket_number(instr.args[0])
         target = self._const(idx) if idx is not None else instr.args[0]
         return f"ensureDefined({target})"
+
+    def _op_ToString(self, instr: Instruction) -> str:
+        return "ACCU = String(ACCU)"
