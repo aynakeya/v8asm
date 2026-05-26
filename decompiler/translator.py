@@ -23,6 +23,8 @@ CONDITION_MAP: Dict[str, Tuple[str, bool]] = {
     "JumpIfToBooleanFalseConstant": ("truthy(ACCU)", False),
     "JumpIfUndefinedOrNull": ("isNullish(ACCU)", True),
     "JumpIfUndefinedOrNullConstant": ("isNullish(ACCU)", True),
+    "JumpIfUndefined": ("ACCU === undefined", True),
+    "JumpIfNotUndefined": ("ACCU !== undefined", True),
     "JumpIfJSReceiver": ("isJSReceiver(ACCU)", True),
     "JumpIfJSReceiverConstant": ("isJSReceiver(ACCU)", True),
 }
@@ -33,6 +35,18 @@ def _parse_bracket_number(token: str) -> Optional[int]:
     if not m:
         return None
     return int(m.group(1))
+
+
+def _parse_number_token(token: str) -> Optional[int]:
+    token = token.strip()
+    bracket = _parse_bracket_number(token)
+    if bracket is not None:
+        return bracket
+    if token.startswith("#") and token[1:].isdigit():
+        return int(token[1:])
+    if token.isdigit():
+        return int(token)
+    return None
 
 
 class InstructionTranslator:
@@ -184,6 +198,12 @@ class InstructionTranslator:
         arg_text = ", ".join(self._reg_name(arg) for arg in args)
         return f"ACCU = {self._reg_name(callee)}({arg_text})"
 
+    def _format_spread_args(self, args: List[str]) -> List[str]:
+        if not args:
+            return []
+        fixed = [self._reg_name(arg) for arg in args[:-1]]
+        return fixed + [f"...{self._reg_name(args[-1])}"]
+
     def _imm(self, token: str, fallback: str = "?") -> str:
         value = _parse_bracket_number(token)
         if value is None:
@@ -217,6 +237,22 @@ class InstructionTranslator:
         if const_repr.startswith("{"):
             return f"ACCU = {const_repr}"
         return f"ACCU = create_object_literal({const_repr}) /* flags={flags}, slot={slot} */"
+
+    def _op_CreateRegExpLiteral(self, instr: Instruction) -> str:
+        if len(instr.args) < 1:
+            return "ACCU = new RegExp(\"\")"
+        pattern = self._const_token(instr.args[0])
+        flags_value = _parse_number_token(instr.args[2]) if len(instr.args) > 2 else None
+        flags = self._regexp_flags(flags_value)
+        return f"ACCU = new RegExp({pattern}, {json.dumps(flags)})"
+
+    def _op_CreateRestParameter(self, instr: Instruction) -> str:
+        user_param_count = max(0, (self.bytecode.parameter_count or 1) - 1)
+        return f"ACCU = Array.prototype.slice.call(arguments, {user_param_count})"
+
+    def _op_CreateBlockContext(self, instr: Instruction) -> str:
+        scope = self._const_token(instr.args[0]) if instr.args else "<ScopeInfo>"
+        return f"ACCU = create_block_context({scope})"
 
     def _op_LdaGlobal(self, instr: Instruction) -> str:
         if not instr.args:
@@ -288,6 +324,49 @@ class InstructionTranslator:
             return "ACCU = <named-property>"
         return f"ACCU = {self._format_property_access(args[0], args[1])}"
 
+    def _op_GetKeyedProperty(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 2)
+        if not args:
+            return "ACCU = <keyed-property>"
+        receiver = self._reg_name(args[0])
+        return f"ACCU = {receiver}[ACCU]"
+
+    def _op_SetNamedProperty(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 3)
+        if len(args) < 2:
+            return "<named-property> = ACCU"
+        return f"{self._format_property_access(args[0], args[1])} = ACCU"
+
+    def _op_SetKeyedProperty(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 3)
+        if len(args) < 2:
+            return "<keyed-property> = ACCU"
+        receiver = self._reg_name(args[0])
+        key = self._reg_name(args[1])
+        return f"{receiver}[{key}] = ACCU"
+
+    def _op_DefineNamedOwnProperty(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 3)
+        if len(args) < 2:
+            return "<own-property> = ACCU"
+        return f"{self._format_property_access(args[0], args[1])} = ACCU"
+
+    def _op_DefineKeyedOwnProperty(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 4)
+        if len(args) < 2:
+            return "<own-keyed-property> = ACCU"
+        receiver = self._reg_name(args[0])
+        key = self._reg_name(args[1])
+        return f"{receiver}[{key}] = ACCU"
+
+    def _op_StaInArrayLiteral(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 3)
+        if len(args) < 2:
+            return "<array-literal>[?] = ACCU"
+        receiver = self._reg_name(args[0])
+        index = self._reg_name(args[1])
+        return f"{receiver}[{index}] = ACCU"
+
     def _op_GetIterator(self, instr: Instruction) -> str:
         if not instr.args:
             return "ACCU = GetIterator(?)"
@@ -303,6 +382,9 @@ class InstructionTranslator:
             arg_regs = self._expand_range(instr.args[1])
         arg_text = ", ".join(arg_regs)
         return f"ACCU = {runtime_name}({arg_text})"
+
+    def _op_InvokeIntrinsic(self, instr: Instruction) -> str:
+        return self._op_CallRuntime(instr)
 
     def _op_CallUndefinedReceiver0(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 2)
@@ -334,6 +416,20 @@ class InstructionTranslator:
         call_args = self._expand_range(args[1]) if len(args) > 1 else []
         return self._format_call(callee, call_args)
 
+    def _op_CallWithSpread(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 3)
+        if not args:
+            return "ACCU = callWithSpread(?)"
+        callee = self._reg_name(args[0])
+        call_args = self._expand_range(args[1]) if len(args) > 1 else []
+        receiver = call_args[0] if call_args else "undefined"
+        spread_args = self._format_spread_args(call_args[1:])
+        arg_text = ", ".join(spread_args)
+        if receiver == "undefined":
+            return f"ACCU = {callee}({arg_text})"
+        method_args = ", ".join([receiver] + spread_args)
+        return f"ACCU = {callee}.call({method_args})"
+
     def _op_CallProperty0(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 3)
         if len(args) < 2:
@@ -361,6 +457,24 @@ class InstructionTranslator:
         arg1 = self._reg_name(args[2])
         return f"ACCU = {callee}.call({receiver}, {arg1})"
 
+    def _op_Construct(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 3)
+        if not args:
+            return "ACCU = new <constructor>()"
+        callee = self._reg_name(args[0])
+        call_args = self._expand_range(args[1]) if len(args) > 1 else []
+        arg_text = ", ".join(call_args)
+        return f"ACCU = new {callee}({arg_text})"
+
+    def _op_ConstructWithSpread(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 3)
+        if not args:
+            return "ACCU = new <constructor>(...?)"
+        callee = self._reg_name(args[0])
+        call_args = self._expand_range(args[1]) if len(args) > 1 else []
+        arg_text = ", ".join(self._format_spread_args(call_args))
+        return f"ACCU = new {callee}({arg_text})"
+
     def _op_Add(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 1)
         if not args:
@@ -371,6 +485,9 @@ class InstructionTranslator:
     def _op_AddSmi(self, instr: Instruction) -> str:
         value = _parse_bracket_number(instr.args[0]) if instr.args else None
         return f"ACCU = (ACCU + {value})"
+
+    def _op_Inc(self, instr: Instruction) -> str:
+        return "ACCU = (ACCU + 1)"
 
     def _op_SubSmi(self, instr: Instruction) -> str:
         value = _parse_bracket_number(instr.args[0]) if instr.args else None
@@ -432,6 +549,18 @@ class InstructionTranslator:
             return "if (ACCU == nullish) goto ?"
         return f"if (ACCU == null || ACCU == undefined) goto offset_{target}"
 
+    def _op_JumpIfUndefined(self, instr: Instruction) -> str:
+        target = self._find_target(instr)
+        if target is None:
+            return "if (ACCU === undefined) goto ?"
+        return f"if (ACCU === undefined) goto offset_{target}"
+
+    def _op_JumpIfNotUndefined(self, instr: Instruction) -> str:
+        target = self._find_target(instr)
+        if target is None:
+            return "if (ACCU !== undefined) goto ?"
+        return f"if (ACCU !== undefined) goto offset_{target}"
+
     def _op_JumpIfJSReceiver(self, instr: Instruction) -> str:
         target = self._find_target(instr)
         if target is None:
@@ -449,6 +578,24 @@ class InstructionTranslator:
 
     def _op_JumpIfUndefinedOrNullConstant(self, instr: Instruction) -> str:
         return self._op_JumpIfUndefinedOrNull(instr)
+
+    def _op_SwitchOnGeneratorState(self, instr: Instruction) -> str:
+        generator = self._reg_name(instr.args[0]) if instr.args else "generator"
+        return f"// SwitchOnGeneratorState {generator}"
+
+    def _op_SuspendGenerator(self, instr: Instruction) -> str:
+        generator = self._reg_name(instr.args[0]) if instr.args else "generator"
+        state = self._imm(instr.args[-1], "?") if instr.args else "?"
+        return f"// SuspendGenerator {generator}, state={state}"
+
+    def _op_ResumeGenerator(self, instr: Instruction) -> str:
+        generator = self._reg_name(instr.args[0]) if instr.args else "generator"
+        return f"ACCU = ResumeGenerator({generator})"
+
+    def _op_SwitchOnSmiNoFeedback(self, instr: Instruction) -> str:
+        args = ", ".join(instr.args)
+        suffix = f" {args}" if args else ""
+        return f"// SwitchOnSmiNoFeedback ACCU{suffix}"
 
     def _op_LdaGlobalInsideTypeofIC(self, instr: Instruction) -> str:
         return self._op_LdaGlobal(instr)
@@ -512,6 +659,9 @@ class InstructionTranslator:
     def _op_ReThrow(self, instr: Instruction) -> str:
         return "throw ACCU"
 
+    def _op_Throw(self, instr: Instruction) -> str:
+        return "throw ACCU"
+
     def _op_ThrowReferenceErrorIfHole(self, instr: Instruction) -> str:
         if not instr.args:
             return "// ThrowReferenceErrorIfHole"
@@ -521,3 +671,21 @@ class InstructionTranslator:
 
     def _op_ToString(self, instr: Instruction) -> str:
         return "ACCU = String(ACCU)"
+
+    def _regexp_flags(self, value: Optional[int]) -> str:
+        if value is None:
+            return ""
+        flags = []
+        for bit, flag in (
+            (1, "g"),
+            (2, "i"),
+            (4, "m"),
+            (8, "s"),
+            (16, "u"),
+            (32, "y"),
+            (64, "d"),
+            (128, "v"),
+        ):
+            if value & bit:
+                flags.append(flag)
+        return "".join(flags)

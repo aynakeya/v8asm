@@ -6,21 +6,48 @@ ROUND_DIR="$ROOT_DIR/tests/decomp_rounds"
 CASE_DIR="$ROUND_DIR/cases"
 OUT_DIR="$ROUND_DIR/out"
 TMP_DIR="$ROUND_DIR/tmp"
-BYTENODE_PATH="/home/aynakeya/.npm/_npx/ea56e60f3ac75570/node_modules/bytenode"
+V8ASM_BIN="${V8ASM_BIN:-$ROOT_DIR/v8asm}"
+ROUND_NODE_VERSION="${ROUND_NODE_VERSION:-24.7.0}"
+BYTENODE_PATH="${ROUND_BYTENODE_PATH:-/home/aynakeya/.npm/_npx/ea56e60f3ac75570/node_modules/bytenode}"
 
 mkdir -p "$OUT_DIR" "$TMP_DIR"
 
 source "$HOME/.nvm/nvm.sh"
-nvm use 24.7.0 >/dev/null
+nvm use "$ROUND_NODE_VERSION" >/dev/null
 
-if [[ ! -x "$ROOT_DIR/v8asm" ]]; then
-  echo "v8asm not found at $ROOT_DIR/v8asm" >&2
+if [[ ! -x "$V8ASM_BIN" ]]; then
+  echo "v8asm not found at $V8ASM_BIN" >&2
   exit 1
 fi
 if [[ ! -f "$BYTENODE_PATH/package.json" ]]; then
   echo "bytenode cache not found at $BYTENODE_PATH" >&2
   exit 1
 fi
+
+v8asm_version="$("$V8ASM_BIN" version)"
+node_version="$(node -v)"
+node_v8_version="$(node -p 'process.versions.v8')"
+node_v8_numeric="${node_v8_version%%-*}"
+bytenode_version="$(node -e "const p=require(process.argv[1] + '/package.json'); console.log(p.version || 'unknown')" "$BYTENODE_PATH")"
+if [[ "$node_v8_numeric" == "$v8asm_version" ]]; then
+  compat_note="same numeric V8 version; Node/bytenode still use Node embedder snapshot/flags"
+else
+  compat_note="different numeric V8 version; bytenode mode is forced-incompatible research coverage"
+fi
+
+{
+  echo "## Round Environment"
+  echo "- v8asm_bin: \`$V8ASM_BIN\`"
+  echo "- v8asm_version: \`$v8asm_version\`"
+  echo "- v8asm_build_args:"
+  "$V8ASM_BIN" build-args | sed 's/^/  - /'
+  echo "- node_version: \`$node_version\`"
+  echo "- node_v8_version: \`$node_v8_version\`"
+  echo "- bytenode_path: \`$BYTENODE_PATH\`"
+  echo "- bytenode_version: \`$bytenode_version\`"
+  echo "- compatibility_note: $compat_note"
+  echo ""
+} >"$OUT_DIR/metadata.md"
 
 for js in "$CASE_DIR"/*.js; do
   base="$(basename "$js" .js)"
@@ -30,7 +57,7 @@ for js in "$CASE_DIR"/*.js; do
   v8_jsc="$casedir/$base.v8asm.jsc"
   btn_jsc="$casedir/$base.bytenode.jsc"
 
-  "$ROOT_DIR/v8asm" asm "$js" -o "$v8_jsc" >"$casedir/$base.v8asm.asm.log" 2>&1 || true
+  "$V8ASM_BIN" asm "$js" -o "$v8_jsc" >"$casedir/$base.v8asm.asm.log" 2>&1 || true
   node -e "const b=require(process.argv[1]); b.compileFile({filename: process.argv[2], output: process.argv[3]});" \
     "$BYTENODE_PATH" "$js" "$btn_jsc" >"$casedir/$base.bytenode.asm.log" 2>&1 || true
 
@@ -45,7 +72,14 @@ for js in "$CASE_DIR"/*.js; do
       continue
     fi
 
-    if "$ROOT_DIR/v8asm" disasm "$in_jsc" >"$dis_txt" 2>"$dis_err"; then
+    "$V8ASM_BIN" checkversion "$in_jsc" >"$casedir/$base.$mode.checkversion.txt" 2>&1 || true
+
+    disasm_args=()
+    if [[ "$mode" == "bytenode" ]]; then
+      disasm_args+=(--force-incompatible)
+    fi
+
+    if "$V8ASM_BIN" disasm "$in_jsc" "${disasm_args[@]}" >"$dis_txt" 2>"$dis_err"; then
       if ! python3 "$ROOT_DIR/decompiler/v8decompiler.py" "$dis_txt" --level 4 --runtime >"$dec_js" 2>"$casedir/$base.$mode.decompile.err"; then
         echo "// decompile failed for $dis_txt" >"$dec_js"
       fi

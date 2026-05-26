@@ -56,6 +56,9 @@ codex resume 019c42ba-60e2-7cb0-905b-0edd833425d3
 - 一键运行：`tests/decomp_rounds/run_round.sh`
 - 报告：`tests/decomp_rounds/summary.md`
 - 分析脚本：`tests/decomp_rounds/analyze_round.py`
+- 版本元数据：summary 顶部会记录 `v8asm`、Node、Node V8、bytenode 版本。
+  每个 case 也会输出 `*.checkversion.txt`，不要把不匹配的 bytenode 行当成
+  对应 V8 版本验证。
 
 流水线执行：
 
@@ -65,11 +68,47 @@ codex resume 019c42ba-60e2-7cb0-905b-0edd833425d3
 4. `python decompiler/v8decompiler.py --level 4 --runtime`
 5. 输出统计（`accu_lines/reg_refs/raw_goto/...`）
 
+默认 bytenode 使用 `nvm use 24.7.0`。验证其他 V8 版本时应显式指定：
+
+```bash
+V8ASM_BIN=/path/to/v8/out/v8asm.12.9.x64.release/v8asm \
+ROUND_NODE_VERSION=22.17.0 \
+tests/decomp_rounds/run_round.sh
+```
+
+如果 summary 显示 Node V8 与 `v8asm_version` 不同，bytenode 路径只是
+`--force-incompatible` 覆盖，不证明那个 V8 branch 已经匹配 bytenode。
+
+轻量版本矩阵：
+
+```bash
+tests/decomp_rounds/run_version_matrix.sh
+```
+
+它只用一个 case 检查本机可用的 `v8asm` 二进制和 nvm Node 版本：
+
+- `v8asm asm` 自生成 cache 必须能 strict disasm + level-4 decompile。
+- bytenode cache 先记录 `checkversion`；只有 Node V8 数字版本等于
+  `v8asm version`，且 Node 与 `v8asm` 的 pointer compression 布局一致时，
+  才尝试 `--force-incompatible`。
+- 数字版本或 pointer compression 不匹配时不强跑 force，因为这会把不同对象布局
+  的 serializer 数据喂给 V8，容易在反序列化阶段崩溃。
+
 ## Known Issues (as of latest run)
 
-- 某些 bytenode 产物（尤其含 `try/catch` 或复杂 case）在 `v8asm disasm` 会出现段错误，这属于 `v8asm` 侧稳定性问题，不是 Python 反编译器崩溃。
-- `level 4` 对复杂异常路径仍有低层状态机残留（例如 `HOLE`、部分上下文寄存器）。
-- 复杂对象字面量/高级语法仍可能出现 `// raw line` 注释回退，需要继续补 opcode。
+- bytenode 行默认是 Node `24.7.0` / V8 `13.6.233.10-node.26` 产物。即使数字版本接近，仍要看
+  `checkversion` 里的 `magic`、`flags_hash`、read-only snapshot checksum；不匹配时只能视为
+  `--force-incompatible` 研究覆盖。
+- Node `22.17.0` 的 bytenode 对应 V8 `12.4.254.21-node.26`，并且是
+  `v8_enable_pointer_compression=0`。普通 pointer-compression 版 V8 12.4
+  不是这个 bytenode 的对应版本；要用
+  `out/v8asm.12.4.node22.x64.release/v8asm`。
+- `v8asm disasm` 默认拒绝不兼容 cached data；只有显式 `--force-incompatible` 时才启用 best-effort
+  反汇编和对象打印保护。不要把缺失 print 当成 Python decompiler 问题。
+- `level 4` 对复杂异常/async handler 路径仍有低层状态机残留（例如 `HOLE`、pending message、reject
+  handler 片段）。
+- 当前 round 的 `unknown` 和 `raw_goto` 应保持为 0；如果回升，优先看 translator opcode 覆盖或
+  level-4 pipeline 顺序是否破坏了已有结构恢复。
 
 ## Recent High-Impact Fixes
 

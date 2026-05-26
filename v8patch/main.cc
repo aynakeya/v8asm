@@ -13,28 +13,56 @@
 
 #include "src/objects/managed-inl.h"
 #include "src/objects/literal-objects-inl.h"
+#include "src/flags/flags.h"
 #include "src/snapshot/code-serializer.h"
+#include "src/snapshot/snapshot.h"
 #include "src/utils/ostreams.h"
+#include "src/utils/version.h"
 
 #include <csignal>
 #include <csetjmp>
+#include <set>
 #include <unistd.h>
 
 
 class V8ObjectExplorer {
 public:
-    explicit V8ObjectExplorer(v8::internal::Isolate* isolate) : isolate_(isolate) {}
+    explicit V8ObjectExplorer(v8::internal::Isolate* isolate,
+                              bool best_effort = false)
+        : isolate_(isolate), best_effort_(best_effort) {}
 
     void Disassemble(v8::internal::Tagged<v8::internal::Object> start_obj) {
         // printf("before traversal\n");
-        DiscoverReachableObjects(start_obj);
+        if (best_effort_) {
+          void (*old_handler)(int);
+          old_handler = signal(SIGSEGV, segfault_jumper);
+          DiscoverReachableObjects(start_obj);
+          signal(SIGSEGV, old_handler);
+        } else {
+          DiscoverReachableObjects(start_obj);
+        }
         // printf("traversal done!\n");
         PrintDiscoveredObjects();
     }
 private:
     void DiscoverReachableObjects(v8::internal::Tagged<v8::internal::Object> obj) {
         if (v8::internal::IsHeapObject(obj)) {
-            Traverse(v8::internal::Cast<v8::internal::HeapObject>(obj));
+            auto heap_obj = v8::internal::Cast<v8::internal::HeapObject>(obj);
+            if (!best_effort_) {
+                Traverse(heap_obj);
+                return;
+            }
+            if (sigsetjmp(jump_buffer_, 1) == 0) {
+                currently_discovering_obj_addr_ = heap_obj.ptr();
+                Traverse(heap_obj);
+                currently_discovering_obj_addr_ = 0;
+            } else {
+                if (currently_discovering_obj_addr_ != 0) {
+                    v8::internal::Address skipped_addr = currently_discovering_obj_addr_;
+                    skipped_objects_.insert(skipped_addr);
+                }
+                currently_discovering_obj_addr_ = 0;
+            }
         }
     }
 
@@ -85,6 +113,7 @@ private:
         if (v8::internal::IsBytecodeArray(obj)) {
             auto bytecode = v8::internal::Cast<v8::internal::BytecodeArray>(obj);
             auto consts = bytecode->constant_pool();
+            DiscoverReachableObjects(consts);
             for (int i = 0; i < consts->length(); i++) {
               DiscoverReachableObjects(consts->get(i));
             }
@@ -115,13 +144,18 @@ private:
     void PrintDiscoveredObjects() {
         v8::internal::OFStream os(stdout);
 
-        void (*old_handler)(int);
-        
-        old_handler = signal(SIGSEGV, segfault_jumper);
+        void (*old_handler)(int) = nullptr;
+        if (best_effort_) {
+            old_handler = signal(SIGSEGV, segfault_jumper);
+        }
 
         for (const auto& pair : discovered_objects_) {
             auto obj = pair.second;
-            if (sigsetjmp(jump_buffer_, 1) == 0) {
+            if (!best_effort_) {
+              currently_printing_obj_addr_ = pair.first;
+              v8::internal::Print(obj, os);
+              currently_printing_obj_addr_ = 0;
+            } else if (sigsetjmp(jump_buffer_, 1) == 0) {
               currently_printing_obj_addr_ = pair.first;
               v8::internal::Print(obj, os);
               currently_printing_obj_addr_ = 0;
@@ -132,16 +166,26 @@ private:
             }
             fflush(stdout);
         }
-        signal(SIGSEGV, old_handler);
+        if (best_effort_) {
+            for (const auto& addr : skipped_objects_) {
+                os << std::endl << "!" << v8::internal::AsHex::Address(addr)
+                   << ": segmentfault while discovering object, skipped" << std::endl;
+            }
+            signal(SIGSEGV, old_handler);
+        }
         fflush(stdout);
     }
 private:
     static sigjmp_buf jump_buffer_;
     static volatile v8::internal::Address currently_printing_obj_addr_;
+    static volatile v8::internal::Address currently_discovering_obj_addr_;
     v8::internal::Isolate* isolate_;
+    bool best_effort_;
     std::map<v8::internal::Address, v8::internal::Tagged<v8::internal::HeapObject>> discovered_objects_;
+    std::set<v8::internal::Address> skipped_objects_;
 };
 volatile v8::internal::Address V8ObjectExplorer::currently_printing_obj_addr_ = 0;
+volatile v8::internal::Address V8ObjectExplorer::currently_discovering_obj_addr_ = 0;
 sigjmp_buf V8ObjectExplorer::jump_buffer_;
 
 
@@ -234,6 +278,90 @@ bool write_file_to_buffer(const char* file, const uint8_t* data, size_t len) {
   return true;
 }
 
+uint32_t read_u32_le(const std::vector<uint8_t>& data, uint32_t offset) {
+  if (data.size() < offset + sizeof(uint32_t)) return 0;
+  uint32_t value;
+  memcpy(&value, data.data() + offset, sizeof(value));
+  return value;
+}
+
+struct CacheHeader {
+  uint32_t magic;
+  uint32_t version_hash;
+  uint32_t source_hash;
+  uint32_t flags_hash;
+  uint32_t ro_snapshot_checksum;
+  uint32_t payload_length;
+  uint32_t checksum;
+};
+
+CacheHeader parse_cache_header(const std::vector<uint8_t>& data) {
+  return CacheHeader{
+      read_u32_le(data, v8::internal::SerializedData::kMagicNumberOffset),
+      read_u32_le(data, v8::internal::SerializedCodeData::kVersionHashOffset),
+      read_u32_le(data, v8::internal::SerializedCodeData::kSourceHashOffset),
+      read_u32_le(data, v8::internal::SerializedCodeData::kFlagHashOffset),
+      read_u32_le(data, v8::internal::SerializedCodeData::kReadOnlySnapshotChecksumOffset),
+      read_u32_le(data, v8::internal::SerializedCodeData::kPayloadLengthOffset),
+      read_u32_le(data, v8::internal::SerializedCodeData::kChecksumOffset),
+  };
+}
+
+struct CacheExpectations {
+  uint32_t magic;
+  uint32_t version_hash;
+  uint32_t flags_hash;
+  uint32_t ro_snapshot_checksum;
+};
+
+CacheExpectations current_cache_expectations(v8::internal::Isolate* isolate) {
+  return CacheExpectations{
+      v8::internal::SerializedData::kMagicNumber,
+      v8::internal::Version::Hash(),
+      v8::internal::FlagList::Hash(),
+      v8::internal::Snapshot::ExtractReadOnlySnapshotChecksum(isolate->snapshot_blob()),
+  };
+}
+
+bool cache_header_matches_current_v8(const CacheHeader& header,
+                                     const CacheExpectations& expected,
+                                     size_t data_size) {
+  if (header.magic != expected.magic) return false;
+  if (header.version_hash != expected.version_hash) return false;
+  if (header.flags_hash != expected.flags_hash) return false;
+  if (header.ro_snapshot_checksum != expected.ro_snapshot_checksum) return false;
+  if (header.payload_length > data_size - v8::internal::SerializedCodeData::kHeaderSize) return false;
+  return true;
+}
+
+void print_cache_header_report(FILE* out, const CacheHeader& header,
+                               const CacheExpectations& expected,
+                               size_t data_size) {
+  fprintf(out, "Cached data header:\n");
+  fprintf(out, "  magic: 0x%08x (expected 0x%08x)%s\n",
+          header.magic, expected.magic, header.magic == expected.magic ? "" : " mismatch");
+  fprintf(out, "  version_hash: 0x%08x (expected 0x%08x)%s\n",
+          header.version_hash, expected.version_hash,
+          header.version_hash == expected.version_hash ? "" : " mismatch");
+  fprintf(out, "  source_hash: 0x%08x (informational)\n", header.source_hash);
+  fprintf(out, "  flags_hash: 0x%08x (expected 0x%08x)%s\n",
+          header.flags_hash, expected.flags_hash,
+          header.flags_hash == expected.flags_hash ? "" : " mismatch");
+  fprintf(out, "  read_only_snapshot_checksum: 0x%08x (expected 0x%08x)%s\n",
+          header.ro_snapshot_checksum, expected.ro_snapshot_checksum,
+          header.ro_snapshot_checksum == expected.ro_snapshot_checksum ? "" : " mismatch");
+  fprintf(out, "  payload_length: %u (max %zu)%s\n",
+          header.payload_length,
+          data_size >= v8::internal::SerializedCodeData::kHeaderSize
+              ? data_size - v8::internal::SerializedCodeData::kHeaderSize
+              : 0,
+          data_size >= v8::internal::SerializedCodeData::kHeaderSize &&
+                  header.payload_length <= data_size - v8::internal::SerializedCodeData::kHeaderSize
+              ? ""
+              : " mismatch");
+  fprintf(out, "  checksum: 0x%08x\n", header.checksum);
+}
+
 struct VersionTuple {
   int major;
   int minor;
@@ -261,7 +389,7 @@ VersionTuple bruteforce_v8_version(uint32_t target_hash,
   return VersionTuple{-1, -1, -1, -1};
 }
 
-int do_checkversion(const char* filename) {
+int do_checkversion(const char* filename, v8::Isolate* isolate) {
   std::vector<uint8_t> data;
   if (!read_file_to_buffer(filename, data)) {
     fprintf(stderr, "Error reading file: %s\n", filename);
@@ -279,6 +407,10 @@ int do_checkversion(const char* filename) {
   // read as little-endian uint32_t
   uint32_t version_hash = *(uint32_t *) version_addr;
   printf("Version hash: hex = %x%x%x%x , uint32 = 0x%08x (%u)\n", version_addr[0], version_addr[1], version_addr[2], version_addr[3], version_hash, version_hash);
+  auto i_isolate = reinterpret_cast<v8::internal::Isolate*>(isolate);
+  CacheHeader header = parse_cache_header(data);
+  CacheExpectations expected = current_cache_expectations(i_isolate);
+  print_cache_header_report(stdout, header, expected, data.size());
   printf("Starting brute-force search (0-20.0-20.0-500.0-200)...\n");
 
   VersionTuple found = bruteforce_v8_version(version_hash, 20, 20, 500, 200);
@@ -359,7 +491,7 @@ int do_asm(int argc, char* argv[], v8::Isolate* isolate) {
 }
 
 
-int do_disasm(const char* filename, v8::Isolate* isolate) {
+int do_disasm(const char* filename, v8::Isolate* isolate, bool force_incompatible) {
   std::vector<uint8_t> data;
   if (!read_file_to_buffer(filename, data)) {
     fprintf(stderr, "Error reading file: %s\n", filename);
@@ -368,6 +500,26 @@ int do_disasm(const char* filename, v8::Isolate* isolate) {
   v8::Isolate::Scope isolate_scope(isolate);
   v8::HandleScope handle_scope(isolate);
   auto i_isolate = reinterpret_cast<v8::internal::Isolate*>(isolate);
+
+  if (data.size() < v8::internal::SerializedCodeData::kHeaderSize) {
+    fprintf(stderr, "File too small to contain a V8 cached-data header.\n");
+    return 1;
+  }
+  CacheHeader header = parse_cache_header(data);
+  CacheExpectations expected = current_cache_expectations(i_isolate);
+  bool compatible =
+      cache_header_matches_current_v8(header, expected, data.size());
+  if (!compatible) {
+    print_cache_header_report(stderr, header, expected, data.size());
+    if (!force_incompatible) {
+      fprintf(stderr,
+              "Refusing to deserialize incompatible cached data. "
+              "Use --force-incompatible for best-effort recovery.\n");
+      return 1;
+    }
+    fprintf(stderr,
+            "Forcing incompatible cached data; output may be partial.\n");
+  }
 
   v8::internal::AlignedCachedData cached_data(data.data(), static_cast<int>(data.size()));
   auto source = i_isolate->factory()->NewStringFromAsciiChecked("source");
@@ -388,7 +540,7 @@ int do_disasm(const char* filename, v8::Isolate* isolate) {
 
   auto bytecode = sfi_handle->GetBytecodeArray(i_isolate);
   // disassemble(i_isolate, bytecode);
-  V8ObjectExplorer explorer(i_isolate);
+  V8ObjectExplorer explorer(i_isolate, force_incompatible && !compatible);
   explorer.Disassemble(bytecode);
   return 0;
 }
@@ -452,7 +604,7 @@ int main(int argc, char* argv[]) {
       ret = 1;
       goto finish;
     }
-    ret = do_checkversion(argv[2]);
+    ret = do_checkversion(argv[2], isolate);
     goto finish;
   } 
   if (strcmp(cmd, "asm") == 0) {
@@ -461,15 +613,27 @@ int main(int argc, char* argv[]) {
   }
   if (strcmp(cmd, "disasm") == 0) {
     if (argc < 3) {
-      fprintf(stderr, "Usage: %s disasm file.jsc\n", argv[0]);
+      fprintf(stderr, "Usage: %s disasm file.jsc [--force-incompatible]\n", argv[0]);
       ret = 1;
       goto finish;
     }
-    ret = do_disasm(argv[2], isolate);
+    bool force_incompatible = false;
+    for (int i = 3; i < argc; ++i) {
+      if (strcmp(argv[i], "--force-incompatible") == 0 ||
+          strcmp(argv[i], "--best-effort") == 0) {
+        force_incompatible = true;
+      } else {
+        fprintf(stderr, "Unknown disasm option: %s\n", argv[i]);
+        fprintf(stderr, "Usage: %s disasm file.jsc [--force-incompatible]\n", argv[0]);
+        ret = 1;
+        goto finish;
+      }
+    }
+    ret = do_disasm(argv[2], isolate, force_incompatible);
     goto finish;
   }
   fprintf(stderr, "Unknown command: %s\n", cmd);
-  fprintf(stderr, "Usage: %s <asm|disasm|checkversion> ...\n", argv[0]);
+  fprintf(stderr, "Usage: %s <asm|disasm|checkversion|version|build-args> ...\n", argv[0]);
   ret = 1;
 finish:
   isolate->Dispose();

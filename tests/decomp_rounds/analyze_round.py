@@ -13,6 +13,7 @@ def score_text(text: str) -> dict[str, int]:
         "goto_comments": len(re.findall(r"//\s*goto\s+offset_", text)),
         "raw_goto": len(re.findall(r"\bgoto\s+offset_", text)),
         "unknown_comments": len(re.findall(r"//\s*0x[0-9a-f]+\s+@", text)),
+        "undefined_fallbacks": len(re.findall(r"<undefined: segmentfault", text)),
         "holes": len(re.findall(r"\bHOLE\b", text)),
         "functions": len(re.findall(r"^\s*function\s+", text, flags=re.M)),
     }
@@ -30,8 +31,12 @@ def main() -> int:
     case_dirs = sorted([p for p in out_dir.iterdir() if p.is_dir()])
     print("# Decompile Round Summary")
     print("")
-    print("| case | mode | accu_lines | reg_refs | goto_comments | raw_goto | holes |")
-    print("|---|---:|---:|---:|---:|---:|---:|")
+    metadata = out_dir / "metadata.md"
+    if metadata.exists():
+        print(metadata.read_text(encoding="utf-8", errors="ignore").rstrip())
+        print("")
+    print("| case | mode | accu_lines | reg_refs | goto_comments | raw_goto | unknown | undefined_fallbacks | holes |")
+    print("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
 
     for case_dir in case_dirs:
         case = case_dir.name
@@ -44,13 +49,16 @@ def main() -> int:
             s = score_text(text)
             print(
                 f"| {case} | {mode} | {s['accu_lines']} | {s['reg_refs']} | "
-                f"{s['goto_comments']} | {s['raw_goto']} | {s['holes']} |"
+                f"{s['goto_comments']} | {s['raw_goto']} | {s['unknown_comments']} | "
+                f"{s['undefined_fallbacks']} | {s['holes']} |"
             )
 
     print("")
     print("## Quick Inspection Targets")
     print("- Prefer cases with highest `accu_lines` and `reg_refs` for next cleanups.")
     print("- Any non-zero `raw_goto` indicates structurer fallback/regression.")
+    print("- Non-zero `unknown` usually means translator opcode coverage is missing.")
+    print("- Non-zero `undefined_fallbacks` usually points at v8asm/best-effort object printing.")
     return 0
 
 

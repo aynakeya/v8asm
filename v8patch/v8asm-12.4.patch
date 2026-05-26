@@ -1,0 +1,146 @@
+diff --git a/src/d8/d8.cc b/src/d8/d8.cc
+index 86f2c0611c0..1449b827f78 100644
+--- a/src/d8/d8.cc
++++ b/src/d8/d8.cc
+@@ -6178,7 +6178,7 @@ static void Disassemble(v8::internal::Isolate* isolate,
+   for (int val = 0; val < consts->length(); val++) {
+     auto obj = consts->get(val);
+     if (v8::internal::IsSharedFunctionInfo(obj)) {
+-      auto shared = v8::internal::Cast<v8::internal::SharedFunctionInfo>(obj);
++      auto shared = v8::internal::SharedFunctionInfo::cast(obj);
+
+       for (int val1 = 0; val1 < depth; ++val1) v8::internal::PrintF("  ");
+       v8::internal::PrintF("--> Found SFI in constant pool at index %d: ", val);
+@@ -6222,9 +6222,10 @@ void v8::Shell::LoadJSC(const v8::FunctionCallbackInfo<v8::Value>& args) {
+     auto source = isolate->factory()
+                       ->NewStringFromUtf8(base::CStrVector("source"))
+                       .ToHandleChecked();
+-    v8::internal::ScriptDetails script_details;
++    v8::ScriptOriginOptions origin_options;
+     v8::internal::MaybeDirectHandle<v8::internal::SharedFunctionInfo> maybe_fun =
+-        v8::internal::CodeSerializer::Deserialize(isolate, &cached_data, source, script_details);
++        v8::internal::CodeSerializer::Deserialize(isolate, &cached_data, source,
++                                                  origin_options);
+
+     v8::internal::DirectHandle<v8::internal::SharedFunctionInfo> fun;
+     if (!maybe_fun.ToHandle(&fun)) {
+@@ -6245,4 +6246,4 @@ void v8::Shell::LoadJSC(const v8::FunctionCallbackInfo<v8::Value>& args) {
+
+     delete[] filedata;
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/src/disassembler/main.cc b/src/disassembler/main.cc
+index ed33477b92d..d784b654ec0 100644
+--- a/src/disassembler/main.cc
++++ b/src/disassembler/main.cc
+@@ -47,7 +47,7 @@ public:
+ private:
+     void DiscoverReachableObjects(v8::internal::Tagged<v8::internal::Object> obj) {
+         if (v8::internal::IsHeapObject(obj)) {
+-            auto heap_obj = v8::internal::Cast<v8::internal::HeapObject>(obj);
++            auto heap_obj = v8::internal::HeapObject::cast(obj);
+             if (!best_effort_) {
+                 Traverse(heap_obj);
+                 return;
+@@ -111,27 +111,27 @@ private:
+         }
+
+         if (v8::internal::IsBytecodeArray(obj)) {
+-            auto bytecode = v8::internal::Cast<v8::internal::BytecodeArray>(obj);
++            auto bytecode = v8::internal::BytecodeArray::cast(obj);
+             auto consts = bytecode->constant_pool();
+             DiscoverReachableObjects(consts);
+             for (int i = 0; i < consts->length(); i++) {
+               DiscoverReachableObjects(consts->get(i));
+             }
+         } else if (v8::internal::IsSharedFunctionInfo(obj)) {
+-            auto sfi = v8::internal::Cast<v8::internal::SharedFunctionInfo>(obj);
++            auto sfi = v8::internal::SharedFunctionInfo::cast(obj);
+             if (sfi->HasBytecodeArray()) {
+                 DiscoverReachableObjects(sfi->GetBytecodeArray(isolate_));
+             }
+         } else if (v8::internal::IsFixedArray(obj)) {
+-            auto fixed_array = v8::internal::Cast<v8::internal::FixedArray>(obj);
++            auto fixed_array = v8::internal::FixedArray::cast(obj);
+             for (int i = 0; i < fixed_array->length(); ++i) {
+                 DiscoverReachableObjects(fixed_array->get(i));
+             }
+         } else if (v8::internal::IsArrayBoilerplateDescription(obj)) {
+-            auto abd = v8::internal::Cast<v8::internal::ArrayBoilerplateDescription>(obj);
++            auto abd = v8::internal::ArrayBoilerplateDescription::cast(obj);
+             DiscoverReachableObjects(abd->constant_elements());
+         } else if (v8::internal::IsObjectBoilerplateDescription(obj)) {
+-            auto obd = v8::internal::Cast<v8::internal::ObjectBoilerplateDescription>(obj);
++            auto obd = v8::internal::ObjectBoilerplateDescription::cast(obj);
+             for (int i = 0; i < obd->length(); i++) {
+                 DiscoverReachableObjects(obd->get(i));
+             }
+@@ -198,14 +198,14 @@ static void disassemble(v8::internal::Isolate* isolate,
+     v8::internal::Print(obj,os);
+
+     if (v8::internal::IsBytecodeArray(obj)) {
+-      auto bytecode = v8::internal::Cast<v8::internal::BytecodeArray>(obj);
++      auto bytecode = v8::internal::BytecodeArray::cast(obj);
+       // v8::internal::PrintF("0x%012llx: [BytecodeArray]\n", static_cast<unsigned long long>(bytecode.ptr()));
+       // bytecode->Disassemble(os);
+       auto consts = bytecode->constant_pool();
+       for (int i = 0; i < consts->length(); i++) {
+         auto inner = consts->get(i);
+         if (v8::internal::IsHeapObject(inner)) {
+-          auto shared = v8::internal::Cast<v8::internal::HeapObject>(inner);
++          auto shared = v8::internal::HeapObject::cast(inner);
+           disassemble(isolate,shared);
+         }else {
+           // smi
+@@ -215,14 +215,14 @@ static void disassemble(v8::internal::Isolate* isolate,
+     }
+
+     if (v8::internal::IsSharedFunctionInfo(obj)) {
+-        auto sfi = v8::internal::Cast<v8::internal::SharedFunctionInfo>(obj);
++        auto sfi = v8::internal::SharedFunctionInfo::cast(obj);
+         if (sfi->HasBytecodeArray()) {
+             disassemble(isolate, sfi->GetBytecodeArray(isolate));
+         }
+     }
+
+     if (v8::internal::IsFixedArray(obj)) {
+-        auto fixed_array = v8::internal::Cast<v8::internal::FixedArray>(obj);
++        auto fixed_array = v8::internal::FixedArray::cast(obj);
+         for (int i = 0; i < fixed_array->length(); ++i) {
+             auto objn = fixed_array->get(i);
+             if (v8::internal::IsHeapObject(objn)) {
+@@ -234,16 +234,16 @@ static void disassemble(v8::internal::Isolate* isolate,
+     }
+
+     if (v8::internal::IsArrayBoilerplateDescription(obj)) {
+-      auto abd = v8::internal::Cast<v8::internal::ArrayBoilerplateDescription>(obj);
++      auto abd = v8::internal::ArrayBoilerplateDescription::cast(obj);
+       disassemble(isolate,abd->constant_elements());
+     }
+
+     if (v8::internal::IsObjectBoilerplateDescription(obj)) {
+-      auto obd = v8::internal::Cast<v8::internal::ObjectBoilerplateDescription>(obj);
++      auto obd = v8::internal::ObjectBoilerplateDescription::cast(obj);
+       for (int i = 0; i < obd->capacity(); i++) {
+         auto inner = obd->get(i);
+         if (v8::internal::IsHeapObject(inner)) {
+-          auto shared = v8::internal::Cast<v8::internal::HeapObject>(inner);
++          auto shared = v8::internal::HeapObject::cast(inner);
+           disassemble(isolate,shared);
+         }else {
+           // smi
+@@ -523,9 +523,10 @@ int do_disasm(const char* filename, v8::Isolate* isolate, bool force_incompatibl
+
+   v8::internal::AlignedCachedData cached_data(data.data(), static_cast<int>(data.size()));
+   auto source = i_isolate->factory()->NewStringFromAsciiChecked("source");
+-  v8::internal::ScriptDetails script_details(source);
++  v8::ScriptOriginOptions origin_options;
+   v8::internal::MaybeDirectHandle<v8::internal::SharedFunctionInfo> maybe_sfi =
+-      v8::internal::CodeSerializer::Deserialize(i_isolate, &cached_data, source, script_details);
++      v8::internal::CodeSerializer::Deserialize(i_isolate, &cached_data, source,
++                                                origin_options);
+
+   v8::internal::DirectHandle<v8::internal::SharedFunctionInfo> sfi_handle;
+   if (!maybe_sfi.ToHandle(&sfi_handle)) {

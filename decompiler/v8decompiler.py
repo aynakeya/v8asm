@@ -77,6 +77,7 @@ function create_array_literal(v) { return Array.isArray(v) ? v.slice() : []; }
 function create_object_literal(v) { return v && typeof v === "object" ? { ...v } : {}; }
 function create_closure(fn) { return typeof fn === "function" ? fn : function () { return undefined; }; }
 function create_function_context(scope, slots) { return { scope, slots: new Array(Number(slots) || 0) }; }
+function create_block_context(scope) { return { scope, slots: [] }; }
 function create_catch_context(value, scope) { return { value, scope, slots: [value] }; }
 function pushContext(v) {
   const prev = context;
@@ -92,6 +93,13 @@ function ensureDefined(name) {
 }
 function ThrowIteratorResultNotAnObject(v) {
   throw new TypeError("Iterator result is not an object: " + String(v));
+}
+function _CopyDataPropertiesWithExcludedPropertiesOnStack(source, ...keys) {
+  const out = {};
+  for (const key of Object.keys(Object(source))) {
+    if (!keys.includes(key)) out[key] = source[key];
+  }
+  return out;
 }
 """
 

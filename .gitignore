@@ -1,4 +1,7 @@
 __pycache__
 .idea
+v8asm
+snapshot_blob.bin
 tests/decomp_rounds/out
 tests/decomp_rounds/tmp
+tests/decomp_rounds/version_matrix
