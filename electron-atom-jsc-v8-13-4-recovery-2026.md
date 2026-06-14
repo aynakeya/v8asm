@@ -508,6 +508,40 @@ The pass intentionally does not perform broad cross-function `context_slot`
 replacement, because closure variables and private-field symbols share the same
 printed form and would be easy to corrupt without scope-level evidence.
 
+## Atom decompiler opcode coverage
+
+The plain 13.4 forced disassembly exposes bytecode forms that the small round
+cases did not cover, especially operand-scale suffixes such as `.Wide` and
+`.ExtraWide`. Before normalizing those suffixes, level-4 output for
+`atom.compiled.dist.jsc` still contained 1978 raw unknown bytecode comments.
+Most of them were ordinary instructions such as `LdaSmi.Wide`,
+`CreateObjectLiteral.Wide`, `DefineNamedOwnProperty.Wide`, and
+`CallUndefinedReceiver2.Wide`.
+
+The Python decompiler now strips V8 operand-scale suffixes before dispatching
+to opcode translators and adds conservative translations for the Atom-heavy
+opcodes: generic `CallProperty`, context-slot load/store, empty literals,
+loose equality, `typeof` tests, boolean/numeric conversions, bitwise and shift
+operators, mapped arguments, clone-object, and the low-level `for-in` iterator
+bytecodes.
+
+Current Atom check:
+
+```text
+python3 decompiler/v8decompiler.py \
+  /tmp/atom.current.13.4.force.disasm.txt --level 4 --runtime \
+  > /tmp/atom.current.13.4.force.dec.l4.final.js
+
+unknown_comments: 0
+undefined_fallbacks: 0
+functions: 809
+decompiler stderr: 0 bytes
+```
+
+The remaining `ACCU`/register/goto residue is now structural cleanup work, not
+missing opcode coverage. The normal 20-case round still reports `raw_goto=0`
+and `unknown=0` for both self-cache and bytenode rows.
+
 ## Remaining gap
 
 This is still forced recovery. The output is useful, but not equivalent to

@@ -6,6 +6,8 @@ from typing import List
 
 from objects.bytecode import CodeLine
 
+OPERAND_SCALE_SUFFIXES = (".Wide", ".ExtraWide")
+
 
 def _split_operands(operand_text: str) -> List[str]:
     if not operand_text:
@@ -54,6 +56,12 @@ class Instruction:
     mnemonic: str
     args: List[str]
     raw_line: str
+
+    def __post_init__(self) -> None:
+        for suffix in OPERAND_SCALE_SUFFIXES:
+            if self.mnemonic.endswith(suffix):
+                self.mnemonic = self.mnemonic[: -len(suffix)]
+                break
 
     @classmethod
     def from_codeline(cls, line: CodeLine) -> "Instruction":

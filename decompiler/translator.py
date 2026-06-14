@@ -13,6 +13,17 @@ from utils import parse_jump_target
 CONST_INDEX_RE = re.compile(r"^\[(\-?\d+)\]$")
 RANGE_RE = re.compile(r"^([ra])(\d+)-([ra])(\d+)$")
 IDENT_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
+TYPEOF_LITERAL_FLAGS = {
+    0: "number",
+    1: "string",
+    2: "symbol",
+    3: "boolean",
+    4: "bigint",
+    5: "undefined",
+    6: "function",
+    7: "object",
+    8: "other",
+}
 
 CONDITION_MAP: Dict[str, Tuple[str, bool]] = {
     "JumpIfTrue": ("truthy(ACCU)", True),
@@ -24,7 +35,13 @@ CONDITION_MAP: Dict[str, Tuple[str, bool]] = {
     "JumpIfUndefinedOrNull": ("isNullish(ACCU)", True),
     "JumpIfUndefinedOrNullConstant": ("isNullish(ACCU)", True),
     "JumpIfUndefined": ("ACCU === undefined", True),
+    "JumpIfUndefinedConstant": ("ACCU === undefined", True),
     "JumpIfNotUndefined": ("ACCU !== undefined", True),
+    "JumpIfNotUndefinedConstant": ("ACCU !== undefined", True),
+    "JumpIfNull": ("ACCU === null", True),
+    "JumpIfNotNull": ("ACCU !== null", True),
+    "JumpIfNullConstant": ("ACCU === null", True),
+    "JumpIfNotNullConstant": ("ACCU !== null", True),
     "JumpIfJSReceiver": ("isJSReceiver(ACCU)", True),
     "JumpIfJSReceiverConstant": ("isJSReceiver(ACCU)", True),
 }
@@ -76,6 +93,10 @@ class InstructionTranslator:
         return f"// {instr.raw_line.strip()}"
 
     def branch_condition(self, instr: Instruction) -> Optional[Tuple[str, bool]]:
+        if instr.mnemonic in {"JumpIfForInDone", "JumpIfForInDoneConstant"}:
+            index = self._reg_name(instr.args[1]) if len(instr.args) > 1 else "index"
+            cache = self._reg_name(instr.args[2]) if len(instr.args) > 2 else "cache"
+            return (f"ForInDone({index}, {cache})", True)
         info = CONDITION_MAP.get(instr.mnemonic)
         if not info:
             return None
@@ -174,6 +195,12 @@ class InstructionTranslator:
             return ident
         return f"globalThis[{name}]"
 
+    def _format_context_slot(self, context: str, slot: str, depth: str) -> str:
+        context_expr = self._reg_name(context)
+        slot_expr = self._imm(slot, slot)
+        depth_expr = self._imm(depth, depth)
+        return f"context_slot({context_expr}, {slot_expr}, {depth_expr})"
+
     def _expand_range(self, token: str) -> List[str]:
         token = token.strip()
         match = RANGE_RE.match(token)
@@ -228,6 +255,9 @@ class InstructionTranslator:
             return f"ACCU = {const_repr}"
         return f"ACCU = create_array_literal({const_repr}) /* depth={depth}, flags={flags} */"
 
+    def _op_CreateEmptyArrayLiteral(self, instr: Instruction) -> str:
+        return "ACCU = []"
+
     def _op_CreateObjectLiteral(self, instr: Instruction) -> str:
         if len(instr.args) < 1:
             return "ACCU = create_object_literal({})"
@@ -237,6 +267,9 @@ class InstructionTranslator:
         if const_repr.startswith("{"):
             return f"ACCU = {const_repr}"
         return f"ACCU = create_object_literal({const_repr}) /* flags={flags}, slot={slot} */"
+
+    def _op_CreateEmptyObjectLiteral(self, instr: Instruction) -> str:
+        return "ACCU = {}"
 
     def _op_CreateRegExpLiteral(self, instr: Instruction) -> str:
         if len(instr.args) < 1:
@@ -249,6 +282,9 @@ class InstructionTranslator:
     def _op_CreateRestParameter(self, instr: Instruction) -> str:
         user_param_count = max(0, (self.bytecode.parameter_count or 1) - 1)
         return f"ACCU = Array.prototype.slice.call(arguments, {user_param_count})"
+
+    def _op_CreateMappedArguments(self, instr: Instruction) -> str:
+        return "ACCU = arguments"
 
     def _op_CreateBlockContext(self, instr: Instruction) -> str:
         scope = self._const_token(instr.args[0]) if instr.args else "<ScopeInfo>"
@@ -275,7 +311,12 @@ class InstructionTranslator:
         return self._op_LdaImmutableCurrentContextSlot(instr)
 
     def _op_LdaImmutableContextSlot(self, instr: Instruction) -> str:
+        if len(instr.args) >= 3:
+            return f"ACCU = {self._format_context_slot(*instr.args[:3])}"
         return self._op_LdaImmutableCurrentContextSlot(instr)
+
+    def _op_LdaContextSlot(self, instr: Instruction) -> str:
+        return self._op_LdaImmutableContextSlot(instr)
 
     def _op_LdaCurrentScriptContextSlot(self, instr: Instruction) -> str:
         return self._op_LdaImmutableCurrentContextSlot(instr)
@@ -317,6 +358,18 @@ class InstructionTranslator:
 
     def _op_StaCurrentContextSlot(self, instr: Instruction) -> str:
         return self._op_StaCurrentScriptContextSlot(instr)
+
+    def _op_StaContextSlot(self, instr: Instruction) -> str:
+        if len(instr.args) >= 3:
+            slot = self._format_context_slot(*instr.args[:3])
+            return f"{slot} = ACCU"
+        return self._op_StaCurrentScriptContextSlot(instr)
+
+    def _op_StaGlobal(self, instr: Instruction) -> str:
+        if not instr.args:
+            return "globalThis[?] = ACCU"
+        target = self._format_global_access(instr.args[0])
+        return f"{target} = ACCU"
 
     def _op_GetNamedProperty(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 2)
@@ -457,6 +510,21 @@ class InstructionTranslator:
         arg1 = self._reg_name(args[2])
         return f"ACCU = {callee}.call({receiver}, {arg1})"
 
+    def _op_CallProperty(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 3)
+        if len(args) < 2:
+            return "ACCU = callProperty(?, receiver=?)"
+        callee = self._reg_name(args[0])
+        call_args = self._expand_range(args[1])
+        receiver = call_args[0] if call_args else "undefined"
+        arg_text = ", ".join([receiver] + call_args[1:])
+        return f"ACCU = {callee}.call({arg_text})"
+
+    def _op_CloneObject(self, instr: Instruction) -> str:
+        source = self._reg_name(instr.args[0]) if instr.args else "ACCU"
+        flags = instr.args[1] if len(instr.args) > 1 else "#0"
+        return f"ACCU = clone_object({source}) /* flags={flags} */"
+
     def _op_Construct(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 3)
         if not args:
@@ -489,13 +557,95 @@ class InstructionTranslator:
     def _op_Inc(self, instr: Instruction) -> str:
         return "ACCU = (ACCU + 1)"
 
+    def _op_Dec(self, instr: Instruction) -> str:
+        return "ACCU = (ACCU - 1)"
+
+    def _op_Sub(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 1)
+        if not args:
+            return "ACCU = (? - ACCU)"
+        left = self._reg_name(args[0])
+        return f"ACCU = ({left} - ACCU)"
+
     def _op_SubSmi(self, instr: Instruction) -> str:
         value = _parse_bracket_number(instr.args[0]) if instr.args else None
         return f"ACCU = (ACCU - {value})"
 
+    def _op_Mul(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 1)
+        if not args:
+            return "ACCU = (? * ACCU)"
+        left = self._reg_name(args[0])
+        return f"ACCU = ({left} * ACCU)"
+
     def _op_MulSmi(self, instr: Instruction) -> str:
         value = _parse_bracket_number(instr.args[0]) if instr.args else None
         return f"ACCU = (ACCU * {value})"
+
+    def _op_BitwiseOr(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 1)
+        if not args:
+            return "ACCU = (? | ACCU)"
+        left = self._reg_name(args[0])
+        return f"ACCU = ({left} | ACCU)"
+
+    def _op_BitwiseOrSmi(self, instr: Instruction) -> str:
+        value = _parse_number_token(instr.args[0]) if instr.args else None
+        return f"ACCU = (ACCU | {value})"
+
+    def _op_BitwiseAnd(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 1)
+        if not args:
+            return "ACCU = (? & ACCU)"
+        left = self._reg_name(args[0])
+        return f"ACCU = ({left} & ACCU)"
+
+    def _op_BitwiseAndSmi(self, instr: Instruction) -> str:
+        value = _parse_number_token(instr.args[0]) if instr.args else None
+        return f"ACCU = (ACCU & {value})"
+
+    def _op_BitwiseNot(self, instr: Instruction) -> str:
+        return "ACCU = ~ACCU"
+
+    def _op_ShiftLeft(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 1)
+        if not args:
+            return "ACCU = (? << ACCU)"
+        left = self._reg_name(args[0])
+        return f"ACCU = ({left} << ACCU)"
+
+    def _op_ShiftLeftSmi(self, instr: Instruction) -> str:
+        value = _parse_number_token(instr.args[0]) if instr.args else None
+        return f"ACCU = (ACCU << {value})"
+
+    def _op_ShiftRight(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 1)
+        if not args:
+            return "ACCU = (? >> ACCU)"
+        left = self._reg_name(args[0])
+        return f"ACCU = ({left} >> ACCU)"
+
+    def _op_Div(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 1)
+        if not args:
+            return "ACCU = (? / ACCU)"
+        left = self._reg_name(args[0])
+        return f"ACCU = ({left} / ACCU)"
+
+    def _op_DivSmi(self, instr: Instruction) -> str:
+        value = _parse_number_token(instr.args[0]) if instr.args else None
+        return f"ACCU = (ACCU / {value})"
+
+    def _op_Mod(self, instr: Instruction) -> str:
+        args = self._drop_feedback(instr.args, 1)
+        if not args:
+            return "ACCU = (? % ACCU)"
+        left = self._reg_name(args[0])
+        return f"ACCU = ({left} % ACCU)"
+
+    def _op_ModSmi(self, instr: Instruction) -> str:
+        value = _parse_number_token(instr.args[0]) if instr.args else None
+        return f"ACCU = (ACCU % {value})"
 
     def _op_Mov(self, instr: Instruction) -> str:
         if len(instr.args) < 2:
@@ -579,6 +729,36 @@ class InstructionTranslator:
     def _op_JumpIfUndefinedOrNullConstant(self, instr: Instruction) -> str:
         return self._op_JumpIfUndefinedOrNull(instr)
 
+    def _op_JumpIfUndefinedConstant(self, instr: Instruction) -> str:
+        return self._op_JumpIfUndefined(instr)
+
+    def _op_JumpIfNotUndefinedConstant(self, instr: Instruction) -> str:
+        return self._op_JumpIfNotUndefined(instr)
+
+    def _op_JumpIfTrueConstant(self, instr: Instruction) -> str:
+        return self._op_JumpIfTrue(instr)
+
+    def _op_JumpIfFalseConstant(self, instr: Instruction) -> str:
+        return self._op_JumpIfFalse(instr)
+
+    def _op_JumpIfNull(self, instr: Instruction) -> str:
+        target = self._find_target(instr)
+        if target is None:
+            return "if (ACCU === null) goto ?"
+        return f"if (ACCU === null) goto offset_{target}"
+
+    def _op_JumpIfNotNull(self, instr: Instruction) -> str:
+        target = self._find_target(instr)
+        if target is None:
+            return "if (ACCU !== null) goto ?"
+        return f"if (ACCU !== null) goto offset_{target}"
+
+    def _op_JumpIfNullConstant(self, instr: Instruction) -> str:
+        return self._op_JumpIfNull(instr)
+
+    def _op_JumpIfNotNullConstant(self, instr: Instruction) -> str:
+        return self._op_JumpIfNotNull(instr)
+
     def _op_SwitchOnGeneratorState(self, instr: Instruction) -> str:
         generator = self._reg_name(instr.args[0]) if instr.args else "generator"
         return f"// SwitchOnGeneratorState {generator}"
@@ -641,17 +821,52 @@ class InstructionTranslator:
         ref = self._reg_name(instr.args[0])
         return f"ACCU = ({ref} === ACCU)"
 
+    def _op_TestEqual(self, instr: Instruction) -> str:
+        if not instr.args:
+            return "ACCU = (ACCU == ?)"
+        ref = self._reg_name(instr.args[0])
+        return f"ACCU = ({ref} == ACCU)"
+
     def _op_TestGreaterThan(self, instr: Instruction) -> str:
         if not instr.args:
             return "ACCU = (ACCU > ?)"
         ref = self._reg_name(instr.args[0])
         return f"ACCU = ({ref} > ACCU)"
 
+    def _op_TestGreaterThanOrEqual(self, instr: Instruction) -> str:
+        if not instr.args:
+            return "ACCU = (ACCU >= ?)"
+        ref = self._reg_name(instr.args[0])
+        return f"ACCU = ({ref} >= ACCU)"
+
     def _op_TestLessThan(self, instr: Instruction) -> str:
         if not instr.args:
             return "ACCU = (ACCU < ?)"
         ref = self._reg_name(instr.args[0])
         return f"ACCU = ({ref} < ACCU)"
+
+    def _op_TestLessThanOrEqual(self, instr: Instruction) -> str:
+        if not instr.args:
+            return "ACCU = (ACCU <= ?)"
+        ref = self._reg_name(instr.args[0])
+        return f"ACCU = ({ref} <= ACCU)"
+
+    def _op_TestUndetectable(self, instr: Instruction) -> str:
+        return "ACCU = isUndetectable(ACCU)"
+
+    def _op_TestTypeOf(self, instr: Instruction) -> str:
+        literal_id = _parse_number_token(instr.args[0]) if instr.args else None
+        literal = TYPEOF_LITERAL_FLAGS.get(literal_id, f"type_{literal_id}")
+        return f"ACCU = (typeof ACCU === {json.dumps(literal)})"
+
+    def _op_TestUndefined(self, instr: Instruction) -> str:
+        return "ACCU = (ACCU === undefined)"
+
+    def _op_TestInstanceOf(self, instr: Instruction) -> str:
+        if not instr.args:
+            return "ACCU = (? instanceof ACCU)"
+        value = self._reg_name(instr.args[0])
+        return f"ACCU = ({value} instanceof ACCU)"
 
     def _op_SetPendingMessage(self, instr: Instruction) -> str:
         return "// SetPendingMessage"
@@ -669,8 +884,71 @@ class InstructionTranslator:
         target = self._const(idx) if idx is not None else instr.args[0]
         return f"ensureDefined({target})"
 
+    def _op_ToBoolean(self, instr: Instruction) -> str:
+        return "ACCU = truthy(ACCU)"
+
+    def _op_ToBooleanLogicalNot(self, instr: Instruction) -> str:
+        return "ACCU = !truthy(ACCU)"
+
+    def _op_LogicalNot(self, instr: Instruction) -> str:
+        return "ACCU = !truthy(ACCU)"
+
+    def _op_ToNumeric(self, instr: Instruction) -> str:
+        return "ACCU = Number(ACCU)"
+
+    def _op_ToObject(self, instr: Instruction) -> str:
+        source = self._reg_name(instr.args[0]) if instr.args else "ACCU"
+        return f"ACCU = Object({source})"
+
     def _op_ToString(self, instr: Instruction) -> str:
         return "ACCU = String(ACCU)"
+
+    def _op_DeletePropertySloppy(self, instr: Instruction) -> str:
+        key = self._reg_name(instr.args[0]) if instr.args else "ACCU"
+        return f"ACCU = delete ACCU[{key}]"
+
+    def _op_ForInEnumerate(self, instr: Instruction) -> str:
+        source = self._reg_name(instr.args[0]) if instr.args else "ACCU"
+        return f"ACCU = ForInEnumerate({source})"
+
+    def _op_ForInPrepare(self, instr: Instruction) -> str:
+        if not instr.args:
+            return "ForInPrepare(?)"
+        regs = self._expand_range(instr.args[0])
+        slot = instr.args[1] if len(instr.args) > 1 else "[?]"
+        return f"{', '.join(regs)} = ForInPrepare(ACCU, {slot})"
+
+    def _op_ForInNext(self, instr: Instruction) -> str:
+        if len(instr.args) < 3:
+            return "ACCU = ForInNext(?)"
+        receiver = self._reg_name(instr.args[0])
+        index = self._reg_name(instr.args[1])
+        cache = ", ".join(self._expand_range(instr.args[2]))
+        slot = instr.args[3] if len(instr.args) > 3 else "[?]"
+        return f"ACCU = ForInNext({receiver}, {index}, {cache}, {slot})"
+
+    def _op_GetEnumeratedKeyedProperty(self, instr: Instruction) -> str:
+        if len(instr.args) < 3:
+            return "ACCU = get_enumerated_keyed_property(?)"
+        receiver = self._reg_name(instr.args[0])
+        index = self._reg_name(instr.args[1])
+        cache = self._reg_name(instr.args[2])
+        return f"ACCU = GetEnumeratedKeyedProperty({receiver}, {index}, {cache})"
+
+    def _op_ForInStep(self, instr: Instruction) -> str:
+        index = self._reg_name(instr.args[0]) if instr.args else "index"
+        return f"{index} = ForInStep({index})"
+
+    def _op_JumpIfForInDone(self, instr: Instruction) -> str:
+        index = self._reg_name(instr.args[1]) if len(instr.args) > 1 else "index"
+        cache = self._reg_name(instr.args[2]) if len(instr.args) > 2 else "cache"
+        target = self._find_target(instr)
+        if target is None:
+            return f"if (ForInDone({index}, {cache})) goto ?"
+        return f"if (ForInDone({index}, {cache})) goto offset_{target}"
+
+    def _op_JumpIfForInDoneConstant(self, instr: Instruction) -> str:
+        return self._op_JumpIfForInDone(instr)
 
     def _regexp_flags(self, value: Optional[int]) -> str:
         if value is None:

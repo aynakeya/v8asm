@@ -12,7 +12,7 @@ if str(DECOMPILER) not in sys.path:
 
 from context import ConstantPoolEntry, DecompilerContext
 from instruction import Instruction
-from objects.bytecode import V8BytecodeArray
+from objects.bytecode import CodeLine, V8BytecodeArray
 from translator import InstructionTranslator
 
 
@@ -41,6 +41,24 @@ class TranslatorOpcodeTests(unittest.TestCase):
             "r2.value = ACCU",
         )
 
+    def test_operand_scale_suffix_reuses_base_opcode_translation(self) -> None:
+        wide = Instruction(0, "LdaSmi.Wide", ["[248]"], "raw")
+        extra_wide = Instruction(0, "DivSmi.ExtraWide", ["[86400000]", "[10]"], "raw")
+        parsed = Instruction.from_codeline(
+            CodeLine.from_text(
+                "0x1 @ 0 : 00 0d f8 00       LdaSmi.Wide [248]"
+            )
+        )
+
+        self.assertEqual(wide.mnemonic, "LdaSmi")
+        self.assertEqual(extra_wide.mnemonic, "DivSmi")
+        self.assertEqual(parsed.mnemonic, "LdaSmi")
+        self.assertEqual(self.translator.translate(wide), "ACCU = 248")
+        self.assertEqual(
+            self.translator.translate(extra_wide),
+            "ACCU = (ACCU / 86400000)",
+        )
+
     def test_define_keyed_own_property(self) -> None:
         self.assertEqual(
             self.translate("DefineKeyedOwnProperty", ["<this>", "r0", "#0", "[0]"]),
@@ -53,8 +71,43 @@ class TranslatorOpcodeTests(unittest.TestCase):
             "this[r3] = ACCU",
         )
 
+    def test_atom_high_frequency_opcodes_have_translations(self) -> None:
+        cases = {
+            ("CreateEmptyObjectLiteral", ()): "ACCU = {}",
+            ("CreateEmptyArrayLiteral", ("[171]",)): "ACCU = []",
+            ("TestEqual", ("r7", "[103]")): "ACCU = (r7 == ACCU)",
+            ("ToBooleanLogicalNot", ()): "ACCU = !truthy(ACCU)",
+            ("LdaContextSlot", ("r0", "[16]", "[0]")): "ACCU = context_slot(r0, 16, 0)",
+            ("StaContextSlot", ("r0", "[16]", "[0]")): "context_slot(r0, 16, 0) = ACCU",
+            ("CallProperty", ("r7", "r8-r10", "[212]")): "ACCU = r7.call(r8, r9, r10)",
+            ("TestTypeOf", ("#1",)): 'ACCU = (typeof ACCU === "string")',
+            ("JumpIfForInDone", ("[61]", "r6", "r5")): "if (ForInDone(r6, r5)) goto ?",
+            ("BitwiseAndSmi.Wide", ("[128]", "[10]")): "ACCU = (ACCU & 128)",
+            ("ShiftRight", ("a0", "[13]")): "ACCU = (arg0 >> ACCU)",
+            ("TestUndefined", ()): "ACCU = (ACCU === undefined)",
+            ("CreateMappedArguments", ()): "ACCU = arguments",
+            ("ForInNext", ("r2", "r6", "r3-r4", "[2]")): "ACCU = ForInNext(r2, r6, r3, r4, [2])",
+            (
+                "GetEnumeratedKeyedProperty",
+                ("a0", "r6", "r3", "[12]"),
+            ): "ACCU = GetEnumeratedKeyedProperty(arg0, r6, r3)",
+            ("ForInStep", ("r6",)): "r6 = ForInStep(r6)",
+            ("JumpIfFalseConstant", ("[34]",)): "if (!ACCU) goto ?",
+            ("JumpIfUndefinedConstant", ("[20]",)): "if (ACCU === undefined) goto ?",
+            ("JumpIfNull", ("[72]",)): "if (ACCU === null) goto ?",
+            ("JumpIfForInDoneConstant", ("[33]", "r14", "r13")): "if (ForInDone(r14, r13)) goto ?",
+        }
+        for (mnemonic, args), expected in cases.items():
+            with self.subTest(mnemonic=mnemonic):
+                self.assertEqual(self.translate(mnemonic, list(args)), expected)
+
     def test_jump_if_undefined_branch_condition(self) -> None:
-        instr = Instruction(0, "JumpIfUndefined", ["[10]"], "0x1 @ 0 : a6 0a JumpIfUndefined [10] (0x1 @ 10)")
+        instr = Instruction(
+            0,
+            "JumpIfUndefined",
+            ["[10]"],
+            "0x1 @ 0 : a6 0a JumpIfUndefined [10] (0x1 @ 10)",
+        )
 
         self.assertEqual(
             self.translator.branch_condition(instr),
