@@ -361,6 +361,44 @@ Pointer-compatible cross-major rows were probed and returned ordinary `fail:1`;
 a crash-signature scan for fatal errors, CHECK failures, assertions, SIGSEGV,
 SIGTRAP, and abort messages returned no matches.
 
+## Bytenode undefined fallbacks
+
+The remaining bytenode `undefined_fallbacks` are now tracked with cached-data
+header evidence in `tests/decomp_rounds/summary.md`. The 2026-06-15 Node 24
+round shows:
+
+- every self-generated `v8asm` row has `header_mismatch=ok` and
+  `ro_snapshot=ok`;
+- every bytenode row has `header_mismatch=magic,flags_hash,ro_snapshot` and
+  `ro_snapshot=mismatch`;
+- cases with missing object/property names, such as `05_object_calls`,
+  `07_try_catch`, `09_all_features`, `11_object_mutation`,
+  `13_destructuring_spread`, `14_optional_chaining`, `16_regex_template`, and
+  `20_rest_spread_calls`, are all inside that bytenode RO snapshot mismatch
+  set.
+
+That means the current gaps are not caused by Python translator coverage: the
+level-4 summary still has `raw_goto=0`, `unknown=0`, and `accu_lines=0`. The
+missing names are already absent in the `v8asm` object print, where constants
+fall back to markers such as `<undefined: segmentfault, might outside scope>`.
+
+The local Node 24 check was rerun with the correct nvm activation:
+
+```text
+/home/aynakeya/.nvm/versions/node/v24.7.0/bin/node
+v24.7.0
+13.6.233.10-node.26
+node_use_node_snapshot=true
+v8_enable_pointer_compression=0
+```
+
+Searching the Node 24 nvm installation found no external `snapshot_blob.bin` or
+`v8_context_snapshot.bin`; only `include/node/v8-snapshot.h` is present. So for
+Node/bytenode, unlike the Electron sample, there is no local external snapshot
+file that can simply be passed to `v8asm --snapshot_blob`. The next real
+recovery path is a Node-aligned V8/v8asm build or extracting/reconstructing the
+Node startup snapshot/RO heap, not another Python prettification pass.
+
 ## Remaining gap
 
 This is still forced recovery. The output is useful, but not equivalent to

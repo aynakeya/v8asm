@@ -59,6 +59,10 @@ codex resume 019c42ba-60e2-7cb0-905b-0edd833425d3
 - 版本元数据：summary 顶部会记录 `v8asm`、Node、Node V8、bytenode 版本。
   每个 case 也会输出 `*.checkversion.txt`，不要把不匹配的 bytenode 行当成
   对应 V8 版本验证。
+- summary 表里的 `header_mismatch`/`ro_snapshot` 来自每个 case 的
+  `*.checkversion.txt` 或 `*.disasm.err`。如果 bytenode 行还有
+  `undefined_fallbacks` 且 `ro_snapshot=mismatch`，优先查 v8asm/Node
+  embedder snapshot/RO heap 对象恢复，不要继续在 Python 层美化占位符。
 
 流水线执行：
 
@@ -99,6 +103,11 @@ tests/decomp_rounds/run_version_matrix.sh
 - bytenode 行默认是 Node `24.7.0` / V8 `13.6.233.10-node.26` 产物。即使数字版本接近，仍要看
   `checkversion` 里的 `magic`、`flags_hash`、read-only snapshot checksum；不匹配时只能视为
   `--force-incompatible` 研究覆盖。
+- Node `24.7.0` 的 nvm 二进制使用 `node_use_node_snapshot=true`，安装目录没有
+  可直接传给 `v8asm --snapshot_blob` 的外部 `snapshot_blob.bin` 或
+  `v8_context_snapshot.bin`。当前 bytenode 剩余的对象名缺失对应
+  `read_only_snapshot_checksum` mismatch，需要 Node-aligned v8asm/Node snapshot
+  恢复方向继续查。
 - Node `22.17.0` 的 bytenode 对应 V8 `12.4.254.21-node.26`，并且是
   `v8_enable_pointer_compression=0`。普通 pointer-compression 版 V8 12.4
   不是这个 bytenode 的对应版本；要用

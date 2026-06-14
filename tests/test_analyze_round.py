@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+ROUND_DIR = ROOT / "tests" / "decomp_rounds"
+if str(ROUND_DIR) not in sys.path:
+    sys.path.insert(0, str(ROUND_DIR))
+
+from analyze_round import parse_header_diagnostics
+
+
+class AnalyzeRoundTests(unittest.TestCase):
+    def test_parse_matching_cached_data_header(self) -> None:
+        diagnostics = parse_header_diagnostics(
+            """
+Cached data header:
+  magic: 0xc0de0689 (expected 0xc0de0689)
+  version_hash: 0x2b2c7714 (expected 0x2b2c7714)
+  flags_hash: 0xdc93751f (expected 0xdc93751f)
+  read_only_snapshot_checksum: 0x436e38a3 (expected 0x436e38a3)
+  payload_length: 624 (max 624)
+"""
+        )
+
+        self.assertEqual(diagnostics["header_mismatch"], "ok")
+        self.assertEqual(diagnostics["ro_snapshot"], "ok")
+
+    def test_parse_node_embedder_snapshot_mismatch(self) -> None:
+        diagnostics = parse_header_diagnostics(
+            """
+Cached data header:
+  magic: 0xc0de0688 (expected 0xc0de0689) mismatch
+  version_hash: 0x2b2c7714 (expected 0x2b2c7714)
+  flags_hash: 0x1c7c619b (expected 0xdc93751f) mismatch
+  read_only_snapshot_checksum: 0xd31c4342 (expected 0x436e38a3) mismatch
+  payload_length: 856 (max 856)
+"""
+        )
+
+        self.assertEqual(
+            diagnostics["header_mismatch"],
+            "magic,flags_hash,ro_snapshot",
+        )
+        self.assertEqual(diagnostics["ro_snapshot"], "mismatch")
+
+    def test_missing_cached_data_header_is_not_applicable(self) -> None:
+        diagnostics = parse_header_diagnostics("disasm failed before header parse")
+
+        self.assertEqual(diagnostics["header_mismatch"], "n/a")
+        self.assertEqual(diagnostics["ro_snapshot"], "n/a")
+
+
+if __name__ == "__main__":
+    unittest.main()
