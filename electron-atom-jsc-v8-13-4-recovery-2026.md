@@ -74,7 +74,7 @@ Cached data header:
 Found matching version: 13.4.114.21
 ```
 
-Header check with `v8context/v8_context_snapshot.bin` and the Electron-suffix build:
+Header check with `v8context/v8_context_snapshot.bin` and the plain 13.4 build:
 
 ```text
 v8asm: using snapshot external reference table size 1671 (current 1672), inferred startup sentinel 1592 (current 1593)
@@ -244,6 +244,14 @@ Atom Electron forced load:
   /tmp/atom.13.4.electron.direct.dec.js       36038 lines, 1187504 bytes
 ```
 
+2026-06-15 recheck: the externally supplied `v8_context_snapshot.bin` path is
+verified with the plain `out/v8asm.13.4.x64.release/v8asm` build. The cached
+Electron-suffix build still passes self-cache checks, but mixing it with this
+external context snapshot aborts during V8 startup with
+`Check failed: address == encoded_address`; keep that binary for self-cache
+coverage, not for the explicit `--snapshot_blob v8_context_snapshot.bin`
+recovery path.
+
 The direct forced-load command still reports the expected Electron/vanilla
 header differences, but it reaches the deserializer and prints bytecode:
 
@@ -309,6 +317,12 @@ patch additionally probes several startup-snapshot mismatch points, but the
 13.6-vs-13.4 Electron test still fails in startup root deserialization. Matching
 baseline remains the only verified path for `atom.compiled.dist.jsc`.
 
+The 13.6 patch now also annotates unresolved read-only object-print failures
+with the current read-only heap object boundary. In the Node24/bytenode round,
+several unresolved offsets land inside the current RO object at `delta=0x10`
+instead of on an object boundary. That is a stronger signal for
+embedder-snapshot/layout mismatch than a simple missing printer guard.
+
 The matrix runner now passes a sibling `snapshot_blob.bin` automatically for
 cached `v8asm` binaries and can be pointed at an embedder snapshot with:
 
@@ -364,11 +378,14 @@ Node 22 are covered by cached V8 builds:
 
 The Electron-flavored
 `tests/decomp_rounds/bin_cache/v8asm.13.4.electron.x64.release/v8asm` build
-also passes self-cache asm/strict-disasm/decompile in the matrix. The plain
-`out/v8asm.13.4.x64.release/v8asm` build was restored on 2026-06-15 and passes
-self-cache asm, strict disasm, and level-4 decompile. Mismatch rows skipped
-forced deserialization when pointer compression differed. The remaining missing
-optional plain `out/*` binaries in the latest matrix are 11.9, 12.4, and 12.9.
+also passes self-cache asm/strict-disasm/decompile in the matrix, but it is not
+the verified binary for the external `v8_context_snapshot.bin` recovery path.
+The plain `out/v8asm.13.4.x64.release/v8asm` build was restored on 2026-06-15
+and passes self-cache asm, strict disasm, level-4 decompile, and the explicit
+`--snapshot_blob v8context/v8_context_snapshot.bin` Atom forced disasm.
+Mismatch rows skipped forced deserialization when pointer compression differed.
+The remaining missing optional plain `out/*` binaries in the latest matrix are
+11.9, 12.4, and 12.9.
 
 The 2026-06-15 strict gate
 (`/tmp/v8asm-matrix-full-strict-after-snapshot-force/summary.md`) reported zero
@@ -405,7 +422,10 @@ stable across a fresh Node 24 round. The 13.6 `v8asm` build now also annotates
 both top-level object-print crashes and guarded `HeapObjectShortPrint`
 placeholders with `object_chunk_offset`. That offset is the untagged heap-object
 address within the current memory chunk, so it is a better RO-heap locator than
-the full process address.
+the full process address. For top-level print/discovery crashes, it also prints
+`current_ro_object=[start,end) delta=... hit=...`; `hit=inside` shows that the
+Node object pointer resolves into the middle of a current V8 RO object, which
+keeps the investigation focused on snapshot/build alignment.
 
 | suffix | object chunk offset | cases | inferred source role |
 |---|---:|---|---|

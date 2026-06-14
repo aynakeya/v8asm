@@ -28,12 +28,17 @@ UNRESOLVED_OBJECT_RE = re.compile(
 UNRESOLVED_OBJECT_CHUNK_OFFSET_RE = re.compile(
     r"object_chunk_offset=(0x[0-9a-fA-F]+)"
 )
+CURRENT_RO_OBJECT_RE = re.compile(
+    r"current_ro_object=\[(0x[0-9a-fA-F]+),(0x[0-9a-fA-F]+)\) "
+    r"delta=(0x[0-9a-fA-F]+) hit=([a-z]+)"
+)
 
 
 class UnresolvedDiagnostics(TypedDict):
     unresolved_objects: int
     unresolved_suffixes: list[str]
     object_chunk_offsets: list[str]
+    current_ro_objects: list[str]
 
 
 def classify_decompile_status(text: str) -> str:
@@ -93,6 +98,17 @@ def unresolved_object_chunk_offsets(text: str) -> set[str]:
     return offsets
 
 
+def unresolved_current_ro_objects(text: str) -> set[str]:
+    objects: set[str] = set()
+    for match in CURRENT_RO_OBJECT_RE.finditer(text):
+        start = f"0x{int(match.group(1), 16):x}"
+        end = f"0x{int(match.group(2), 16):x}"
+        delta = f"0x{int(match.group(3), 16):x}"
+        hit = match.group(4)
+        objects.add(f"{hit}+{delta}@[{start},{end})")
+    return objects
+
+
 def parse_header_diagnostics(text: str) -> dict[str, str]:
     mismatches: list[str] = []
     ro_snapshot = "n/a"
@@ -139,6 +155,7 @@ def read_mode_unresolved_diagnostics(
             "unresolved_objects": 0,
             "unresolved_suffixes": [],
             "object_chunk_offsets": [],
+            "current_ro_objects": [],
         }
     text = path.read_text(encoding="utf-8", errors="ignore")
     suffixes = sorted(unresolved_object_suffixes(text))
@@ -146,6 +163,7 @@ def read_mode_unresolved_diagnostics(
         "unresolved_objects": len(unresolved_object_addresses(text)),
         "unresolved_suffixes": suffixes,
         "object_chunk_offsets": sorted(unresolved_object_chunk_offsets(text)),
+        "current_ro_objects": sorted(unresolved_current_ro_objects(text)),
     }
 
 
@@ -172,7 +190,7 @@ def main() -> int:
     print("|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
 
     failure_count = 0
-    unresolved_rows: list[tuple[str, str, list[str], list[str]]] = []
+    unresolved_rows: list[tuple[str, str, list[str], list[str], list[str]]] = []
     for case_dir in case_dirs:
         case = case_dir.name
         for mode in ("v8asm", "bytenode"):
@@ -196,8 +214,11 @@ def main() -> int:
             s = score_text(text)
             suffixes = list(unresolved["unresolved_suffixes"])
             object_chunk_offsets = list(unresolved["object_chunk_offsets"])
+            current_ro_objects = list(unresolved["current_ro_objects"])
             if suffixes:
-                unresolved_rows.append((case, mode, suffixes, object_chunk_offsets))
+                unresolved_rows.append(
+                    (case, mode, suffixes, object_chunk_offsets, current_ro_objects)
+                )
             print(
                 f"| {case} | {mode} | {status} | {header['header_mismatch']} | "
                 f"{header['ro_snapshot']} | {s['accu_lines']} | {s['reg_refs']} | "
@@ -210,19 +231,36 @@ def main() -> int:
         print("")
         print("## Unresolved Read-Only Object Suffixes")
         print("")
-        print("| case | mode | suffixes | object_chunk_offsets |")
-        print("|---|---:|---|---|")
-        for case, mode, suffixes, object_chunk_offsets in unresolved_rows:
+        print("| case | mode | suffixes | object_chunk_offsets | current_ro_objects |")
+        print("|---|---:|---|---|---|")
+        for (
+            case,
+            mode,
+            suffixes,
+            object_chunk_offsets,
+            current_ro_objects,
+        ) in unresolved_rows:
             offsets = ",".join(object_chunk_offsets) if object_chunk_offsets else "n/a"
-            print(f"| {case} | {mode} | `{','.join(suffixes)}` | `{offsets}` |")
+            current = ",".join(current_ro_objects) if current_ro_objects else "n/a"
+            print(
+                f"| {case} | {mode} | `{','.join(suffixes)}` | `{offsets}` | "
+                f"`{current}` |"
+            )
 
     print("")
     print("## Quick Inspection Targets")
     print("- Prefer cases with highest `accu_lines` and `reg_refs` for next cleanups.")
     print("- Any non-zero `raw_goto` indicates structurer fallback/regression.")
     print("- Non-zero `unknown` usually means translator opcode coverage is missing.")
-    print("- Non-zero `undefined_fallbacks` with `ro_snapshot=mismatch` points at V8/embedder snapshot object recovery, not Python translation.")
-    print("- Non-zero `unresolved_objects` counts unique object-print failures in the disasm, before Python decompilation; `object_chunk_offsets` are printed by newer v8asm builds.")
+    print(
+        "- Non-zero `undefined_fallbacks` with `ro_snapshot=mismatch` points at "
+        "V8/embedder snapshot object recovery, not Python translation."
+    )
+    print(
+        "- Non-zero `unresolved_objects` counts unique object-print failures in "
+        "the disasm, before Python decompilation; `object_chunk_offsets` and "
+        "`current_ro_objects` are printed by newer v8asm builds."
+    )
     if failure_count:
         print("")
         print("## Failures")

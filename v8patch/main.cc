@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <fstream>
 #include <string.h>
+#include <vector>
 
 #include "include/libplatform/libplatform.h"
 #include "include/v8-context.h"
@@ -11,8 +12,10 @@
 #include "include/v8-primitive.h"
 #include "include/v8-script.h"
 
+#include "src/heap/read-only-spaces.h"
 #include "src/objects/managed-inl.h"
 #include "src/objects/literal-objects-inl.h"
+#include "src/objects/objects-inl.h"
 #include "src/flags/flags.h"
 #include "src/snapshot/code-serializer.h"
 #include "src/snapshot/snapshot.h"
@@ -22,7 +25,6 @@
 #include <csignal>
 #include <csetjmp>
 #include <set>
-#include <vector>
 #include <unistd.h>
 
 
@@ -68,7 +70,7 @@ private:
     }
 
     void Traverse(v8::internal::Tagged<v8::internal::HeapObject> obj) {
-        // if compiled by node, sometimes the object will point to an address outside current bytecode scope, 
+        // if compiled by node, sometimes the object will point to an address outside current bytecode scope,
         // which is normally located in snapshot_blob.bin (?).
         // if this happen, we are not able to read the data of the object, neither the type of the object.
         // so so we need to check if the object is readable here, if not, we need to stop here so that program doesnt crash.
@@ -103,7 +105,7 @@ private:
             // v8::internal::OFStream os(stdout);
             // os << instance_type;
           }
-          // in other case, the container object is readable, but object inside, for example objects inside 
+          // in other case, the container object is readable, but object inside, for example objects inside
           // TrustedFixArray is not readable. in this case, we need handle it inside object-printer.cc
         }
 
@@ -142,6 +144,87 @@ private:
         siglongjmp(V8ObjectExplorer::jump_buffer_, 1);
     }
 
+    void PrintReadOnlyAddressDiagnostics(v8::internal::OFStream& os,
+                                         v8::internal::Address tagged_addr) {
+        using v8::internal::Address;
+        using v8::internal::kHeapObjectTag;
+        if (isolate_ == nullptr || tagged_addr == v8::internal::kNullAddress) {
+            return;
+        }
+        Address object_addr = tagged_addr - kHeapObjectTag;
+        v8::internal::ReadOnlySpace* read_only_space =
+            isolate_->heap()->read_only_space();
+        const auto& pages = read_only_space->pages();
+        char buf[320];
+        for (size_t i = 0; i < pages.size(); ++i) {
+            const v8::internal::ReadOnlyPageMetadata* page = pages[i];
+            if (!page->Contains(object_addr)) continue;
+            size_t object_chunk_offset =
+                static_cast<size_t>(object_addr - page->ChunkAddress());
+            size_t tagged_chunk_offset =
+                static_cast<size_t>(tagged_addr - page->ChunkAddress());
+            size_t area_offset =
+                static_cast<size_t>(object_addr - page->area_start());
+            snprintf(buf, sizeof(buf),
+                     " (ro_page=%zu object_chunk_offset=0x%zx "
+                     "tagged_chunk_offset=0x%zx area_offset=0x%zx "
+                     "page=[0x%llx,0x%llx))",
+                     i, object_chunk_offset, tagged_chunk_offset, area_offset,
+                     static_cast<unsigned long long>(page->area_start()),
+                     static_cast<unsigned long long>(page->area_end()));
+            os << buf;
+            PrintCurrentReadOnlyObjectBoundary(os, read_only_space, page,
+                                               object_addr);
+            return;
+        }
+        snprintf(buf, sizeof(buf),
+                 " (not in current read-only space; tagged_low16=0x%04llx "
+                 "object_low16=0x%04llx)",
+                 static_cast<unsigned long long>(tagged_addr & 0xffff),
+                 static_cast<unsigned long long>(object_addr & 0xffff));
+        os << buf;
+    }
+
+    void PrintCurrentReadOnlyObjectBoundary(
+        v8::internal::OFStream& os,
+        const v8::internal::ReadOnlySpace* read_only_space,
+        const v8::internal::ReadOnlyPageMetadata* page,
+        v8::internal::Address object_addr) {
+        using v8::internal::Address;
+        Address cursor = page->area_start();
+        Address end = page->area_end();
+        while (cursor < end) {
+            if (cursor == read_only_space->top() &&
+                cursor != read_only_space->limit()) {
+                cursor = read_only_space->limit();
+                continue;
+            }
+            v8::internal::Tagged<v8::internal::HeapObject> current =
+                v8::internal::HeapObject::FromAddress(cursor);
+            int object_size = current->Size();
+            int aligned_size = ALIGN_TO_ALLOCATION_ALIGNMENT(object_size);
+            if (aligned_size <= 0) break;
+            Address next = cursor + aligned_size;
+            if (object_addr >= cursor && object_addr < next) {
+                size_t current_offset =
+                    static_cast<size_t>(cursor - page->ChunkAddress());
+                size_t current_end =
+                    static_cast<size_t>(next - page->ChunkAddress());
+                size_t delta = static_cast<size_t>(object_addr - cursor);
+                char buf[192];
+                snprintf(buf, sizeof(buf),
+                         " current_ro_object=[0x%zx,0x%zx) "
+                         "delta=0x%zx hit=%s",
+                         current_offset, current_end, delta,
+                         delta == 0 ? "start" : "inside");
+                os << buf;
+                return;
+            }
+            cursor = next;
+        }
+        os << " current_ro_object=n/a";
+    }
+
     void PrintDiscoveredObjects() {
         v8::internal::OFStream os(stdout);
 
@@ -162,7 +245,10 @@ private:
               currently_printing_obj_addr_ = 0;
             } else {
               fflush(stdout);
-              os << std::endl << "!" <<v8::internal::AsHex::Address(currently_printing_obj_addr_) << ": segmentfault, disassemble stop" << std::endl;
+              os << std::endl << "!" <<v8::internal::AsHex::Address(currently_printing_obj_addr_) << ": segmentfault, disassemble stop";
+              PrintReadOnlyAddressDiagnostics(
+                  os, static_cast<v8::internal::Address>(currently_printing_obj_addr_));
+              os << std::endl;
               currently_printing_obj_addr_ = 0;
             }
             fflush(stdout);
@@ -170,7 +256,9 @@ private:
         if (best_effort_) {
             for (const auto& addr : skipped_objects_) {
                 os << std::endl << "!" << v8::internal::AsHex::Address(addr)
-                   << ": segmentfault while discovering object, skipped" << std::endl;
+                   << ": segmentfault while discovering object, skipped";
+                PrintReadOnlyAddressDiagnostics(os, addr);
+                os << std::endl;
             }
             signal(SIGSEGV, old_handler);
         }
@@ -647,32 +735,43 @@ void print_compiled_args() {
 struct StartupOptions {
   const char* snapshot_blob = nullptr;
   int command_index = 1;
+  bool valid = true;
 };
 
-bool parse_startup_options(int argc, char* argv[], StartupOptions* options) {
-  options->command_index = 1;
-  while (options->command_index < argc) {
-    const char* arg = argv[options->command_index];
+void print_usage(const char* program) {
+  fprintf(stderr,
+          "Usage: %s [--snapshot_blob file] "
+          "<asm|disasm|checkversion|version|build-args> ...\n",
+          program);
+}
+
+StartupOptions parse_startup_options(int argc, char* argv[]) {
+  StartupOptions options;
+  while (options.command_index < argc) {
+    const char* arg = argv[options.command_index];
     if (strcmp(arg, "--snapshot_blob") == 0) {
-      if (options->command_index + 1 >= argc) {
+      if (options.command_index + 1 >= argc) {
         fprintf(stderr, "--snapshot_blob requires a file path\n");
-        return false;
+        options.valid = false;
+        return options;
       }
-      options->snapshot_blob = argv[options->command_index + 1];
-      options->command_index += 2;
+      options.snapshot_blob = argv[options.command_index + 1];
+      options.command_index += 2;
       continue;
     }
-
     const char* snapshot_prefix = "--snapshot_blob=";
     size_t snapshot_prefix_len = strlen(snapshot_prefix);
     if (strncmp(arg, snapshot_prefix, snapshot_prefix_len) == 0) {
-      options->snapshot_blob = arg + snapshot_prefix_len;
-      options->command_index += 1;
+      options.snapshot_blob = arg + snapshot_prefix_len;
+      options.command_index += 1;
       continue;
     }
     break;
   }
-  return true;
+  if (options.command_index >= argc) {
+    options.valid = false;
+  }
+  return options;
 }
 
 bool command_requests_force_incompatible(int argc, char* argv[]) {
@@ -757,19 +856,14 @@ bool validate_snapshot_blob_version(const char* snapshot_blob,
 }
 
 int main(int argc, char* argv[]) {
-  StartupOptions startup_options;
-  if (!parse_startup_options(argc, argv, &startup_options)) {
-    fprintf(stderr,
-            "Usage: %s [--snapshot_blob file] "
-            "<asm|disasm|checkversion|version|build-args> ...\n",
-            argv[0]);
+  if (argc < 2) {
+    print_usage(argv[0]);
     return 1;
   }
-  if (startup_options.command_index >= argc) {
-    fprintf(stderr,
-            "Usage: %s [--snapshot_blob file] "
-            "<asm|disasm|checkversion|version|build-args> ...\n",
-            argv[0]);
+
+  StartupOptions startup_options = parse_startup_options(argc, argv);
+  if (!startup_options.valid) {
+    print_usage(argv[0]);
     return 1;
   }
 
@@ -780,15 +874,13 @@ int main(int argc, char* argv[]) {
     command_argv.push_back(argv[i]);
   }
   int command_argc = static_cast<int>(command_argv.size());
-  char** command_args = command_argv.data();
-
-  const char* cmd = command_args[1];
+  const char* cmd = command_argv[1];
 
   v8::V8::SetFlagsFromString("--no-lazy --no-flush-bytecode");
   v8::V8::InitializeICUDefaultLocation(argv[0]);
   if (startup_options.snapshot_blob != nullptr) {
     bool force_incompatible =
-        command_requests_force_incompatible(command_argc, command_args);
+        command_requests_force_incompatible(command_argc, command_argv.data());
     if (!validate_snapshot_blob_version(startup_options.snapshot_blob,
                                         force_incompatible)) {
       return 1;
@@ -826,11 +918,11 @@ int main(int argc, char* argv[]) {
       ret = 1;
       goto finish;
     }
-    ret = do_checkversion(command_args[2], isolate);
+    ret = do_checkversion(command_argv[2], isolate);
     goto finish;
   }
   if (strcmp(cmd, "asm") == 0) {
-    ret = do_asm(command_argc, command_args, isolate);
+    ret = do_asm(command_argc, command_argv.data(), isolate);
     goto finish;
   }
   if (strcmp(cmd, "disasm") == 0) {
@@ -841,24 +933,21 @@ int main(int argc, char* argv[]) {
     }
     bool force_incompatible = false;
     for (int i = 3; i < command_argc; ++i) {
-      if (strcmp(command_args[i], "--force-incompatible") == 0 ||
-          strcmp(command_args[i], "--best-effort") == 0) {
+      if (strcmp(command_argv[i], "--force-incompatible") == 0 ||
+          strcmp(command_argv[i], "--best-effort") == 0) {
         force_incompatible = true;
       } else {
-        fprintf(stderr, "Unknown disasm option: %s\n", command_args[i]);
+        fprintf(stderr, "Unknown disasm option: %s\n", command_argv[i]);
         fprintf(stderr, "Usage: %s disasm file.jsc [--force-incompatible]\n", argv[0]);
         ret = 1;
         goto finish;
       }
     }
-    ret = do_disasm(command_args[2], isolate, force_incompatible);
+    ret = do_disasm(command_argv[2], isolate, force_incompatible);
     goto finish;
   }
   fprintf(stderr, "Unknown command: %s\n", cmd);
-  fprintf(stderr,
-          "Usage: %s [--snapshot_blob file] "
-          "<asm|disasm|checkversion|version|build-args> ...\n",
-          argv[0]);
+  print_usage(argv[0]);
   ret = 1;
 finish:
   isolate->Dispose();

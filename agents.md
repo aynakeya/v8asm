@@ -64,8 +64,11 @@ codex resume 019c42ba-60e2-7cb0-905b-0edd833425d3
   `undefined_fallbacks`/`unresolved_objects` 且 `ro_snapshot=mismatch`，优先查
   v8asm/Node embedder snapshot/RO heap 对象恢复，不要继续在 Python 层美化占位符。
   `Unresolved Read-Only Object Suffixes` 表里记录的是 disasm 阶段唯一失败对象
-  的低地址 suffix，以及新版 v8asm 输出的 `object_chunk_offsets`；完整地址会随
-  进程基址变动，chunk offset 更适合跨 run 对比和后续 RO heap 定位。
+  的低地址 suffix，以及新版 v8asm 输出的 `object_chunk_offsets` 和
+  `current_ro_objects`；完整地址会随进程基址变动，chunk offset 更适合跨 run
+  对比和后续 RO heap 定位。`current_ro_objects` 如果显示 `inside+...`，说明
+  失败地址落在当前 V8 RO 对象内部，更像 snapshot/布局错位，而不是单纯缺一个
+  printer guard。
 
 流水线执行：
 
@@ -123,7 +126,8 @@ tests/decomp_rounds/run_version_matrix.sh
   不是这个 bytenode 的对应版本；要用
   `out/v8asm.12.4.node22.x64.release/v8asm`。
 - `v8asm disasm` 默认拒绝不兼容 cached data；只有显式 `--force-incompatible` 时才启用 best-effort
-  反汇编和对象打印保护。不要把缺失 print 当成 Python decompiler 问题。
+  反汇编和对象打印保护。不要把缺失 print 当成 Python decompiler 问题；先看
+  `checkversion` 的 snapshot checksum 和 summary 的 `current_ro_objects`。
 - `level 4` 对复杂异常/async handler 路径仍有低层状态机残留（例如 `HOLE`、pending message、reject
   handler 片段）。
 - 当前 round 的 `unknown` 和 `raw_goto` 应保持为 0；如果回升，优先看 translator opcode 覆盖或

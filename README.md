@@ -52,10 +52,13 @@ both outputs, run the level-4 Python decompiler, and write
 best-effort object-print placeholders (`undefined_fallbacks`). It also counts
 unique unresolved object-print failures from the disassembly
 (`unresolved_objects`) and lists their low address suffixes plus
-`object_chunk_offsets` when the selected `v8asm` prints them. These offsets are
-more useful than full heap addresses because the address base moves between
-runs. Cached-data header mismatches, including `ro_snapshot`, are recorded so
-missing bytenode object/property names can be tied back to V8/Node snapshot
+`object_chunk_offsets` and `current_ro_objects` when the selected `v8asm`
+prints them. These offsets are more useful than full heap addresses because the
+address base moves between runs. `current_ro_objects` shows whether a failed
+address lands at a current read-only heap object start or inside another object,
+which is useful for separating missing print guards from real snapshot layout
+mismatches. Cached-data header mismatches, including `ro_snapshot`, are recorded
+so missing bytenode object/property names can be tied back to V8/Node snapshot
 recovery instead of being mistaken for Python translator loss. The report
 records the exact `v8asm`, Node, Node V8, and bytenode versions used for that
 run.
@@ -163,7 +166,10 @@ post-processing, shared string-table insertion, external-reference-table
 sentinels, and root synchronization, but a 13.6 binary still cannot reliably
 initialize the 13.4 Electron startup snapshot because the startup root stream
 layout diverges after those checks. Use the matching V8 baseline when the goal
-is usable output.
+is usable output. In forced Node/bytenode rounds, newer 13.6 builds also print
+the current read-only heap object range for object-print failures; addresses
+that consistently land inside current RO objects point at snapshot/layout
+mismatch, not merely a missing printer guard.
 
 The matrix runner uses `--snapshot_blob` automatically when a cached v8asm
 binary has a sibling `snapshot_blob.bin`. Strict commands use a snapshot only
@@ -187,7 +193,9 @@ VERSION_MATRIX_SNAPSHOT_BLOB=v8context/v8_context_snapshot.bin \
   guards, forced cross-major cached-data warnings, the forced snapshot version
   mismatch bypass, and startup snapshot mismatch recovery probes for read-only
   heap post-processing, shared string-table insertion, external-reference-table
-  sentinels, and root synchronization.
+  sentinels, and root synchronization. It also annotates unresolved read-only
+  object-print failures with current RO heap object boundaries for layout
+  triage.
 - `v8patch/v8asm-13.4.patch`: V8 13.4 adaptation used for the Electron
   `atom.compiled.dist.jsc` recovery notes. It adds `--snapshot_blob`, a
   direct V8 `SerializedCodeData::SanityCheck*` bypass for forced incompatible

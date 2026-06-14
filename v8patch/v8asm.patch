@@ -274,10 +274,10 @@ index d3e5ec68657..5567eaec886 100644
  void HeapNumber::HeapNumberShortPrint(std::ostream& os) {
 diff --git a/src/disassembler/main.cc b/src/disassembler/main.cc
 new file mode 100644
-index 00000000000..9be068201ce
+index 00000000000..ac21f49ca08
 --- /dev/null
 +++ b/src/disassembler/main.cc
-@@ -0,0 +1,915 @@
+@@ -0,0 +1,958 @@
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <fstream>
@@ -295,6 +295,7 @@ index 00000000000..9be068201ce
 +#include "src/heap/read-only-spaces.h"
 +#include "src/objects/managed-inl.h"
 +#include "src/objects/literal-objects-inl.h"
++#include "src/objects/objects-inl.h"
 +#include "src/flags/flags.h"
 +#include "src/snapshot/code-serializer.h"
 +#include "src/snapshot/snapshot.h"
@@ -452,6 +453,8 @@ index 00000000000..9be068201ce
 +                     static_cast<unsigned long long>(page->area_start()),
 +                     static_cast<unsigned long long>(page->area_end()));
 +            os << buf;
++            PrintCurrentReadOnlyObjectBoundary(os, read_only_space, page,
++                                               object_addr);
 +            return;
 +        }
 +        snprintf(buf, sizeof(buf),
@@ -460,6 +463,46 @@ index 00000000000..9be068201ce
 +                 static_cast<unsigned long long>(tagged_addr & 0xffff),
 +                 static_cast<unsigned long long>(object_addr & 0xffff));
 +        os << buf;
++    }
++
++    void PrintCurrentReadOnlyObjectBoundary(
++        v8::internal::OFStream& os,
++        const v8::internal::ReadOnlySpace* read_only_space,
++        const v8::internal::ReadOnlyPageMetadata* page,
++        v8::internal::Address object_addr) {
++        using v8::internal::Address;
++        Address cursor = page->area_start();
++        Address end = page->area_end();
++        while (cursor < end) {
++            if (cursor == read_only_space->top() &&
++                cursor != read_only_space->limit()) {
++                cursor = read_only_space->limit();
++                continue;
++            }
++            v8::internal::Tagged<v8::internal::HeapObject> current =
++                v8::internal::HeapObject::FromAddress(cursor);
++            int object_size = current->Size();
++            int aligned_size = ALIGN_TO_ALLOCATION_ALIGNMENT(object_size);
++            if (aligned_size <= 0) break;
++            Address next = cursor + aligned_size;
++            if (object_addr >= cursor && object_addr < next) {
++                size_t current_offset =
++                    static_cast<size_t>(cursor - page->ChunkAddress());
++                size_t current_end =
++                    static_cast<size_t>(next - page->ChunkAddress());
++                size_t delta = static_cast<size_t>(object_addr - cursor);
++                char buf[192];
++                snprintf(buf, sizeof(buf),
++                         " current_ro_object=[0x%zx,0x%zx) "
++                         "delta=0x%zx hit=%s",
++                         current_offset, current_end, delta,
++                         delta == 0 ? "start" : "inside");
++                os << buf;
++                return;
++            }
++            cursor = next;
++        }
++        os << " current_ro_object=n/a";
 +    }
 +
 +    void PrintDiscoveredObjects() {

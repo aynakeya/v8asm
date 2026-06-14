@@ -89,3 +89,16 @@ disassembly and emits a low-address-suffix / `object_chunk_offset` table. Newer
 guarded `<undefined: segmentfault...>` placeholders. That keeps bytenode
 `undefined_fallbacks` tied to concrete read-only heap offsets even when the full
 heap address base changes between runs.
+
+The follow-up 13.6 build also annotates top-level object-print failures with the
+current V8 read-only heap object range:
+
+```text
+current_ro_object=[0xa6f0,0xa708) delta=0x10 hit=inside
+```
+
+In the Node24 round, several unresolved bytenode names land inside current
+13.6 RO objects at `+0x10`, not at object starts. That is useful evidence that
+the remaining missing names are caused by Node/embedder snapshot layout
+mismatch. It is not a Python prettifier problem, and blindly recovering names in
+postprocess would hide the real V8-side incompatibility.

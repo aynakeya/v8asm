@@ -13,6 +13,7 @@ if str(ROUND_DIR) not in sys.path:
 from analyze_round import (
     classify_decompile_status,
     parse_header_diagnostics,
+    unresolved_current_ro_objects,
     unresolved_object_addresses,
     unresolved_object_chunk_offsets,
     unresolved_object_suffixes,
@@ -79,13 +80,20 @@ Cached data header:
         self.assertEqual(classify_decompile_status("function ok() {}\n"), "ok")
 
     def test_extracts_unique_unresolved_object_addresses(self) -> None:
-        text = """
+        text = (
+            """
            1: 0x332de880a701 <undefined: segmentfault, might outside scope>
            2: 0x332de880a701 <undefined: segmentfault, might outside scope>
 !0x332de880a701: segmentfault, disassemble stop
-!0x332de880d479: segmentfault while discovering object, skipped (ro_page=0 object_chunk_offset=0xd478 tagged_chunk_offset=0xd479 area_offset=0xd468)
+"""
+            "!0x332de880d479: segmentfault while discovering object, skipped "
+            "(ro_page=0 object_chunk_offset=0xd478 tagged_chunk_offset=0xd479 "
+            "area_offset=0xd468) current_ro_object=[0xd468,0xd480) delta=0x10 "
+            "hit=inside\n"
+            """
            3: 0x332de880ffee <String[4]: #fine>
 """
+        )
 
         self.assertEqual(
             unresolved_object_addresses(text),
@@ -93,6 +101,10 @@ Cached data header:
         )
         self.assertEqual(unresolved_object_suffixes(text), {"a701", "d479"})
         self.assertEqual(unresolved_object_chunk_offsets(text), {"0xd478"})
+        self.assertEqual(
+            unresolved_current_ro_objects(text),
+            {"inside+0x10@[0xd468,0xd480)"},
+        )
 
 
 if __name__ == "__main__":
