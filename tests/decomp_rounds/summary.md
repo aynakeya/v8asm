@@ -63,20 +63,20 @@
 
 ## Unresolved Read-Only Object Suffixes
 
-| case | mode | suffixes |
-|---|---:|---|
-| 05_object_calls | bytenode | `de49` |
-| 07_try_catch | bytenode | `e089,ee79` |
-| 09_all_features | bytenode | `de49,e089,ee79` |
-| 11_object_mutation | bytenode | `08e1` |
-| 13_destructuring_spread | bytenode | `d321` |
-| 14_optional_chaining | bytenode | `0919` |
-| 16_regex_template | bytenode | `de49` |
-| 20_rest_spread_calls | bytenode | `a701,d479,eed1,f0e1` |
+| case | mode | suffixes | object_chunk_offsets |
+|---|---:|---|---|
+| 05_object_calls | bytenode | `de49` | `0xde48` |
+| 07_try_catch | bytenode | `e089,ee79` | `0xe088,0xee78` |
+| 09_all_features | bytenode | `de49,e089,ee79` | `0xde48,0xe088,0xee78` |
+| 11_object_mutation | bytenode | `08e1` | `0x108e0` |
+| 13_destructuring_spread | bytenode | `d321` | `0xd320` |
+| 14_optional_chaining | bytenode | `0919` | `0x10918` |
+| 16_regex_template | bytenode | `de49` | `0xde48` |
+| 20_rest_spread_calls | bytenode | `a701,d479,eed1,f0e1` | `0xa700,0xd478,0xeed0,0xf0e0` |
 
 ## Quick Inspection Targets
 - Prefer cases with highest `accu_lines` and `reg_refs` for next cleanups.
 - Any non-zero `raw_goto` indicates structurer fallback/regression.
 - Non-zero `unknown` usually means translator opcode coverage is missing.
 - Non-zero `undefined_fallbacks` with `ro_snapshot=mismatch` points at V8/embedder snapshot object recovery, not Python translation.
-- Non-zero `unresolved_objects` counts unique object-print failures in the disasm, before Python decompilation.
+- Non-zero `unresolved_objects` counts unique object-print failures in the disasm, before Python decompilation; `object_chunk_offsets` are printed by newer v8asm builds.

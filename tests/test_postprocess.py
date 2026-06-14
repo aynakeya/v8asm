@@ -1232,6 +1232,22 @@ class SimplifyLinesTests(unittest.TestCase):
             ],
         )
 
+    def test_preserves_diagnostic_placeholder_property_read_without_accu(self) -> None:
+        lines = [
+            'ACCU = r2["<undefined: segmentfault, might outside scope; object_chunk_offset=0xde48 tagged_chunk_offset=0xde49>"]',
+            "return r2.value",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(
+            simplified,
+            [
+                'r2["<undefined: segmentfault, might outside scope; object_chunk_offset=0xde48 tagged_chunk_offset=0xde49>"]',
+                "return r2.value",
+            ],
+        )
+
     def test_inlines_simple_accu_literal_into_next_assignment(self) -> None:
         lines = [
             'ACCU = ":"',

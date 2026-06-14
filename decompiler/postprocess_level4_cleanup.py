@@ -157,7 +157,8 @@ def _is_property_read_expr(expr: str) -> bool:
     expr = expr.strip()
     if not expr or "ACCU" in expr:
         return False
-    if any(token in expr for token in ("(", ")", "=", "=>")):
+    structure = re.sub(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', '""', expr)
+    if any(token in structure for token in ("(", ")", "=", "=>")):
         return False
     return bool(re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]+\])+", expr))
 

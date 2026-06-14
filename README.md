@@ -51,12 +51,14 @@ both outputs, run the level-4 Python decompiler, and write
 (`ACCU`, register refs, raw gotos), missing translator coverage (`unknown`), and
 best-effort object-print placeholders (`undefined_fallbacks`). It also counts
 unique unresolved object-print failures from the disassembly
-(`unresolved_objects`) and lists their low address suffixes, which are more
-stable across reruns than full heap addresses. Cached-data header mismatches,
-including `ro_snapshot`, are recorded so missing bytenode object/property names
-can be tied back to V8/Node snapshot recovery instead of being mistaken for
-Python translator loss. The report records the exact `v8asm`, Node, Node V8,
-and bytenode versions used for that run.
+(`unresolved_objects`) and lists their low address suffixes plus
+`object_chunk_offsets` when the selected `v8asm` prints them. These offsets are
+more useful than full heap addresses because the address base moves between
+runs. Cached-data header mismatches, including `ro_snapshot`, are recorded so
+missing bytenode object/property names can be tied back to V8/Node snapshot
+recovery instead of being mistaken for Python translator loss. The report
+records the exact `v8asm`, Node, Node V8, and bytenode versions used for that
+run.
 
 By default, bytenode mode uses Node `24.7.0` through nvm. Override the binary or
 Node version explicitly when validating another target:

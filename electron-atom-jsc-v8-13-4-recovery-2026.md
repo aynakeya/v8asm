@@ -401,19 +401,20 @@ fall back to markers such as `<undefined: segmentfault, might outside scope>`.
 
 The analyzer now separates placeholder occurrences from unique failed objects.
 Full heap addresses move between runs, but the low address suffixes stayed
-stable across a fresh Node 24 round. For example, the `toUpperCase`-shaped
-object moved from `0x25a61e4cde49` to `0x272cad04de49`, while suffix `de49`
-remained the same; the `20_rest_spread_calls` `join`-shaped object likewise kept
-suffix `a701` while the base address changed.
+stable across a fresh Node 24 round. The 13.6 `v8asm` build now also annotates
+both top-level object-print crashes and guarded `HeapObjectShortPrint`
+placeholders with `object_chunk_offset`. That offset is the untagged heap-object
+address within the current memory chunk, so it is a better RO-heap locator than
+the full process address.
 
-| suffix | cases | inferred source role |
-|---|---|---|
-| `de49` | `05_object_calls`, `09_all_features`, `16_regex_template` | likely `toUpperCase` |
-| `ee79`, `e089` | `07_try_catch`, `09_all_features` | likely `JSON` / `parse` from `JSON.parse` |
-| `08e1` | `11_object_mutation` | likely object key `count` |
-| `d321` | `13_destructuring_spread` | likely `Object.values` property `values` |
-| `0919` | `14_optional_chaining` | likely object key `profile` |
-| `a701`, `d479`, `eed1`, `f0e1` | `20_rest_spread_calls` | likely `join`, `call`, `Math`, `max` |
+| suffix | object chunk offset | cases | inferred source role |
+|---|---:|---|---|
+| `de49` | `0xde48` | `05_object_calls`, `09_all_features`, `16_regex_template` | likely `toUpperCase` |
+| `e089`, `ee79` | `0xe088`, `0xee78` | `07_try_catch`, `09_all_features` | likely `JSON` / `parse` from `JSON.parse` |
+| `08e1` | `0x108e0` | `11_object_mutation` | likely object key `count` |
+| `d321` | `0xd320` | `13_destructuring_spread` | likely `Object.values` property `values` |
+| `0919` | `0x10918` | `14_optional_chaining` | likely object key `profile` |
+| `a701`, `d479`, `eed1`, `f0e1` | `0xa700`, `0xd478`, `0xeed0`, `0xf0e0` | `20_rest_spread_calls` | likely `join`, `call`, `Math`, `max` |
 
 Those inferred names are useful for manual triage only. They should not be
 blindly patched into the Python output, because the authoritative failure is

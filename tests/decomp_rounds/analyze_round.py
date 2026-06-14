@@ -25,11 +25,15 @@ UNRESOLVED_OBJECT_RE = re.compile(
     r"(?:: segmentfault(?:, disassemble stop| while discovering object, skipped)"
     r"|\s+<undefined: segmentfault)"
 )
+UNRESOLVED_OBJECT_CHUNK_OFFSET_RE = re.compile(
+    r"object_chunk_offset=(0x[0-9a-fA-F]+)"
+)
 
 
 class UnresolvedDiagnostics(TypedDict):
     unresolved_objects: int
     unresolved_suffixes: list[str]
+    object_chunk_offsets: list[str]
 
 
 def classify_decompile_status(text: str) -> str:
@@ -82,6 +86,13 @@ def unresolved_object_suffixes(text: str) -> set[str]:
     }
 
 
+def unresolved_object_chunk_offsets(text: str) -> set[str]:
+    offsets: set[str] = set()
+    for match in UNRESOLVED_OBJECT_CHUNK_OFFSET_RE.finditer(text):
+        offsets.add(f"0x{int(match.group(1), 16):x}")
+    return offsets
+
+
 def parse_header_diagnostics(text: str) -> dict[str, str]:
     mismatches: list[str] = []
     ro_snapshot = "n/a"
@@ -124,12 +135,17 @@ def read_mode_unresolved_diagnostics(
 ) -> UnresolvedDiagnostics:
     path = case_dir / f"{case}.{mode}.disasm.txt"
     if not path.exists():
-        return {"unresolved_objects": 0, "unresolved_suffixes": []}
+        return {
+            "unresolved_objects": 0,
+            "unresolved_suffixes": [],
+            "object_chunk_offsets": [],
+        }
     text = path.read_text(encoding="utf-8", errors="ignore")
     suffixes = sorted(unresolved_object_suffixes(text))
     return {
         "unresolved_objects": len(unresolved_object_addresses(text)),
         "unresolved_suffixes": suffixes,
+        "object_chunk_offsets": sorted(unresolved_object_chunk_offsets(text)),
     }
 
 
@@ -156,7 +172,7 @@ def main() -> int:
     print("|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
 
     failure_count = 0
-    unresolved_rows: list[tuple[str, str, list[str]]] = []
+    unresolved_rows: list[tuple[str, str, list[str], list[str]]] = []
     for case_dir in case_dirs:
         case = case_dir.name
         for mode in ("v8asm", "bytenode"):
@@ -179,8 +195,9 @@ def main() -> int:
                 failure_count += 1
             s = score_text(text)
             suffixes = list(unresolved["unresolved_suffixes"])
+            object_chunk_offsets = list(unresolved["object_chunk_offsets"])
             if suffixes:
-                unresolved_rows.append((case, mode, suffixes))
+                unresolved_rows.append((case, mode, suffixes, object_chunk_offsets))
             print(
                 f"| {case} | {mode} | {status} | {header['header_mismatch']} | "
                 f"{header['ro_snapshot']} | {s['accu_lines']} | {s['reg_refs']} | "
@@ -193,10 +210,11 @@ def main() -> int:
         print("")
         print("## Unresolved Read-Only Object Suffixes")
         print("")
-        print("| case | mode | suffixes |")
-        print("|---|---:|---|")
-        for case, mode, suffixes in unresolved_rows:
-            print(f"| {case} | {mode} | `{','.join(suffixes)}` |")
+        print("| case | mode | suffixes | object_chunk_offsets |")
+        print("|---|---:|---|---|")
+        for case, mode, suffixes, object_chunk_offsets in unresolved_rows:
+            offsets = ",".join(object_chunk_offsets) if object_chunk_offsets else "n/a"
+            print(f"| {case} | {mode} | `{','.join(suffixes)}` | `{offsets}` |")
 
     print("")
     print("## Quick Inspection Targets")
@@ -204,7 +222,7 @@ def main() -> int:
     print("- Any non-zero `raw_goto` indicates structurer fallback/regression.")
     print("- Non-zero `unknown` usually means translator opcode coverage is missing.")
     print("- Non-zero `undefined_fallbacks` with `ro_snapshot=mismatch` points at V8/embedder snapshot object recovery, not Python translation.")
-    print("- Non-zero `unresolved_objects` counts unique object-print failures in the disasm, before Python decompilation.")
+    print("- Non-zero `unresolved_objects` counts unique object-print failures in the disasm, before Python decompilation; `object_chunk_offsets` are printed by newer v8asm builds.")
     if failure_count:
         print("")
         print("## Failures")

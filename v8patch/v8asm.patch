@@ -173,10 +173,18 @@ index 6fb139446e3..da5f525e63f 100644
  
    static std::unique_ptr<SerializationData> SerializeValue(
 diff --git a/src/diagnostics/objects-printer.cc b/src/diagnostics/objects-printer.cc
-index d3e5ec68657..2cba6fd6fa2 100644
+index d3e5ec68657..5567eaec886 100644
 --- a/src/diagnostics/objects-printer.cc
 +++ b/src/diagnostics/objects-printer.cc
-@@ -34,6 +34,11 @@
+@@ -16,6 +16,7 @@
+ #include "src/execution/isolate-utils-inl.h"
+ #include "src/heap/heap-inl.h"  // For InOldSpace.
+ #include "src/heap/heap-layout-inl.h"
++#include "src/heap/memory-chunk.h"
+ #include "src/heap/heap-write-barrier-inl.h"  // For GetIsolateFromWritableObj.
+ #include "src/heap/marking-inl.h"
+ #include "src/ic/handler-configuration-inl.h"
+@@ -34,6 +35,11 @@
  #include "src/utils/ostreams.h"
  #include "third_party/fp16/src/include/fp16.h"
  
@@ -188,7 +196,7 @@ index d3e5ec68657..2cba6fd6fa2 100644
  #if V8_ENABLE_WEBASSEMBLY
  #include "src/debug/debug-wasm-objects-inl.h"
  #include "src/wasm/wasm-code-manager.h"
-@@ -157,7 +162,7 @@ namespace {
+@@ -157,7 +163,7 @@ namespace {
  void PrintHeapObjectHeaderWithoutMap(Tagged<HeapObject> object,
                                       std::ostream& os, const char* id) {
    PtrComprCageBase cage_base = GetPtrComprCageBase();
@@ -197,13 +205,23 @@ index d3e5ec68657..2cba6fd6fa2 100644
    if (id != nullptr) {
      os << id;
    } else {
-@@ -3368,15 +3373,30 @@ void HeapObject::Print(Tagged<Object> obj, std::ostream& os) {
+@@ -3368,15 +3374,42 @@ void HeapObject::Print(Tagged<Object> obj, std::ostream& os) {
    v8::internal::Print(obj, os);
  }
  
 +static sigjmp_buf g_jump_buffer;
 +void segfault_jumper(int signal_number) {
 +    siglongjmp(g_jump_buffer, 1);
++}
++
++void PrintV8AsmShortPrintAddressDiagnostics(Tagged<HeapObject> object,
++                                            std::ostream& os) {
++  std::ios_base::fmtflags flags = os.flags();
++  os << "; object_chunk_offset=0x" << std::hex
++     << MemoryChunk::AddressToOffset(object.address())
++     << " tagged_chunk_offset=0x"
++     << MemoryChunk::AddressToOffset(object.ptr());
++  os.flags(flags);
 +}
 +
  void HeapObject::HeapObjectShortPrint(std::ostream& os) {
@@ -213,7 +231,9 @@ index d3e5ec68657..2cba6fd6fa2 100644
 +  void (*old_handler)(int);
 +  old_handler = signal(SIGSEGV, segfault_jumper);
 +  if (sigsetjmp(g_jump_buffer, 1) != 0) {
-+    os << "<undefined: segmentfault, might outside scope>";
++    os << "<undefined: segmentfault, might outside scope";
++    PrintV8AsmShortPrintAddressDiagnostics(*this, os);
++    os << ">";
 +    signal(SIGSEGV, old_handler);
 +    return;
 +  }
@@ -228,7 +248,7 @@ index d3e5ec68657..2cba6fd6fa2 100644
      return;
    }
    if (IsJSObject(*this, cage_base)) {
-@@ -3384,6 +3404,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -3384,6 +3417,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
      StringStream accumulator(&allocator);
      Cast<JSObject>(*this)->JSObjectShortPrint(&accumulator);
      os << accumulator.ToCString().get();
@@ -236,7 +256,7 @@ index d3e5ec68657..2cba6fd6fa2 100644
      return;
    }
  
-@@ -3395,6 +3416,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -3395,6 +3429,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
    if (InstanceTypeChecker::IsTrustedObject(instance_type) &&
        !OutsideSandboxOrInReadonlySpace(*this)) {
      os << "<Invalid TrustedObject (outside trusted space)>\n";
@@ -244,7 +264,7 @@ index d3e5ec68657..2cba6fd6fa2 100644
      return;
    }
  
-@@ -3750,6 +3772,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -3750,6 +3785,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
        os << "<Other heap object (" << map()->instance_type() << ")>";
        break;
    }
@@ -257,7 +277,7 @@ new file mode 100644
 index 00000000000..9be068201ce
 --- /dev/null
 +++ b/src/disassembler/main.cc
-@@ -0,0 +1,870 @@
+@@ -0,0 +1,915 @@
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <fstream>
@@ -272,6 +292,7 @@ index 00000000000..9be068201ce
 +#include "include/v8-primitive.h"
 +#include "include/v8-script.h"
 +
++#include "src/heap/read-only-spaces.h"
 +#include "src/objects/managed-inl.h"
 +#include "src/objects/literal-objects-inl.h"
 +#include "src/flags/flags.h"
@@ -402,6 +423,45 @@ index 00000000000..9be068201ce
 +        siglongjmp(V8ObjectExplorer::jump_buffer_, 1);
 +    }
 +
++    void PrintReadOnlyAddressDiagnostics(v8::internal::OFStream& os,
++                                         v8::internal::Address tagged_addr) {
++        using v8::internal::Address;
++        using v8::internal::kHeapObjectTag;
++        if (isolate_ == nullptr || tagged_addr == v8::internal::kNullAddress) {
++            return;
++        }
++        Address object_addr = tagged_addr - kHeapObjectTag;
++        v8::internal::ReadOnlySpace* read_only_space =
++            isolate_->heap()->read_only_space();
++        const auto& pages = read_only_space->pages();
++        char buf[320];
++        for (size_t i = 0; i < pages.size(); ++i) {
++            const v8::internal::ReadOnlyPageMetadata* page = pages[i];
++            if (!page->Contains(object_addr)) continue;
++            size_t object_chunk_offset =
++                static_cast<size_t>(object_addr - page->ChunkAddress());
++            size_t tagged_chunk_offset =
++                static_cast<size_t>(tagged_addr - page->ChunkAddress());
++            size_t area_offset =
++                static_cast<size_t>(object_addr - page->area_start());
++            snprintf(buf, sizeof(buf),
++                     " (ro_page=%zu object_chunk_offset=0x%zx "
++                     "tagged_chunk_offset=0x%zx area_offset=0x%zx "
++                     "page=[0x%llx,0x%llx))",
++                     i, object_chunk_offset, tagged_chunk_offset, area_offset,
++                     static_cast<unsigned long long>(page->area_start()),
++                     static_cast<unsigned long long>(page->area_end()));
++            os << buf;
++            return;
++        }
++        snprintf(buf, sizeof(buf),
++                 " (not in current read-only space; tagged_low16=0x%04llx "
++                 "object_low16=0x%04llx)",
++                 static_cast<unsigned long long>(tagged_addr & 0xffff),
++                 static_cast<unsigned long long>(object_addr & 0xffff));
++        os << buf;
++    }
++
 +    void PrintDiscoveredObjects() {
 +        v8::internal::OFStream os(stdout);
 +
@@ -422,7 +482,10 @@ index 00000000000..9be068201ce
 +              currently_printing_obj_addr_ = 0;
 +            } else {
 +              fflush(stdout);
-+              os << std::endl << "!" <<v8::internal::AsHex::Address(currently_printing_obj_addr_) << ": segmentfault, disassemble stop" << std::endl;
++              os << std::endl << "!" <<v8::internal::AsHex::Address(currently_printing_obj_addr_) << ": segmentfault, disassemble stop";
++              PrintReadOnlyAddressDiagnostics(
++                  os, static_cast<v8::internal::Address>(currently_printing_obj_addr_));
++              os << std::endl;
 +              currently_printing_obj_addr_ = 0;
 +            }
 +            fflush(stdout);
@@ -430,7 +493,9 @@ index 00000000000..9be068201ce
 +        if (best_effort_) {
 +            for (const auto& addr : skipped_objects_) {
 +                os << std::endl << "!" << v8::internal::AsHex::Address(addr)
-+                   << ": segmentfault while discovering object, skipped" << std::endl;
++                   << ": segmentfault while discovering object, skipped";
++                PrintReadOnlyAddressDiagnostics(os, addr);
++                os << std::endl;
 +            }
 +            signal(SIGSEGV, old_handler);
 +        }

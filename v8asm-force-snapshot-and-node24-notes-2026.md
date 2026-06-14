@@ -84,6 +84,8 @@ It returns non-zero for `disasm_failed`, `decompile_failed`, `disasm_skipped`,
 and skips bytenode force-disasm when pointer compression differs, so a crash is
 reported as a real failure instead of appearing as a zero-residue decompile.
 The summary now also counts unique unresolved object-print failures in the
-disassembly and emits a low-address-suffix table. That keeps bytenode
-`undefined_fallbacks` tied to concrete read-only heap objects even when the full
+disassembly and emits a low-address-suffix / `object_chunk_offset` table. Newer
+13.6 `v8asm` builds print that offset in both `!0x... segmentfault` lines and
+guarded `<undefined: segmentfault...>` placeholders. That keeps bytenode
+`undefined_fallbacks` tied to concrete read-only heap offsets even when the full
 heap address base changes between runs.

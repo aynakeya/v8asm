@@ -14,6 +14,7 @@ from analyze_round import (
     classify_decompile_status,
     parse_header_diagnostics,
     unresolved_object_addresses,
+    unresolved_object_chunk_offsets,
     unresolved_object_suffixes,
 )
 
@@ -82,7 +83,7 @@ Cached data header:
            1: 0x332de880a701 <undefined: segmentfault, might outside scope>
            2: 0x332de880a701 <undefined: segmentfault, might outside scope>
 !0x332de880a701: segmentfault, disassemble stop
-!0x332de880d479: segmentfault while discovering object, skipped
+!0x332de880d479: segmentfault while discovering object, skipped (ro_page=0 object_chunk_offset=0xd478 tagged_chunk_offset=0xd479 area_offset=0xd468)
            3: 0x332de880ffee <String[4]: #fine>
 """
 
@@ -91,6 +92,7 @@ Cached data header:
             {"0x332de880a701", "0x332de880d479"},
         )
         self.assertEqual(unresolved_object_suffixes(text), {"a701", "d479"})
+        self.assertEqual(unresolved_object_chunk_offsets(text), {"0xd478"})
 
 
 if __name__ == "__main__":
