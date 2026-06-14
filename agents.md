@@ -82,6 +82,10 @@ tests/decomp_rounds/run_round.sh
 
 如果 summary 显示 Node V8 与 `v8asm_version` 不同，bytenode 路径只是
 `--force-incompatible` 覆盖，不证明那个 V8 branch 已经匹配 bytenode。
+`run_round.sh` 默认会使用 `V8ASM_BIN` 同目录下的 `snapshot_blob.bin`；
+也可以用 `ROUND_SNAPSHOT_BLOB=/path/to/blob` 指定外部 snapshot。指定外部
+snapshot 时，bytenode 的 `checkversion` 和 forced disasm 都会走
+`--snapshot_blob ... --force-incompatible`，避免只在反汇编阶段加载 snapshot。
 
 轻量版本矩阵：
 
@@ -95,8 +99,11 @@ tests/decomp_rounds/run_version_matrix.sh
 - bytenode cache 先记录 `checkversion`；只有 Node V8 数字版本等于
   `v8asm version`，且 Node 与 `v8asm` 的 pointer compression 布局一致时，
   才尝试 `--force-incompatible`。
-- 数字版本或 pointer compression 不匹配时不强跑 force，因为这会把不同对象布局
-  的 serializer 数据喂给 V8，容易在反序列化阶段崩溃。
+- bytenode 的 `checkversion` 会带 `--force-incompatible`，因此设置
+  `VERSION_MATRIX_SNAPSHOT_BLOB=/path/to/blob` 时 header 对比会基于加载后的
+  snapshot checksum。
+- pointer compression 不匹配时不强跑 force，因为这会把不同对象布局的
+  serializer 数据喂给 V8，容易在反序列化阶段崩溃。
 
 ## Known Issues (as of latest run)
 

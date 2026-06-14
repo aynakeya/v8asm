@@ -68,7 +68,18 @@ flags.
 ## Test guard
 
 `tests/decomp_rounds/analyze_round.py` now has an explicit `status` column and
-returns non-zero for `disasm_failed`, `decompile_failed`, `disasm_skipped`,
+the shell runners no longer rely on a hand-written disasm command to exercise
+startup snapshots:
+
+- `run_round.sh` uses a sibling `snapshot_blob.bin` for `V8ASM_BIN` when one is
+  present, or `ROUND_SNAPSHOT_BLOB` when explicitly provided.
+- bytenode `checkversion` is invoked with `--force-incompatible`, so a supplied
+  snapshot blob changes the expected read-only snapshot checksum in diagnostics
+  before the forced disasm attempt.
+- `run_version_matrix.sh` applies the same rule for bytenode header rows,
+  keeping header diagnostics and forced disasm on the same startup snapshot.
+
+It returns non-zero for `disasm_failed`, `decompile_failed`, `disasm_skipped`,
 `crash_signature`, and missing outputs. `run_round.sh` records Node build flags
 and skips bytenode force-disasm when pointer compression differs, so a crash is
 reported as a real failure instead of appearing as a zero-residue decompile.

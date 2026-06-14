@@ -85,6 +85,14 @@ forced loads when the pointer-compression build layout differs. The default Node
 18.20.8, 20.20.2, 22.17.0, and 24.7.0 when those versions are installed
 through nvm.
 
+The round runner follows the same snapshot convention as the matrix: if the
+selected `V8ASM_BIN` has a sibling `snapshot_blob.bin`, commands are launched as
+`v8asm --snapshot_blob <sibling> ...`. Set `ROUND_SNAPSHOT_BLOB=/path/to/blob`
+to force a specific snapshot for bytenode `checkversion` and forced disasm
+probes. In that mode, `checkversion` is invoked with `--force-incompatible` so
+the expected read-only snapshot checksum is computed after loading the supplied
+startup blob.
+
 The default matrix can use cached support files under
 `tests/decomp_rounds/bin_cache/` for V8 builds that are expensive to recreate.
 Currently this includes the Node-aligned V8 `10.2.154.26`, `11.3.244.8`, and
@@ -156,6 +164,8 @@ The matrix runner uses `--snapshot_blob` automatically when a cached v8asm
 binary has a sibling `snapshot_blob.bin`. Strict commands use a snapshot only
 for sibling blobs; an explicit override is used only for forced commands and
 only when the `v8asm` binary contains the forced snapshot recovery hook.
+Bytenode `checkversion` rows also pass `--force-incompatible`, so an override
+snapshot affects the header comparison instead of only the following disasm.
 Override that for embedder snapshots, for example:
 
 ```bash

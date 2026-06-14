@@ -3,6 +3,7 @@
 ## Round Environment
 - v8asm_bin: `tests/decomp_rounds/bin_cache/v8asm.13.6.node24.x64.release/v8asm`
 - v8asm_version: `13.6.233.10`
+- v8asm_snapshot_blob: `tests/decomp_rounds/bin_cache/v8asm.13.6.node24.x64.release/snapshot_blob.bin`
 - v8asm_build_args:
   - is_debug=false
   - v8_enable_object_print=true

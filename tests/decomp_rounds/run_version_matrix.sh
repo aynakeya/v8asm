@@ -381,7 +381,7 @@ for node_version in "${node_versions[@]}"; do
     fi
     work="$OUT_DIR/bytenode-${node_actual#v}-$label"
     mkdir -p "$work"
-    run_v8asm "$bin" checkversion "$btn_jsc" >"$work/$case_base.checkversion.txt" 2>&1 || true
+    run_v8asm "$bin" checkversion "$btn_jsc" --force-incompatible >"$work/$case_base.checkversion.txt" 2>&1 || true
     check_crash_output "bytenode $node_actual $label checkversion" "$work/$case_base.checkversion.txt"
     strict_status="$(strict_disasm_status "$bin" "$btn_jsc" "$work/$case_base.strict.disasm.txt" "$work/$case_base.strict.disasm.err")"
     check_crash_output "bytenode $node_actual $label strict disasm" "$work/$case_base.strict.disasm.err" "$work/$case_base.strict.disasm.txt"

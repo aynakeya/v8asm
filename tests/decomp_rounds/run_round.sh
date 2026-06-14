@@ -9,6 +9,8 @@ TMP_DIR="$ROUND_DIR/tmp"
 V8ASM_BIN="${V8ASM_BIN:-$ROOT_DIR/v8asm}"
 ROUND_NODE_VERSION="${ROUND_NODE_VERSION:-24.7.0}"
 BYTENODE_PATH="${ROUND_BYTENODE_PATH:-/home/aynakeya/.npm/_npx/ea56e60f3ac75570/node_modules/bytenode}"
+ROUND_USE_BIN_SNAPSHOT="${ROUND_USE_BIN_SNAPSHOT:-1}"
+ROUND_SNAPSHOT_BLOB="${ROUND_SNAPSHOT_BLOB:-}"
 
 mkdir -p "$OUT_DIR" "$TMP_DIR"
 
@@ -24,8 +26,62 @@ if [[ ! -f "$BYTENODE_PATH/package.json" ]]; then
   exit 1
 fi
 
+v8asm_snapshot_blob_for() {
+  if [[ -n "$ROUND_SNAPSHOT_BLOB" ]]; then
+    printf "%s" "$ROUND_SNAPSHOT_BLOB"
+    return
+  fi
+  if [[ "$ROUND_USE_BIN_SNAPSHOT" == "1" ]]; then
+    local bin_snapshot
+    bin_snapshot="$(dirname "$V8ASM_BIN")/snapshot_blob.bin"
+    if [[ -f "$bin_snapshot" ]]; then
+      printf "%s" "$bin_snapshot"
+    fi
+  fi
+}
+
+v8asm_binary_supports_snapshot_blob() {
+  grep -aq -- "--snapshot_blob" "$V8ASM_BIN"
+}
+
+v8asm_args_request_force_incompatible() {
+  local arg
+  for arg in "$@"; do
+    if [[ "$arg" == "--force-incompatible" || "$arg" == "--best-effort" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+v8asm_should_use_snapshot_blob() {
+  local snapshot_blob="$1"
+  shift
+  if [[ -z "$snapshot_blob" ]]; then
+    return 1
+  fi
+  if ! v8asm_binary_supports_snapshot_blob; then
+    return 1
+  fi
+  if v8asm_args_request_force_incompatible "$@"; then
+    return 0
+  fi
+  [[ -z "$ROUND_SNAPSHOT_BLOB" ]]
+}
+
+run_v8asm() {
+  local snapshot_blob
+  snapshot_blob="$(v8asm_snapshot_blob_for)"
+  if v8asm_should_use_snapshot_blob "$snapshot_blob" "$@"; then
+    "$V8ASM_BIN" --snapshot_blob "$snapshot_blob" "$@"
+  else
+    "$V8ASM_BIN" "$@"
+  fi
+}
+
 v8asm_version="$("$V8ASM_BIN" version)"
 v8asm_build_args="$("$V8ASM_BIN" build-args)"
+v8asm_snapshot_blob="$(v8asm_snapshot_blob_for)"
 v8asm_pointer_compression="$(printf '%s\n' "$v8asm_build_args" | awk -F= '/^v8_enable_pointer_compression=/ {print $2}')"
 node_version="$(node -v)"
 node_v8_version="$(node -p 'process.versions.v8')"
@@ -49,6 +105,11 @@ fi
   echo "## Round Environment"
   echo "- v8asm_bin: \`$V8ASM_BIN\`"
   echo "- v8asm_version: \`$v8asm_version\`"
+  if [[ -n "$v8asm_snapshot_blob" ]]; then
+    echo "- v8asm_snapshot_blob: \`$v8asm_snapshot_blob\`"
+  else
+    echo "- v8asm_snapshot_blob: none"
+  fi
   echo "- v8asm_build_args:"
   printf '%s\n' "$v8asm_build_args" | sed 's/^/  - /'
   echo "- node_version: \`$node_version\`"
@@ -70,7 +131,7 @@ for js in "$CASE_DIR"/*.js; do
   v8_jsc="$casedir/$base.v8asm.jsc"
   btn_jsc="$casedir/$base.bytenode.jsc"
 
-  "$V8ASM_BIN" asm "$js" -o "$v8_jsc" >"$casedir/$base.v8asm.asm.log" 2>&1 || true
+  run_v8asm asm "$js" -o "$v8_jsc" >"$casedir/$base.v8asm.asm.log" 2>&1 || true
   node -e "const b=require(process.argv[1]); b.compileFile({filename: process.argv[2], output: process.argv[3]});" \
     "$BYTENODE_PATH" "$js" "$btn_jsc" >"$casedir/$base.bytenode.asm.log" 2>&1 || true
 
@@ -85,7 +146,11 @@ for js in "$CASE_DIR"/*.js; do
       continue
     fi
 
-    "$V8ASM_BIN" checkversion "$in_jsc" >"$casedir/$base.$mode.checkversion.txt" 2>&1 || true
+    checkversion_args=(checkversion "$in_jsc")
+    if [[ "$mode" == "bytenode" ]]; then
+      checkversion_args+=(--force-incompatible)
+    fi
+    run_v8asm "${checkversion_args[@]}" >"$casedir/$base.$mode.checkversion.txt" 2>&1 || true
 
     disasm_args=()
     if [[ "$mode" == "bytenode" ]]; then
@@ -104,7 +169,7 @@ for js in "$CASE_DIR"/*.js; do
       fi
     fi
 
-    if "$V8ASM_BIN" disasm "$in_jsc" "${disasm_args[@]}" >"$dis_txt" 2>"$dis_err"; then
+    if run_v8asm disasm "$in_jsc" "${disasm_args[@]}" >"$dis_txt" 2>"$dis_err"; then
       if ! python3 "$ROOT_DIR/decompiler/v8decompiler.py" "$dis_txt" --level 4 --runtime >"$dec_js" 2>"$casedir/$base.$mode.decompile.err"; then
         echo "// decompile failed for $dis_txt" >"$dec_js"
       fi
