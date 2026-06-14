@@ -254,10 +254,10 @@ index d3e5ec68657..2cba6fd6fa2 100644
  void HeapNumber::HeapNumberShortPrint(std::ostream& os) {
 diff --git a/src/disassembler/main.cc b/src/disassembler/main.cc
 new file mode 100644
-index 00000000000..17278f38fe0
+index 00000000000..4370882f3fb
 --- /dev/null
 +++ b/src/disassembler/main.cc
-@@ -0,0 +1,794 @@
+@@ -0,0 +1,869 @@
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <fstream>
@@ -957,6 +957,76 @@ index 00000000000..17278f38fe0
 +  return false;
 +}
 +
++constexpr size_t kV8AsmSnapshotVersionOffset = 16;
++constexpr size_t kV8AsmSnapshotVersionLength = 64;
++
++bool read_snapshot_version(const char* path,
++                           char version[kV8AsmSnapshotVersionLength + 1]) {
++  memset(version, 0, kV8AsmSnapshotVersionLength + 1);
++  FILE* file = fopen(path, "rb");
++  if (file == nullptr) {
++    fprintf(stderr, "Failed to open snapshot blob '%s': %s\n", path,
++            strerror(errno));
++    return false;
++  }
++  bool ok = false;
++  if (fseek(file, static_cast<long>(kV8AsmSnapshotVersionOffset), SEEK_SET) == 0) {
++    ok = fread(version, 1, kV8AsmSnapshotVersionLength, file) ==
++         kV8AsmSnapshotVersionLength;
++  }
++  if (!ok) {
++    fprintf(stderr, "Failed to read snapshot version from '%s'\n", path);
++  }
++  fclose(file);
++  return ok;
++}
++
++bool snapshot_matches_binary_base(const char* snapshot_version,
++                                  const char* binary_version) {
++  size_t binary_len = strlen(binary_version);
++  if (strncmp(snapshot_version, binary_version, binary_len) != 0) {
++    return false;
++  }
++  char next = snapshot_version[binary_len];
++  return next == '\0' || next == '-' || next == '+';
++}
++
++bool allow_cross_version_snapshot_mismatch() {
++  const char* value = getenv("V8ASM_ALLOW_CROSS_VERSION_SNAPSHOT_MISMATCH");
++  return value != nullptr && strcmp(value, "0") != 0;
++}
++
++bool validate_snapshot_blob_version(const char* snapshot_blob) {
++  char snapshot_version[kV8AsmSnapshotVersionLength + 1];
++  if (!read_snapshot_version(snapshot_blob, snapshot_version)) {
++    return false;
++  }
++
++  const char* binary_version = v8::V8::GetVersion();
++  if (snapshot_matches_binary_base(snapshot_version, binary_version)) {
++    return true;
++  }
++
++  if (allow_cross_version_snapshot_mismatch()) {
++    fprintf(stderr,
++            "Warning: forcing cross-version snapshot blob load.\n"
++            "#   V8 binary version: %s\n"
++            "#    Snapshot version: %s\n",
++            binary_version, snapshot_version);
++    return true;
++  }
++
++  fprintf(stderr,
++          "Refusing to load snapshot_blob built for a different V8 baseline.\n"
++          "#   V8 binary version: %s\n"
++          "#    Snapshot version: %s\n"
++          "Use a matching v8asm build for this snapshot, or set "
++          "V8ASM_ALLOW_CROSS_VERSION_SNAPSHOT_MISMATCH=1 for crash-prone "
++          "manual research.\n",
++          binary_version, snapshot_version);
++  return false;
++}
++
 +int main(int argc, char* argv[]) {
 +  if (argc < 2) {
 +    print_usage(argv[0]);
@@ -981,7 +1051,12 @@ index 00000000000..17278f38fe0
 +  v8::V8::SetFlagsFromString("--no-lazy --no-flush-bytecode");
 +  v8::V8::InitializeICUDefaultLocation(argv[0]);
 +  if (startup_options.snapshot_blob != nullptr) {
-+    if (command_requests_force_incompatible(command_argc, command_argv.data())) {
++    bool force_incompatible =
++        command_requests_force_incompatible(command_argc, command_argv.data());
++    if (!validate_snapshot_blob_version(startup_options.snapshot_blob)) {
++      return 1;
++    }
++    if (force_incompatible) {
 +      setenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH", "1", 0);
 +      setenv("V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH", "1", 0);
 +    }
@@ -1213,21 +1288,22 @@ index 114cb45c3a7..2249551e0b3 100644
    if (v8_flags.trace_deserialization) {
      PrintF("%*sReadOnlyHeapRef [%u, %u] : ", depth_, "", chunk_index,
 diff --git a/src/snapshot/snapshot.cc b/src/snapshot/snapshot.cc
+index 4a3f6bdaf88..576a23ae7ec 100644
 --- a/src/snapshot/snapshot.cc
 +++ b/src/snapshot/snapshot.cc
-@@ -27,4 +27,6 @@
+@@ -26,6 +26,8 @@
+ #include "src/snapshot/startup-serializer.h"
  #include "src/utils/memcopy.h"
  #include "src/utils/version.h"
--
 +#include <cstdlib>
 +#include <cstring>
-+
+ 
  #ifdef V8_SNAPSHOT_COMPRESSION
-@@ -130,4 +133,12 @@ class SnapshotImpl : public AllStatic {
+ #include "src/snapshot/snapshot-compression.h"
+@@ -130,6 +132,14 @@ class SnapshotImpl : public AllStatic {
    }
  };
--
-+
+ 
 +bool V8AsmAllowsSnapshotVersionMismatch() {
 +  const char* value = std::getenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH");
 +  if (value == nullptr || value[0] == '\0' || std::strcmp(value, "0") == 0) {
@@ -1237,7 +1313,9 @@ diff --git a/src/snapshot/snapshot.cc b/src/snapshot/snapshot.cc
 +}
 +
  }  // namespace
-@@ -745,6 +756,17 @@ void SnapshotImpl::CheckVersion(const v8::StartupData* data) {
+ 
+ SnapshotData MaybeDecompress(Isolate* isolate,
+@@ -745,6 +755,17 @@ void SnapshotImpl::CheckVersion(const v8::StartupData* data) {
      CHECK_LT(kVersionStringOffset + kVersionStringLength,
               static_cast<uint32_t>(data->raw_size));
      Version::GetString(base::Vector<char>(version, kVersionStringLength));

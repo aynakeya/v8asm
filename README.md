@@ -143,6 +143,10 @@ opens the forced snapshot recovery switches before V8 startup data is loaded.
 This lets an Electron context snapshot with a version string such as
 `13.4.114.21-electron.0` initialize a plain `13.4.114.21` research build. The
 version mismatch is printed on stderr and strict mode remains unchanged.
+Startup snapshots from a different V8 baseline are refused before V8
+initialization because the read-only heap layout can already be incompatible
+after the version check is bypassed. A manual escape hatch exists for crash-prone
+experiments: `V8ASM_ALLOW_CROSS_VERSION_SNAPSHOT_MISMATCH=1`.
 
 The matrix runner uses `--snapshot_blob` automatically when a cached v8asm
 binary has a sibling `snapshot_blob.bin`. Strict commands use a snapshot only

@@ -22,6 +22,16 @@ when `--snapshot_blob` and `--force-incompatible` are both present, `v8asm`
 enables `V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH=1` before V8 startup data is
 loaded. The mismatch is printed on stderr and initialization continues.
 
+That bypass is intentionally bounded to the same V8 baseline plus embedder
+suffix case. Rebuilding a patched `13.6.233.10` binary and pointing it at the
+`13.4.114.21-electron.0` startup snapshot got past `SnapshotImpl::CheckVersion`,
+but then segfaulted in `ReadOnlyDeserializer::PostProcessNewObjects()` while
+iterating the read-only heap. The snapshot object's map/size layout was already
+untrusted at that point. `v8asm` now checks the startup blob version string
+before `InitializeExternalStartupDataFromFile()`: `13.4.114.21` may force-load
+`13.4.114.21-electron.0`, while `13.6.233.10` cleanly refuses that 13.4 startup
+snapshot instead of entering V8's RO heap deserializer.
+
 The same Electron snapshot also has serialized external reference table size
 `1671`, while the vanilla V8 `13.4.114.21` build has size `1672`; in startup
 deserialization that means the Electron sentinel is `1592` and the current
@@ -255,13 +265,13 @@ local `tests/decomp_rounds/bin_cache/` cache before switching versions again.
 
 | patch | V8 tag used | synced Electron fixes | build/test status |
 | --- | --- | --- | --- |
-| `v8patch/v8asm.patch` | `13.6.233.10` | `--snapshot_blob`, cached-data sanity bypass, forced snapshot version mismatch bypass, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in, direct forced-load payload/cross-major guard | `git apply --check` passed on clean `13.6.233.10`; existing repo `v8asm` still passes Node24/bytenode forced disasm/decompiler |
-| `v8patch/v8asm-13.4.patch` | `13.4.114.21` | `--snapshot_blob`, cached-data sanity bypass, forced snapshot version mismatch bypass, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in | `autoninja -j10 -C out/v8asm.13.4.x64.release v8asm`; plain build forced-disassembles `atom.compiled.dist.jsc` with `v8_context_snapshot.bin`; level-4 decompiler passed |
-| `v8patch/v8asm-12.9.patch` | `12.9.202.28` | `--snapshot_blob`, cached-data sanity bypass, forced snapshot version mismatch bypass, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in | `git apply --check` passed on clean `12.9.202.28` |
-| `v8patch/v8asm-12.4.patch` | `12.4.254.21` | `--snapshot_blob`, cached-data sanity bypass, forced snapshot version mismatch bypass, invalid `ReadOnlyHeapRef` fallback, direct forced-load payload/cross-major guard | `git apply --check` passed on clean `12.4.254.21`; cached Node22 build still passes forced disasm/decompiler |
-| `v8patch/v8asm-11.9.patch` | `11.9.169.7` | `--snapshot_blob`, cached-data sanity bypass, forced snapshot version mismatch bypass, invalid `ReadOnlyHeapRef` fallback | `git apply --check` passed on clean `11.9.169.7` |
-| `v8patch/v8asm-11.3.patch` | `11.3.244.8` | `--snapshot_blob`, cached-data sanity bypass, forced snapshot version mismatch bypass, invalid `ReadOnlyHeapRef` fallback adapted to the 11.3 `Object` API, direct forced-load payload/cross-major guard | `git apply --check` passed on clean `11.3.244.8`; cached Node20 build still passes forced disasm/decompiler |
-| `v8patch/v8asm-10.2.patch` | `10.2.154.26` | `--snapshot_blob`, cached-data sanity bypass, forced snapshot version mismatch bypass, invalid `ReadOnlyHeapRef` fallback adapted to the 10.2 cached-data header | `git apply --check` passed on clean `10.2.154.26`; cached Node18 build still passes forced disasm/decompiler |
+| `v8patch/v8asm.patch` | `13.6.233.10` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in, direct forced-load payload/cross-major guard | rebuilt with `autoninja -j10 -C out/v8asm.13.6.x64.release v8asm`; root `./v8asm` now reports `13.6.233.10`; 13.6 cleanly refuses the 13.4 Electron snapshot instead of crashing |
+| `v8patch/v8asm-13.4.patch` | `13.4.114.21` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in | `autoninja -j10 -C out/v8asm.13.4.x64.release v8asm`; plain build forced-disassembles `atom.compiled.dist.jsc` with `v8_context_snapshot.bin`; level-4 decompiler passed |
+| `v8patch/v8asm-12.9.patch` | `12.9.202.28` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in | `git apply --check` previously passed on clean `12.9.202.28`; guard synced textually from the verified 13.6/13.4 implementation |
+| `v8patch/v8asm-12.4.patch` | `12.4.254.21` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback, direct forced-load payload/cross-major guard | `git apply --check` previously passed on clean `12.4.254.21`; cached Node22 build still passes forced disasm/decompiler |
+| `v8patch/v8asm-11.9.patch` | `11.9.169.7` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback | `git apply --check` previously passed on clean `11.9.169.7`; guard synced textually |
+| `v8patch/v8asm-11.3.patch` | `11.3.244.8` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback adapted to the 11.3 `Object` API, direct forced-load payload/cross-major guard | `git apply --check` previously passed on clean `11.3.244.8`; cached Node20 build still passes forced disasm/decompiler |
+| `v8patch/v8asm-10.2.patch` | `10.2.154.26` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback adapted to the 10.2 cached-data header | `git apply --check` previously passed on clean `10.2.154.26`; cached Node18 build still passes forced disasm/decompiler |
 
 The snapshot version mismatch bypass is now present in all maintained patch
 variants. The startup external-reference-table mismatch switch is still only
@@ -291,6 +301,13 @@ plausible mismatches. Known cross-major cases now exit cleanly with diagnostics
 instead of entering V8 and triggering SIGABRT/SIGSEGV. This replaced the old
 matrix failures where 11.3 mismatch probes exited `134` and 12.4/13.6 vs Node20
 probes exited `139`.
+
+The same rule now applies to `--snapshot_blob`: the option is for loading the
+matching embedder startup blob for the same V8 baseline, including suffix
+mismatches such as `13.4.114.21-electron.0`. It is not a safe way to deserialize
+a 13.4 startup snapshot inside a 13.6 binary. That case is refused before V8
+startup initialization unless the manual escape hatch
+`V8ASM_ALLOW_CROSS_VERSION_SNAPSHOT_MISMATCH=1` is set.
 
 The matrix runner now passes a sibling `snapshot_blob.bin` automatically for
 cached `v8asm` binaries and can be pointed at an embedder snapshot with:
