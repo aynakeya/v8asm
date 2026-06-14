@@ -61,8 +61,10 @@ codex resume 019c42ba-60e2-7cb0-905b-0edd833425d3
   对应 V8 版本验证。
 - summary 表里的 `header_mismatch`/`ro_snapshot` 来自每个 case 的
   `*.checkversion.txt` 或 `*.disasm.err`。如果 bytenode 行还有
-  `undefined_fallbacks` 且 `ro_snapshot=mismatch`，优先查 v8asm/Node
-  embedder snapshot/RO heap 对象恢复，不要继续在 Python 层美化占位符。
+  `undefined_fallbacks`/`unresolved_objects` 且 `ro_snapshot=mismatch`，优先查
+  v8asm/Node embedder snapshot/RO heap 对象恢复，不要继续在 Python 层美化占位符。
+  `Unresolved Read-Only Object Suffixes` 表里记录的是 disasm 阶段唯一失败对象
+  的低地址 suffix；完整地址会随进程基址变动，suffix 更适合跨 run 对比。
 
 流水线执行：
 

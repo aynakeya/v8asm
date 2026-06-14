@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+from typing import TypedDict
 
 
 HEADER_FIELD_RE = re.compile(
@@ -19,6 +20,16 @@ CRASH_SIGNATURE_RE = re.compile(
     r"AddressSanitizer|heap-use-after-free",
     flags=re.I,
 )
+UNRESOLVED_OBJECT_RE = re.compile(
+    r"(0x[0-9a-fA-F]+)"
+    r"(?:: segmentfault(?:, disassemble stop| while discovering object, skipped)"
+    r"|\s+<undefined: segmentfault)"
+)
+
+
+class UnresolvedDiagnostics(TypedDict):
+    unresolved_objects: int
+    unresolved_suffixes: list[str]
 
 
 def classify_decompile_status(text: str) -> str:
@@ -54,6 +65,20 @@ def score_text(text: str) -> dict[str, int]:
         "undefined_fallbacks": len(re.findall(r"<undefined: segmentfault", text)),
         "holes": len(re.findall(r"\bHOLE\b", text)),
         "functions": len(re.findall(r"^\s*function\s+", text, flags=re.M)),
+    }
+
+
+def unresolved_object_addresses(text: str) -> set[str]:
+    addresses: set[str] = set()
+    for match in UNRESOLVED_OBJECT_RE.finditer(text):
+        addresses.add(f"0x{int(match.group(1), 16):x}")
+    return addresses
+
+
+def unresolved_object_suffixes(text: str) -> set[str]:
+    return {
+        f"{int(address, 16) & 0xffff:04x}"
+        for address in unresolved_object_addresses(text)
     }
 
 
@@ -94,6 +119,20 @@ def read_mode_header_diagnostics(case_dir: Path, case: str, mode: str) -> dict[s
     return {"header_mismatch": "n/a", "ro_snapshot": "n/a"}
 
 
+def read_mode_unresolved_diagnostics(
+    case_dir: Path, case: str, mode: str
+) -> UnresolvedDiagnostics:
+    path = case_dir / f"{case}.{mode}.disasm.txt"
+    if not path.exists():
+        return {"unresolved_objects": 0, "unresolved_suffixes": []}
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    suffixes = sorted(unresolved_object_suffixes(text))
+    return {
+        "unresolved_objects": len(unresolved_object_addresses(text)),
+        "unresolved_suffixes": suffixes,
+    }
+
+
 def main() -> int:
     if len(sys.argv) not in (2, 3) or (
         len(sys.argv) == 3 and sys.argv[2] != "--allow-failures"
@@ -113,20 +152,23 @@ def main() -> int:
     if metadata.exists():
         print(metadata.read_text(encoding="utf-8", errors="ignore").rstrip())
         print("")
-    print("| case | mode | status | header_mismatch | ro_snapshot | accu_lines | reg_refs | goto_comments | raw_goto | unknown | undefined_fallbacks | holes |")
-    print("|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+    print("| case | mode | status | header_mismatch | ro_snapshot | accu_lines | reg_refs | goto_comments | raw_goto | unknown | undefined_fallbacks | unresolved_objects | holes |")
+    print("|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
 
     failure_count = 0
+    unresolved_rows: list[tuple[str, str, list[str]]] = []
     for case_dir in case_dirs:
         case = case_dir.name
         for mode in ("v8asm", "bytenode"):
             header = read_mode_header_diagnostics(case_dir, case, mode)
+            unresolved = read_mode_unresolved_diagnostics(case_dir, case, mode)
             dec = case_dir / f"{case}.{mode}.dec.l4.js"
             if not dec.exists():
                 failure_count += 1
                 print(
                     f"| {case} | {mode} | missing_output | {header['header_mismatch']} | "
-                    f"{header['ro_snapshot']} | n/a | n/a | n/a | n/a | n/a | n/a | n/a |"
+                    f"{header['ro_snapshot']} | n/a | n/a | n/a | n/a | n/a | n/a | "
+                    f"{unresolved['unresolved_objects']} | n/a |"
                 )
                 continue
             text = dec.read_text(encoding="utf-8", errors="ignore")
@@ -136,12 +178,25 @@ def main() -> int:
             if status != "ok":
                 failure_count += 1
             s = score_text(text)
+            suffixes = list(unresolved["unresolved_suffixes"])
+            if suffixes:
+                unresolved_rows.append((case, mode, suffixes))
             print(
                 f"| {case} | {mode} | {status} | {header['header_mismatch']} | "
                 f"{header['ro_snapshot']} | {s['accu_lines']} | {s['reg_refs']} | "
                 f"{s['goto_comments']} | {s['raw_goto']} | {s['unknown_comments']} | "
-                f"{s['undefined_fallbacks']} | {s['holes']} |"
+                f"{s['undefined_fallbacks']} | {unresolved['unresolved_objects']} | "
+                f"{s['holes']} |"
             )
+
+    if unresolved_rows:
+        print("")
+        print("## Unresolved Read-Only Object Suffixes")
+        print("")
+        print("| case | mode | suffixes |")
+        print("|---|---:|---|")
+        for case, mode, suffixes in unresolved_rows:
+            print(f"| {case} | {mode} | `{','.join(suffixes)}` |")
 
     print("")
     print("## Quick Inspection Targets")
@@ -149,6 +204,7 @@ def main() -> int:
     print("- Any non-zero `raw_goto` indicates structurer fallback/regression.")
     print("- Non-zero `unknown` usually means translator opcode coverage is missing.")
     print("- Non-zero `undefined_fallbacks` with `ro_snapshot=mismatch` points at V8/embedder snapshot object recovery, not Python translation.")
+    print("- Non-zero `unresolved_objects` counts unique object-print failures in the disasm, before Python decompilation.")
     if failure_count:
         print("")
         print("## Failures")

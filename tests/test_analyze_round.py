@@ -10,7 +10,12 @@ ROUND_DIR = ROOT / "tests" / "decomp_rounds"
 if str(ROUND_DIR) not in sys.path:
     sys.path.insert(0, str(ROUND_DIR))
 
-from analyze_round import classify_decompile_status, parse_header_diagnostics
+from analyze_round import (
+    classify_decompile_status,
+    parse_header_diagnostics,
+    unresolved_object_addresses,
+    unresolved_object_suffixes,
+)
 
 
 class AnalyzeRoundTests(unittest.TestCase):
@@ -71,6 +76,21 @@ Cached data header:
             "input_missing",
         )
         self.assertEqual(classify_decompile_status("function ok() {}\n"), "ok")
+
+    def test_extracts_unique_unresolved_object_addresses(self) -> None:
+        text = """
+           1: 0x332de880a701 <undefined: segmentfault, might outside scope>
+           2: 0x332de880a701 <undefined: segmentfault, might outside scope>
+!0x332de880a701: segmentfault, disassemble stop
+!0x332de880d479: segmentfault while discovering object, skipped
+           3: 0x332de880ffee <String[4]: #fine>
+"""
+
+        self.assertEqual(
+            unresolved_object_addresses(text),
+            {"0x332de880a701", "0x332de880d479"},
+        )
+        self.assertEqual(unresolved_object_suffixes(text), {"a701", "d479"})
 
 
 if __name__ == "__main__":

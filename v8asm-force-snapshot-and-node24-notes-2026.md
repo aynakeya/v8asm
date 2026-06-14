@@ -83,3 +83,7 @@ It returns non-zero for `disasm_failed`, `decompile_failed`, `disasm_skipped`,
 `crash_signature`, and missing outputs. `run_round.sh` records Node build flags
 and skips bytenode force-disasm when pointer compression differs, so a crash is
 reported as a real failure instead of appearing as a zero-residue decompile.
+The summary now also counts unique unresolved object-print failures in the
+disassembly and emits a low-address-suffix table. That keeps bytenode
+`undefined_fallbacks` tied to concrete read-only heap objects even when the full
+heap address base changes between runs.
