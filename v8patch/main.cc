@@ -324,6 +324,20 @@ CacheExpectations current_cache_expectations(v8::internal::Isolate* isolate) {
   };
 }
 
+size_t cache_header_payload_max_size(size_t data_size) {
+  if (data_size < v8::internal::SerializedCodeData::kHeaderSize) return 0;
+  return data_size - v8::internal::SerializedCodeData::kHeaderSize;
+}
+
+bool cache_header_payload_is_plausible(const CacheHeader& header,
+                                       size_t data_size) {
+  if (data_size < v8::internal::SerializedCodeData::kHeaderSize) return false;
+  size_t max_payload = cache_header_payload_max_size(data_size);
+  if (header.payload_length > max_payload) return false;
+  if (max_payload > 0 && header.payload_length == 0) return false;
+  return true;
+}
+
 bool cache_header_matches_current_v8(const CacheHeader& header,
                                      const CacheExpectations& expected,
                                      size_t data_size) {
@@ -331,7 +345,7 @@ bool cache_header_matches_current_v8(const CacheHeader& header,
   if (header.version_hash != expected.version_hash) return false;
   if (header.flags_hash != expected.flags_hash) return false;
   if (header.ro_snapshot_checksum != expected.ro_snapshot_checksum) return false;
-  if (header.payload_length > data_size - v8::internal::SerializedCodeData::kHeaderSize) return false;
+  if (!cache_header_payload_is_plausible(header, data_size)) return false;
   return true;
 }
 
@@ -353,13 +367,8 @@ void print_cache_header_report(FILE* out, const CacheHeader& header,
           header.ro_snapshot_checksum == expected.ro_snapshot_checksum ? "" : " mismatch");
   fprintf(out, "  payload_length: %u (max %zu)%s\n",
           header.payload_length,
-          data_size >= v8::internal::SerializedCodeData::kHeaderSize
-              ? data_size - v8::internal::SerializedCodeData::kHeaderSize
-              : 0,
-          data_size >= v8::internal::SerializedCodeData::kHeaderSize &&
-                  header.payload_length <= data_size - v8::internal::SerializedCodeData::kHeaderSize
-              ? ""
-              : " mismatch");
+          cache_header_payload_max_size(data_size),
+          cache_header_payload_is_plausible(header, data_size) ? "" : " mismatch");
   fprintf(out, "  checksum: 0x%08x\n", header.checksum);
 }
 
@@ -390,6 +399,45 @@ VersionTuple bruteforce_v8_version(uint32_t target_hash,
   return VersionTuple{-1, -1, -1, -1};
 }
 
+struct KnownVersionHash {
+  uint32_t hash;
+  VersionTuple version;
+};
+
+bool lookup_known_v8_version_hash(uint32_t target_hash,
+                                  VersionTuple* cached_version) {
+  static const KnownVersionHash known_versions[] = {
+      {0x3569a082, VersionTuple{10, 2, 154, 26}},
+      {0x00e4c20b, VersionTuple{11, 3, 244, 8}},
+      {0x79dafe74, VersionTuple{12, 4, 254, 21}},
+      {0x2135fe8d, VersionTuple{13, 4, 114, 21}},
+      {0x2b2c7714, VersionTuple{13, 6, 233, 10}},
+  };
+
+  for (const KnownVersionHash& known_version : known_versions) {
+    if (known_version.hash == target_hash) {
+      if (cached_version != nullptr) {
+        *cached_version = known_version.version;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+bool cache_header_is_known_cross_major(const CacheHeader& header,
+                                       VersionTuple* cached_version) {
+  if (header.version_hash == v8::internal::Version::Hash()) return false;
+  VersionTuple known{-1, -1, -1, -1};
+  if (lookup_known_v8_version_hash(header.version_hash, &known)) {
+    if (cached_version != nullptr) *cached_version = known;
+    return known.major != v8::internal::Version::GetMajor();
+  }
+  VersionTuple found = bruteforce_v8_version(header.version_hash, 20, 20, 500, 200);
+  if (cached_version != nullptr) *cached_version = found;
+  return found.major >= 0 && found.major != v8::internal::Version::GetMajor();
+}
+
 int do_checkversion(const char* filename, v8::Isolate* isolate) {
   std::vector<uint8_t> data;
   if (!read_file_to_buffer(filename, data)) {
@@ -412,8 +460,14 @@ int do_checkversion(const char* filename, v8::Isolate* isolate) {
   CacheHeader header = parse_cache_header(data);
   CacheExpectations expected = current_cache_expectations(i_isolate);
   print_cache_header_report(stdout, header, expected, data.size());
-  printf("Starting brute-force search (0-20.0-20.0-500.0-200)...\n");
+  VersionTuple known{-1, -1, -1, -1};
+  if (lookup_known_v8_version_hash(version_hash, &known)) {
+    printf("Known matching version: %d.%d.%d.%d\n",
+           known.major, known.minor, known.build, known.patch);
+    return 0;
+  }
 
+  printf("Starting brute-force search (0-20.0-20.0-500.0-200)...\n");
   VersionTuple found = bruteforce_v8_version(version_hash, 20, 20, 500, 200);
   if (found.major >= 0) {
     printf("Found matching version: %d.%d.%d.%d\n", found.major, found.minor, found.build, found.patch);
@@ -508,6 +562,10 @@ int do_disasm(const char* filename, v8::Isolate* isolate, bool force_incompatibl
   }
   CacheHeader header = parse_cache_header(data);
   CacheExpectations expected = current_cache_expectations(i_isolate);
+  bool plausible_payload = cache_header_payload_is_plausible(header, data.size());
+  VersionTuple cached_version{-1, -1, -1, -1};
+  bool known_cross_major =
+      cache_header_is_known_cross_major(header, &cached_version);
   bool compatible =
       cache_header_matches_current_v8(header, expected, data.size());
   if (!compatible) {
@@ -516,6 +574,23 @@ int do_disasm(const char* filename, v8::Isolate* isolate, bool force_incompatibl
       fprintf(stderr,
               "Refusing to deserialize incompatible cached data. "
               "Use --force-incompatible for best-effort recovery.\n");
+      return 1;
+    }
+    if (!plausible_payload) {
+      fprintf(stderr,
+              "Refusing to force cached data because this V8 build parses an "
+              "impossible payload length. The cached-data header layout is "
+              "probably from a different major V8; use a matching v8asm "
+              "patch/build for direct recovery.\n");
+      return 1;
+    }
+    if (known_cross_major) {
+      fprintf(stderr,
+              "Refusing to force cached data from V8 %d.%d.%d.%d with this "
+              "V8 %d.x build. Cross-major bytecode layouts are not safe to "
+              "deserialize directly; use the matching major v8asm patch/build.\n",
+              cached_version.major, cached_version.minor, cached_version.build,
+              cached_version.patch, v8::internal::Version::GetMajor());
       return 1;
     }
     fprintf(stderr,
@@ -601,6 +676,16 @@ bool parse_startup_options(int argc, char* argv[], StartupOptions* options) {
   return true;
 }
 
+bool command_requests_force_incompatible(int argc, char* argv[]) {
+  for (int i = 1; i < argc; ++i) {
+    if (strcmp(argv[i], "--force-incompatible") == 0 ||
+        strcmp(argv[i], "--best-effort") == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 int main(int argc, char* argv[]) {
   StartupOptions startup_options;
   if (!parse_startup_options(argc, argv, &startup_options)) {
@@ -632,6 +717,10 @@ int main(int argc, char* argv[]) {
   v8::V8::SetFlagsFromString("--no-lazy --no-flush-bytecode");
   v8::V8::InitializeICUDefaultLocation(argv[0]);
   if (startup_options.snapshot_blob != nullptr) {
+    if (command_requests_force_incompatible(command_argc, command_args)) {
+      setenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH", "1", 0);
+      setenv("V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH", "1", 0);
+    }
     v8::V8::InitializeExternalStartupDataFromFile(
         startup_options.snapshot_blob);
   } else {

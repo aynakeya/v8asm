@@ -22,9 +22,15 @@ DEFAULT_NODE_VERSIONS=(18.20.8 20.20.2 22.17.0 24.7.0)
 VERSION_MATRIX_STRICT="${VERSION_MATRIX_STRICT:-1}"
 VERSION_MATRIX_REQUIRE_BINS="${VERSION_MATRIX_REQUIRE_BINS:-0}"
 VERSION_MATRIX_REQUIRE_NODES="${VERSION_MATRIX_REQUIRE_NODES:-0}"
+VERSION_MATRIX_FORCE_MISMATCH="${VERSION_MATRIX_FORCE_MISMATCH:-1}"
+VERSION_MATRIX_REQUIRE_FORCE_MISMATCH="${VERSION_MATRIX_REQUIRE_FORCE_MISMATCH:-0}"
+VERSION_MATRIX_USE_BIN_SNAPSHOT="${VERSION_MATRIX_USE_BIN_SNAPSHOT:-1}"
+VERSION_MATRIX_SNAPSHOT_BLOB="${VERSION_MATRIX_SNAPSHOT_BLOB:-}"
 
 gate_failures=()
 gate_warnings=()
+declare -A snapshot_blob_option_support_cache=()
+declare -A snapshot_blob_forced_recovery_cache=()
 
 mkdir -p "$OUT_DIR"
 
@@ -58,6 +64,89 @@ status_of() {
   fi
 }
 
+v8asm_snapshot_blob_for() {
+  local bin="$1"
+  if [[ -n "$VERSION_MATRIX_SNAPSHOT_BLOB" ]]; then
+    printf "%s" "$VERSION_MATRIX_SNAPSHOT_BLOB"
+    return
+  fi
+  if [[ "$VERSION_MATRIX_USE_BIN_SNAPSHOT" == "1" ]]; then
+    local bin_snapshot
+    bin_snapshot="$(dirname "$bin")/snapshot_blob.bin"
+    if [[ -f "$bin_snapshot" ]]; then
+      printf "%s" "$bin_snapshot"
+    fi
+  fi
+}
+
+run_v8asm() {
+  local bin="$1"
+  shift
+  local snapshot_blob
+  snapshot_blob="$(v8asm_snapshot_blob_for "$bin")"
+  if [[ -n "$snapshot_blob" ]] && v8asm_should_use_snapshot_blob "$bin" "$snapshot_blob" "$@"; then
+    "$bin" --snapshot_blob "$snapshot_blob" "$@"
+  else
+    "$bin" "$@"
+  fi
+}
+
+v8asm_args_request_force_incompatible() {
+  local arg
+  for arg in "$@"; do
+    if [[ "$arg" == "--force-incompatible" || "$arg" == "--best-effort" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+v8asm_should_use_snapshot_blob() {
+  local bin="$1"
+  local snapshot_blob="$2"
+  shift 2
+  if ! v8asm_binary_supports_snapshot_blob "$bin"; then
+    return 1
+  fi
+  if v8asm_args_request_force_incompatible "$@"; then
+    if [[ -n "$VERSION_MATRIX_SNAPSHOT_BLOB" ]]; then
+      v8asm_binary_supports_forced_snapshot_recovery "$bin"
+    else
+      return 0
+    fi
+  else
+    [[ -z "$VERSION_MATRIX_SNAPSHOT_BLOB" ]]
+  fi
+}
+
+v8asm_binary_supports_snapshot_blob() {
+  local bin="$1"
+  if [[ -n "${snapshot_blob_option_support_cache[$bin]:-}" ]]; then
+    [[ "${snapshot_blob_option_support_cache[$bin]}" == "yes" ]]
+    return
+  fi
+  if grep -aq -- "--snapshot_blob" "$bin"; then
+    snapshot_blob_option_support_cache[$bin]="yes"
+    return 0
+  fi
+  snapshot_blob_option_support_cache[$bin]="no"
+  return 1
+}
+
+v8asm_binary_supports_forced_snapshot_recovery() {
+  local bin="$1"
+  if [[ -n "${snapshot_blob_forced_recovery_cache[$bin]:-}" ]]; then
+    [[ "${snapshot_blob_forced_recovery_cache[$bin]}" == "yes" ]]
+    return
+  fi
+  if grep -aq -- "V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH" "$bin"; then
+    snapshot_blob_forced_recovery_cache[$bin]="yes"
+    return 0
+  fi
+  snapshot_blob_forced_recovery_cache[$bin]="no"
+  return 1
+}
+
 append_unique() {
   local value="$1"
   shift
@@ -83,7 +172,7 @@ has_crash_signature() {
   local file="$1"
   [[ -s "$file" ]] || return 1
   grep -Eiq \
-    "Segmentation fault|SIGSEGV|Received signal|Trace/breakpoint trap|core dumped|CHECK failed|DCHECK failed|AddressSanitizer|heap-use-after-free" \
+    "Segmentation fault|SIGSEGV|SIGTRAP|Received signal|Trace/breakpoint trap|core dumped|Fatal error|FailureMessage|unreachable code|CHECK failed|DCHECK failed|AddressSanitizer|heap-use-after-free" \
     "$file"
 }
 
@@ -104,7 +193,7 @@ strict_disasm_status() {
   local txt="$3"
   local err="$4"
   set +e
-  "$bin" disasm "$jsc" >"$txt" 2>"$err"
+  run_v8asm "$bin" disasm "$jsc" >"$txt" 2>"$err"
   local code="$?"
   set -e
   status_of "$code"
@@ -116,7 +205,7 @@ force_disasm_status() {
   local txt="$3"
   local err="$4"
   set +e
-  "$bin" disasm "$jsc" --force-incompatible >"$txt" 2>"$err"
+  run_v8asm "$bin" disasm "$jsc" --force-incompatible >"$txt" 2>"$err"
   local code="$?"
   set -e
   status_of "$code"
@@ -145,6 +234,12 @@ build_arg_value() {
   echo "- case: \`$CASE\`"
   echo "- bytenode_path: \`$BYTENODE_PATH\`"
   echo "- strict_gate: \`$VERSION_MATRIX_STRICT\`"
+  echo "- force_mismatch_probe: \`$VERSION_MATRIX_FORCE_MISMATCH\`"
+  echo "- require_force_mismatch: \`$VERSION_MATRIX_REQUIRE_FORCE_MISMATCH\`"
+  echo "- use_bin_snapshot_blob: \`$VERSION_MATRIX_USE_BIN_SNAPSHOT\`"
+  if [[ -n "$VERSION_MATRIX_SNAPSHOT_BLOB" ]]; then
+    echo "- snapshot_blob_override: \`$VERSION_MATRIX_SNAPSHOT_BLOB\`"
+  fi
   if [[ -f "$BYTENODE_PATH/package.json" ]]; then
     bytenode_version="$(node -e "const p=require(process.argv[1] + '/package.json'); console.log(p.version || 'unknown')" "$BYTENODE_PATH")"
     echo "- bytenode_version: \`$bytenode_version\`"
@@ -173,8 +268,8 @@ for bin in "${v8asm_bins[@]}"; do
     continue
   fi
 
-  version="$("$bin" version)"
-  build_args="$("$bin" build-args | paste -sd ';' -)"
+  version="$(run_v8asm "$bin" version)"
+  build_args="$(run_v8asm "$bin" build-args | paste -sd ';' -)"
   work="$OUT_DIR/self-$label"
   mkdir -p "$work"
   jsc="$work/$case_base.jsc"
@@ -184,7 +279,7 @@ for bin in "${v8asm_bins[@]}"; do
   dec_err="$work/$case_base.decompile.err"
 
   set +e
-  "$bin" asm "$CASE" -o "$jsc" >"$work/$case_base.asm.log" 2>&1
+  run_v8asm "$bin" asm "$CASE" -o "$jsc" >"$work/$case_base.asm.log" 2>&1
   asm_code="$?"
   set -e
   asm_status="$(status_of "$asm_code")"
@@ -218,8 +313,8 @@ done
   echo ""
   echo "## bytenode Cache Checked Against v8asm"
   echo ""
-  echo "| node | node_v8 | v8asm_label | v8asm_version | numeric_match | pointer_match | strict_disasm | force_disasm | decompile_force |"
-  echo "|---|---:|---|---:|---:|---:|---:|---:|---:|"
+  echo "| node | node_v8 | v8asm_label | v8asm_version | numeric_match | pointer_match | force_policy | strict_disasm | force_disasm | decompile_force |"
+  echo "|---|---:|---|---:|---:|---:|---|---:|---:|---:|"
 } >>"$summary"
 
 for node_version in "${node_versions[@]}"; do
@@ -228,7 +323,7 @@ for node_version in "${node_versions[@]}"; do
   nvm_code="$?"
   set -e
   if [[ "$nvm_code" != "0" ]]; then
-    echo "| \`$node_version\` | n/a | all | n/a | n/a | n/a | n/a | n/a | n/a |" >>"$summary"
+    echo "| \`$node_version\` | n/a | all | n/a | n/a | n/a | n/a | n/a | n/a | n/a |" >>"$summary"
     if [[ "$VERSION_MATRIX_REQUIRE_NODES" == "1" ]]; then
       record_failure "required Node version is not installed: $node_version"
     else
@@ -250,7 +345,7 @@ for node_version in "${node_versions[@]}"; do
   set -e
   check_crash_output "bytenode $node_actual compile" "$btn_dir/$case_base.bytenode.asm.log"
   if [[ "$btn_code" != "0" ]]; then
-    echo "| \`$node_actual\` | \`$node_v8\` | all | n/a | n/a | n/a | bytenode-fail:$btn_code | n/a | n/a |" >>"$summary"
+    echo "| \`$node_actual\` | \`$node_v8\` | all | n/a | n/a | n/a | n/a | bytenode-fail:$btn_code | n/a | n/a |" >>"$summary"
     record_failure "bytenode compile failed for $node_actual with exit $btn_code"
     continue
   fi
@@ -261,7 +356,7 @@ for node_version in "${node_versions[@]}"; do
       label="repo-v8asm"
     fi
     if [[ ! -x "$bin" ]]; then
-      echo "| \`$node_actual\` | \`$node_v8\` | $label | missing | n/a | n/a | n/a | n/a | n/a |" >>"$summary"
+      echo "| \`$node_actual\` | \`$node_v8\` | $label | missing | n/a | n/a | n/a | n/a | n/a | n/a |" >>"$summary"
       if [[ "$VERSION_MATRIX_REQUIRE_BINS" == "1" ]]; then
         record_failure "required v8asm binary is missing for bytenode check: $bin"
       else
@@ -269,8 +364,8 @@ for node_version in "${node_versions[@]}"; do
       fi
       continue
     fi
-    version="$("$bin" version)"
-    build_args="$("$bin" build-args | paste -sd ';' -)"
+    version="$(run_v8asm "$bin" version)"
+    build_args="$(run_v8asm "$bin" build-args | paste -sd ';' -)"
     bin_pointer_compression="$(build_arg_value "$build_args" "v8_enable_pointer_compression")"
     numeric_match="no"
     if [[ "$node_v8_numeric" == "$version" ]]; then
@@ -285,13 +380,17 @@ for node_version in "${node_versions[@]}"; do
     fi
     work="$OUT_DIR/bytenode-${node_actual#v}-$label"
     mkdir -p "$work"
-    "$bin" checkversion "$btn_jsc" >"$work/$case_base.checkversion.txt" 2>&1 || true
+    run_v8asm "$bin" checkversion "$btn_jsc" >"$work/$case_base.checkversion.txt" 2>&1 || true
     check_crash_output "bytenode $node_actual $label checkversion" "$work/$case_base.checkversion.txt"
     strict_status="$(strict_disasm_status "$bin" "$btn_jsc" "$work/$case_base.strict.disasm.txt" "$work/$case_base.strict.disasm.err")"
     check_crash_output "bytenode $node_actual $label strict disasm" "$work/$case_base.strict.disasm.err" "$work/$case_base.strict.disasm.txt"
-    should_force="no"
+    force_policy="skip"
     if [[ "$numeric_match" == "yes" && "$pointer_match" == "yes" ]]; then
-      should_force="yes"
+      force_policy="required"
+      force_status="$(force_disasm_status "$bin" "$btn_jsc" "$work/$case_base.force.disasm.txt" "$work/$case_base.force.disasm.err")"
+      check_crash_output "bytenode $node_actual $label force disasm" "$work/$case_base.force.disasm.err" "$work/$case_base.force.disasm.txt"
+    elif [[ "$VERSION_MATRIX_FORCE_MISMATCH" == "1" && "$pointer_match" == "yes" ]]; then
+      force_policy="probe:numeric-mismatch"
       force_status="$(force_disasm_status "$bin" "$btn_jsc" "$work/$case_base.force.disasm.txt" "$work/$case_base.force.disasm.err")"
       check_crash_output "bytenode $node_actual $label force disasm" "$work/$case_base.force.disasm.err" "$work/$case_base.force.disasm.txt"
     else
@@ -309,13 +408,21 @@ for node_version in "${node_versions[@]}"; do
     else
       decompile="n/a"
     fi
-    echo "| \`$node_actual\` | \`$node_v8\` | $label | \`$version\` | $numeric_match | $pointer_match | $strict_status | $force_status | $decompile |" >>"$summary"
-    if [[ "$should_force" == "yes" ]]; then
+    echo "| \`$node_actual\` | \`$node_v8\` | $label | \`$version\` | $numeric_match | $pointer_match | $force_policy | $strict_status | $force_status | $decompile |" >>"$summary"
+    if [[ "$force_policy" == "required" ]]; then
       if [[ "$force_status" != "ok" ]]; then
         record_failure "bytenode $node_actual vs $label should force successfully but returned $force_status"
       fi
       if [[ "$decompile" != "ok" ]]; then
         record_failure "bytenode $node_actual vs $label force decompile returned $decompile"
+      fi
+    elif [[ "$force_policy" == probe:* ]]; then
+      if [[ "$force_status" != "ok" ]]; then
+        if [[ "$VERSION_MATRIX_REQUIRE_FORCE_MISMATCH" == "1" ]]; then
+          record_failure "bytenode $node_actual vs $label mismatch probe returned $force_status"
+        else
+          record_warning "bytenode $node_actual vs $label mismatch probe returned $force_status"
+        fi
       fi
     elif [[ "$force_status" != skipped:* ]]; then
       record_failure "bytenode $node_actual vs $label should skip force but returned $force_status"
