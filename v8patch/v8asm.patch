@@ -254,10 +254,10 @@ index d3e5ec68657..2cba6fd6fa2 100644
  void HeapNumber::HeapNumberShortPrint(std::ostream& os) {
 diff --git a/src/disassembler/main.cc b/src/disassembler/main.cc
 new file mode 100644
-index 00000000000..4370882f3fb
+index 00000000000..9be068201ce
 --- /dev/null
 +++ b/src/disassembler/main.cc
-@@ -0,0 +1,869 @@
+@@ -0,0 +1,870 @@
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <fstream>
@@ -846,12 +846,11 @@ index 00000000000..4370882f3fb
 +    }
 +    if (known_cross_major) {
 +      fprintf(stderr,
-+              "Refusing to force cached data from V8 %d.%d.%d.%d with this "
-+              "V8 %d.x build. Cross-major bytecode layouts are not safe to "
-+              "deserialize directly; use the matching major v8asm patch/build.\n",
++              "Warning: forcing cached data from V8 %d.%d.%d.%d with this "
++              "V8 %d.x build. Cross-major bytecode layouts are crash-prone; "
++              "prefer the matching major v8asm patch/build when possible.\n",
 +              cached_version.major, cached_version.minor, cached_version.build,
 +              cached_version.patch, v8::internal::Version::GetMajor());
-+      return 1;
 +    }
 +    fprintf(stderr,
 +            "Forcing incompatible cached data; output may be partial.\n");
@@ -996,7 +995,8 @@ index 00000000000..4370882f3fb
 +  return value != nullptr && strcmp(value, "0") != 0;
 +}
 +
-+bool validate_snapshot_blob_version(const char* snapshot_blob) {
++bool validate_snapshot_blob_version(const char* snapshot_blob,
++                                    bool force_incompatible) {
 +  char snapshot_version[kV8AsmSnapshotVersionLength + 1];
 +  if (!read_snapshot_version(snapshot_blob, snapshot_version)) {
 +    return false;
@@ -1007,7 +1007,7 @@ index 00000000000..4370882f3fb
 +    return true;
 +  }
 +
-+  if (allow_cross_version_snapshot_mismatch()) {
++  if (force_incompatible || allow_cross_version_snapshot_mismatch()) {
 +    fprintf(stderr,
 +            "Warning: forcing cross-version snapshot blob load.\n"
 +            "#   V8 binary version: %s\n"
@@ -1053,7 +1053,8 @@ index 00000000000..4370882f3fb
 +  if (startup_options.snapshot_blob != nullptr) {
 +    bool force_incompatible =
 +        command_requests_force_incompatible(command_argc, command_argv.data());
-+    if (!validate_snapshot_blob_version(startup_options.snapshot_blob)) {
++    if (!validate_snapshot_blob_version(startup_options.snapshot_blob,
++                                        force_incompatible)) {
 +      return 1;
 +    }
 +    if (force_incompatible) {
@@ -1245,10 +1246,35 @@ index 11ced93c085..dc7b8eb6246 100644
  }
  
 diff --git a/src/snapshot/deserializer.cc b/src/snapshot/deserializer.cc
-index 114cb45c3a7..2249551e0b3 100644
+index 114cb45c3a7..306592316ea 100644
 --- a/src/snapshot/deserializer.cc
 +++ b/src/snapshot/deserializer.cc
-@@ -344,7 +344,7 @@ Deserializer<IsolateT>::Deserializer(IsolateT* isolate,
+@@ -4,6 +4,8 @@
+ 
+ #include "src/snapshot/deserializer.h"
+ 
++#include <cstdlib>
++#include <cstring>
+ #include <inttypes.h>
+ 
+ #include "src/base/logging.h"
+@@ -47,6 +49,15 @@ namespace v8::internal {
+ #define PRIxTAGGED PRIxPTR
+ #endif
+ 
++namespace {
++
++bool V8AsmAllowsSnapshotVersionMismatch() {
++  const char* value = std::getenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH");
++  return value != nullptr && std::strcmp(value, "0") != 0;
++}
++
++}  // namespace
++
+ // A SlotAccessor for a slot in a HeapObject, which abstracts the slot
+ // operations done by the deserializer in a way which is GC-safe. In particular,
+ // rather than an absolute slot address, this accessor holds a Handle to the
+@@ -344,7 +355,7 @@ Deserializer<IsolateT>::Deserializer(IsolateT* isolate,
  #ifdef DEBUG
    num_api_references_ = GetNumApiReferences(isolate);
  #endif  // DEBUG
@@ -1257,7 +1283,26 @@ index 114cb45c3a7..2249551e0b3 100644
  }
  
  template <typename IsolateT>
-@@ -1128,9 +1128,26 @@ int Deserializer<IsolateT>::ReadReadOnlyHeapRef(uint8_t data,
+@@ -382,7 +393,17 @@ void Deserializer<IsolateT>::VisitRootPointers(Root root,
+ template <typename IsolateT>
+ void Deserializer<IsolateT>::Synchronize(VisitorSynchronization::SyncTag tag) {
+   static const uint8_t expected = kSynchronize;
+-  CHECK_EQ(expected, source_.Get());
++  uint8_t actual = source_.Get();
++  if (actual != expected) {
++    if (V8AsmAllowsSnapshotVersionMismatch()) {
++      PrintF(stderr,
++             "v8asm: ignoring snapshot synchronize marker mismatch for tag "
++             "%d: got 0x%02x expected 0x%02x\n",
++             static_cast<int>(tag), actual, expected);
++      return;
++    }
++    CHECK_EQ(expected, actual);
++  }
+   if (v8_flags.trace_deserialization) {
+     const char* name;
+     switch (tag) {
+@@ -1128,9 +1149,26 @@ int Deserializer<IsolateT>::ReadReadOnlyHeapRef(uint8_t data,
    uint32_t chunk_offset = source_.GetUint30();
  
    ReadOnlySpace* read_only_space = isolate()->heap()->read_only_space();
@@ -1287,6 +1332,85 @@ index 114cb45c3a7..2249551e0b3 100644
  
    if (v8_flags.trace_deserialization) {
      PrintF("%*sReadOnlyHeapRef [%u, %u] : ", depth_, "", chunk_index,
+diff --git a/src/snapshot/read-only-deserializer.cc b/src/snapshot/read-only-deserializer.cc
+index f1056d7aa6b..41cd73e023e 100644
+--- a/src/snapshot/read-only-deserializer.cc
++++ b/src/snapshot/read-only-deserializer.cc
+@@ -14,9 +14,21 @@
+ #include "src/snapshot/read-only-serializer-deserializer.h"
+ #include "src/snapshot/snapshot-data.h"
+ 
++#include <cstdlib>
++#include <cstring>
++
+ namespace v8 {
+ namespace internal {
+ 
++namespace {
++
++bool V8AsmAllowsSnapshotVersionMismatch() {
++  const char* value = std::getenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH");
++  return value != nullptr && std::strcmp(value, "0") != 0;
++}
++
++}  // namespace
++
+ class ReadOnlyHeapImageDeserializer final {
+  public:
+   static void Deserialize(Isolate* isolate, SnapshotByteSource* source) {
+@@ -164,6 +176,12 @@ void ReadOnlyDeserializer::DeserializeIntoIsolate() {
+   ReadOnlyHeapImageDeserializer::Deserialize(isolate(), source());
+   ReadOnlyHeap* ro_heap = isolate()->read_only_heap();
+   ro_heap->read_only_space()->RepairFreeSpacesAfterDeserialization();
++  if (V8AsmAllowsSnapshotVersionMismatch()) {
++    PrintF(stderr,
++           "v8asm: skipping read-only heap post-processing for forced "
++           "snapshot version mismatch.\n");
++    return;
++  }
+   PostProcessNewObjects();
+ 
+   ReadOnlyRoots roots(isolate());
+diff --git a/src/snapshot/shared-heap-deserializer.cc b/src/snapshot/shared-heap-deserializer.cc
+index bfb4a8948d5..1fe4b6b3c3a 100644
+--- a/src/snapshot/shared-heap-deserializer.cc
++++ b/src/snapshot/shared-heap-deserializer.cc
+@@ -6,9 +6,21 @@
+ 
+ #include "src/heap/heap-inl.h"
+ 
++#include <cstdlib>
++#include <cstring>
++
+ namespace v8 {
+ namespace internal {
+ 
++namespace {
++
++bool V8AsmAllowsSnapshotVersionMismatch() {
++  const char* value = std::getenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH");
++  return value != nullptr && std::strcmp(value, "0") != 0;
++}
++
++}  // namespace
++
+ void SharedHeapDeserializer::DeserializeIntoIsolate() {
+   // Don't deserialize into isolates that don't own their string table. If there
+   // are client Isolates, the shared heap object cache should already be
+@@ -49,6 +61,13 @@ void SharedHeapDeserializer::DeserializeStringTable() {
+     strings.emplace_back(Cast<String>(ReadObject()));
+   }
+ 
++  if (V8AsmAllowsSnapshotVersionMismatch()) {
++    PrintF(stderr,
++           "v8asm: skipping shared string table insertion for forced "
++           "snapshot version mismatch.\n");
++    return;
++  }
++
+   StringTable* t = isolate()->string_table();
+   DCHECK_EQ(t->NumberOfElements(), 0);
+   t->InsertForIsolateDeserialization(
 diff --git a/src/snapshot/snapshot.cc b/src/snapshot/snapshot.cc
 index 4a3f6bdaf88..576a23ae7ec 100644
 --- a/src/snapshot/snapshot.cc
@@ -1334,13 +1458,14 @@ index 4a3f6bdaf88..576a23ae7ec 100644
          "Version mismatch between V8 binary and snapshot.\n"
          "#   V8 binary version: %.*s\n"
 diff --git a/src/snapshot/startup-deserializer.cc b/src/snapshot/startup-deserializer.cc
-index 30c6ca93d5c..cba46f53267 100644
+index 30c6ca93d5c..4cecbf9a65c 100644
 --- a/src/snapshot/startup-deserializer.cc
 +++ b/src/snapshot/startup-deserializer.cc
-@@ -14,9 +14,22 @@
+@@ -14,9 +14,23 @@
  #include "src/objects/oddball.h"
  #include "src/roots/roots-inl.h"
  
++#include <algorithm>
 +#include <cstdlib>
 +#include <cstring>
 +
@@ -1360,7 +1485,7 @@ index 30c6ca93d5c..cba46f53267 100644
  void StartupDeserializer::DeserializeIntoIsolate() {
    TRACE_EVENT0("v8", "V8.DeserializeIsolate");
    RCS_SCOPE(isolate(), RuntimeCallCounterId::kDeserializeIsolate);
-@@ -96,12 +109,85 @@ void StartupDeserializer::DeserializeAndCheckExternalReferenceTable() {
+@@ -96,12 +110,97 @@ void StartupDeserializer::DeserializeAndCheckExternalReferenceTable() {
    // Verify that any external reference entries that were deduplicated in the
    // serializer are also deduplicated in this isolate.
    ExternalReferenceTable* table = isolate()->external_reference_table();
@@ -1370,12 +1495,16 @@ index 30c6ca93d5c..cba46f53267 100644
 +  const uint32_t current_end =
 +      ExternalReferenceTable::kSizeIsolateIndependent;
 +  uint32_t snapshot_end = current_end;
++  uint32_t forced_end_min = current_end;
++  uint32_t forced_end_max = current_end;
 +  if (allow_mismatch && snapshot_table_size != current_table_size) {
 +    int64_t table_delta = static_cast<int64_t>(current_table_size) -
 +                          static_cast<int64_t>(snapshot_table_size);
 +    int64_t inferred_end = static_cast<int64_t>(current_end) - table_delta;
 +    if (inferred_end >= 0 && inferred_end < (1LL << 30)) {
 +      snapshot_end = static_cast<uint32_t>(inferred_end);
++      forced_end_min = std::min(snapshot_end, current_end);
++      forced_end_max = std::max(snapshot_end, current_end);
 +      PrintF(
 +          "v8asm: using snapshot external reference table size %u "
 +          "(current %u), inferred startup sentinel %u (current %u)\n",
@@ -1387,6 +1516,14 @@ index 30c6ca93d5c..cba46f53267 100644
      uint32_t index = source()->GetUint30();
 -    if (index == ExternalReferenceTable::kSizeIsolateIndependent) break;
 +    if (index == current_end || (allow_mismatch && index == snapshot_end)) {
++      break;
++    }
++    if (allow_mismatch && forced_end_min != forced_end_max &&
++        forced_end_min <= index && index <= forced_end_max) {
++      PrintF(
++          "v8asm: treating startup external reference index %u as forced "
++          "snapshot sentinel (inferred range %u..%u)\n",
++          index, forced_end_min, forced_end_max);
 +      break;
 +    }
      uint32_t encoded_index = source()->GetUint30();

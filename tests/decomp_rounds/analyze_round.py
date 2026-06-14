@@ -13,6 +13,35 @@ HEADER_FIELD_RE = re.compile(
 HEADER_FIELD_ALIASES = {
     "read_only_snapshot_checksum": "ro_snapshot",
 }
+CRASH_SIGNATURE_RE = re.compile(
+    r"Segmentation fault|SIGSEGV|SIGTRAP|Trace/breakpoint trap|core dumped|"
+    r"Fatal error|FailureMessage|unreachable code|CHECK failed|DCHECK failed|"
+    r"AddressSanitizer|heap-use-after-free",
+    flags=re.I,
+)
+
+
+def classify_decompile_status(text: str) -> str:
+    if "// input jsc not found:" in text:
+        return "input_missing"
+    if "// disasm failed for" in text:
+        return "disasm_failed"
+    if "// disasm skipped for" in text:
+        return "disasm_skipped"
+    if "// decompile failed for" in text:
+        return "decompile_failed"
+    return "ok"
+
+
+def mode_has_crash_signature(case_dir: Path, case: str, mode: str) -> bool:
+    for suffix in ("disasm.err", "disasm.txt", "decompile.err"):
+        path = case_dir / f"{case}.{mode}.{suffix}"
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if CRASH_SIGNATURE_RE.search(text):
+            return True
+    return False
 
 
 def score_text(text: str) -> dict[str, int]:
@@ -66,9 +95,12 @@ def read_mode_header_diagnostics(case_dir: Path, case: str, mode: str) -> dict[s
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("Usage: analyze_round.py <out_dir>", file=sys.stderr)
+    if len(sys.argv) not in (2, 3) or (
+        len(sys.argv) == 3 and sys.argv[2] != "--allow-failures"
+    ):
+        print("Usage: analyze_round.py <out_dir> [--allow-failures]", file=sys.stderr)
         return 1
+    allow_failures = len(sys.argv) == 3 and sys.argv[2] == "--allow-failures"
     out_dir = Path(sys.argv[1])
     if not out_dir.exists():
         print(f"Missing out dir: {out_dir}", file=sys.stderr)
@@ -81,24 +113,31 @@ def main() -> int:
     if metadata.exists():
         print(metadata.read_text(encoding="utf-8", errors="ignore").rstrip())
         print("")
-    print("| case | mode | header_mismatch | ro_snapshot | accu_lines | reg_refs | goto_comments | raw_goto | unknown | undefined_fallbacks | holes |")
-    print("|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+    print("| case | mode | status | header_mismatch | ro_snapshot | accu_lines | reg_refs | goto_comments | raw_goto | unknown | undefined_fallbacks | holes |")
+    print("|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|")
 
+    failure_count = 0
     for case_dir in case_dirs:
         case = case_dir.name
         for mode in ("v8asm", "bytenode"):
             header = read_mode_header_diagnostics(case_dir, case, mode)
             dec = case_dir / f"{case}.{mode}.dec.l4.js"
             if not dec.exists():
+                failure_count += 1
                 print(
-                    f"| {case} | {mode} | {header['header_mismatch']} | "
+                    f"| {case} | {mode} | missing_output | {header['header_mismatch']} | "
                     f"{header['ro_snapshot']} | n/a | n/a | n/a | n/a | n/a | n/a | n/a |"
                 )
                 continue
             text = dec.read_text(encoding="utf-8", errors="ignore")
+            status = classify_decompile_status(text)
+            if mode_has_crash_signature(case_dir, case, mode):
+                status = "crash_signature"
+            if status != "ok":
+                failure_count += 1
             s = score_text(text)
             print(
-                f"| {case} | {mode} | {header['header_mismatch']} | "
+                f"| {case} | {mode} | {status} | {header['header_mismatch']} | "
                 f"{header['ro_snapshot']} | {s['accu_lines']} | {s['reg_refs']} | "
                 f"{s['goto_comments']} | {s['raw_goto']} | {s['unknown_comments']} | "
                 f"{s['undefined_fallbacks']} | {s['holes']} |"
@@ -110,6 +149,11 @@ def main() -> int:
     print("- Any non-zero `raw_goto` indicates structurer fallback/regression.")
     print("- Non-zero `unknown` usually means translator opcode coverage is missing.")
     print("- Non-zero `undefined_fallbacks` with `ro_snapshot=mismatch` points at V8/embedder snapshot object recovery, not Python translation.")
+    if failure_count:
+        print("")
+        print("## Failures")
+        print(f"- {failure_count} mode(s) failed before a usable decompile output.")
+        return 0 if allow_failures else 1
     return 0
 
 

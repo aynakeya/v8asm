@@ -10,7 +10,7 @@ ROUND_DIR = ROOT / "tests" / "decomp_rounds"
 if str(ROUND_DIR) not in sys.path:
     sys.path.insert(0, str(ROUND_DIR))
 
-from analyze_round import parse_header_diagnostics
+from analyze_round import classify_decompile_status, parse_header_diagnostics
 
 
 class AnalyzeRoundTests(unittest.TestCase):
@@ -52,6 +52,25 @@ Cached data header:
 
         self.assertEqual(diagnostics["header_mismatch"], "n/a")
         self.assertEqual(diagnostics["ro_snapshot"], "n/a")
+
+    def test_classifies_round_failure_placeholders(self) -> None:
+        self.assertEqual(
+            classify_decompile_status("// disasm failed for sample.jsc\n"),
+            "disasm_failed",
+        )
+        self.assertEqual(
+            classify_decompile_status("// decompile failed for sample.txt\n"),
+            "decompile_failed",
+        )
+        self.assertEqual(
+            classify_decompile_status("// disasm skipped for sample.jsc\n"),
+            "disasm_skipped",
+        )
+        self.assertEqual(
+            classify_decompile_status("// input jsc not found: sample.jsc\n"),
+            "input_missing",
+        )
+        self.assertEqual(classify_decompile_status("function ok() {}\n"), "ok")
 
 
 if __name__ == "__main__":

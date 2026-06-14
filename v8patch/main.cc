@@ -586,12 +586,11 @@ int do_disasm(const char* filename, v8::Isolate* isolate, bool force_incompatibl
     }
     if (known_cross_major) {
       fprintf(stderr,
-              "Refusing to force cached data from V8 %d.%d.%d.%d with this "
-              "V8 %d.x build. Cross-major bytecode layouts are not safe to "
-              "deserialize directly; use the matching major v8asm patch/build.\n",
+              "Warning: forcing cached data from V8 %d.%d.%d.%d with this "
+              "V8 %d.x build. Cross-major bytecode layouts are crash-prone; "
+              "prefer the matching major v8asm patch/build when possible.\n",
               cached_version.major, cached_version.minor, cached_version.build,
               cached_version.patch, v8::internal::Version::GetMajor());
-      return 1;
     }
     fprintf(stderr,
             "Forcing incompatible cached data; output may be partial.\n");
@@ -725,7 +724,8 @@ bool allow_cross_version_snapshot_mismatch() {
   return value != nullptr && strcmp(value, "0") != 0;
 }
 
-bool validate_snapshot_blob_version(const char* snapshot_blob) {
+bool validate_snapshot_blob_version(const char* snapshot_blob,
+                                    bool force_incompatible) {
   char snapshot_version[kV8AsmSnapshotVersionLength + 1];
   if (!read_snapshot_version(snapshot_blob, snapshot_version)) {
     return false;
@@ -736,7 +736,7 @@ bool validate_snapshot_blob_version(const char* snapshot_blob) {
     return true;
   }
 
-  if (allow_cross_version_snapshot_mismatch()) {
+  if (force_incompatible || allow_cross_version_snapshot_mismatch()) {
     fprintf(stderr,
             "Warning: forcing cross-version snapshot blob load.\n"
             "#   V8 binary version: %s\n"
@@ -789,7 +789,8 @@ int main(int argc, char* argv[]) {
   if (startup_options.snapshot_blob != nullptr) {
     bool force_incompatible =
         command_requests_force_incompatible(command_argc, command_args);
-    if (!validate_snapshot_blob_version(startup_options.snapshot_blob)) {
+    if (!validate_snapshot_blob_version(startup_options.snapshot_blob,
+                                        force_incompatible)) {
       return 1;
     }
     if (force_incompatible) {

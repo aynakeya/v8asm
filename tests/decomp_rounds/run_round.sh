@@ -25,10 +25,20 @@ if [[ ! -f "$BYTENODE_PATH/package.json" ]]; then
 fi
 
 v8asm_version="$("$V8ASM_BIN" version)"
+v8asm_build_args="$("$V8ASM_BIN" build-args)"
+v8asm_pointer_compression="$(printf '%s\n' "$v8asm_build_args" | awk -F= '/^v8_enable_pointer_compression=/ {print $2}')"
 node_version="$(node -v)"
 node_v8_version="$(node -p 'process.versions.v8')"
 node_v8_numeric="${node_v8_version%%-*}"
+node_pointer_compression_raw="$(node -p 'String(process.config.variables.v8_enable_pointer_compression || 0)')"
+node_sandbox_raw="$(node -p 'String(process.config.variables.v8_enable_sandbox || 0)')"
+node_snapshot_raw="$(node -p 'String(process.config.variables.node_use_node_snapshot || false)')"
 bytenode_version="$(node -e "const p=require(process.argv[1] + '/package.json'); console.log(p.version || 'unknown')" "$BYTENODE_PATH")"
+if [[ "$node_pointer_compression_raw" == "1" || "$node_pointer_compression_raw" == "true" ]]; then
+  node_pointer_compression="true"
+else
+  node_pointer_compression="false"
+fi
 if [[ "$node_v8_numeric" == "$v8asm_version" ]]; then
   compat_note="same numeric V8 version; Node/bytenode still use Node embedder snapshot/flags"
 else
@@ -40,9 +50,12 @@ fi
   echo "- v8asm_bin: \`$V8ASM_BIN\`"
   echo "- v8asm_version: \`$v8asm_version\`"
   echo "- v8asm_build_args:"
-  "$V8ASM_BIN" build-args | sed 's/^/  - /'
+  printf '%s\n' "$v8asm_build_args" | sed 's/^/  - /'
   echo "- node_version: \`$node_version\`"
   echo "- node_v8_version: \`$node_v8_version\`"
+  echo "- node_v8_enable_pointer_compression: \`$node_pointer_compression_raw\`"
+  echo "- node_v8_enable_sandbox: \`$node_sandbox_raw\`"
+  echo "- node_use_node_snapshot: \`$node_snapshot_raw\`"
   echo "- bytenode_path: \`$BYTENODE_PATH\`"
   echo "- bytenode_version: \`$bytenode_version\`"
   echo "- compatibility_note: $compat_note"
@@ -77,6 +90,18 @@ for js in "$CASE_DIR"/*.js; do
     disasm_args=()
     if [[ "$mode" == "bytenode" ]]; then
       disasm_args+=(--force-incompatible)
+      if [[ -n "$v8asm_pointer_compression" && "$v8asm_pointer_compression" != "$node_pointer_compression" ]]; then
+        {
+          echo "// disasm skipped for $in_jsc"
+          echo "// reason: v8asm pointer compression is $v8asm_pointer_compression, Node reports $node_pointer_compression"
+        } >"$dec_js"
+        {
+          echo "Skipped bytenode force-disasm because pointer compression does not match."
+          echo "v8asm_pointer_compression=$v8asm_pointer_compression"
+          echo "node_pointer_compression=$node_pointer_compression"
+        } >"$dis_err"
+        continue
+      fi
     fi
 
     if "$V8ASM_BIN" disasm "$in_jsc" "${disasm_args[@]}" >"$dis_txt" 2>"$dis_err"; then

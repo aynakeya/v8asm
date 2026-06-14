@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Dict, List
 
 
 IDENT = r"[A-Za-z_$][A-Za-z0-9_$]*"
+FUNCTION_DECL_RE = re.compile(rf"^\s*function\s+({IDENT})\s*\(")
+SYNTHETIC_STRING_FUNCTION_DECL_RE = re.compile(
+    rf"^\s*function\s+(String_\d+_({IDENT}))\s*\("
+)
+
+
+def postprocess_level4_file(text: str) -> str:
+    text = recover_context_slot_closure_names(text)
+    return normalize_unique_string_function_names(text)
 
 
 def recover_context_slot_closure_names(text: str) -> str:
@@ -94,3 +104,45 @@ def _update_context_slot_state(
     if slot_assign:
         slot_closures.pop(slot_assign.group(1), None)
     return None
+
+
+def normalize_unique_string_function_names(text: str) -> str:
+    lines = text.splitlines()
+    synthetic_decls: List[tuple[str, str]] = []
+    suffix_counts: Counter[str] = Counter()
+    all_decl_names: set[str] = set()
+
+    for line in lines:
+        decl = FUNCTION_DECL_RE.match(line)
+        if decl:
+            all_decl_names.add(decl.group(1))
+
+        synthetic = SYNTHETIC_STRING_FUNCTION_DECL_RE.match(line)
+        if synthetic:
+            old_name, suffix = synthetic.groups()
+            synthetic_decls.append((old_name, suffix))
+            suffix_counts[suffix] += 1
+
+    renames: Dict[str, str] = {}
+    for old_name, suffix in synthetic_decls:
+        if suffix_counts[suffix] != 1:
+            continue
+        if suffix in all_decl_names and suffix != old_name:
+            continue
+        renames[old_name] = suffix
+
+    if not renames:
+        return text
+
+    names = sorted(renames, key=len, reverse=True)
+    name_re = re.compile(
+        r"\b(" + "|".join(re.escape(name) for name in names) + r")\b"
+    )
+
+    def repl(match: re.Match[str]) -> str:
+        return renames[match.group(1)]
+
+    rewritten = [name_re.sub(repl, line) for line in lines]
+    if text.endswith("\n"):
+        return "\n".join(rewritten) + "\n"
+    return "\n".join(rewritten)

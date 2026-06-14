@@ -10,7 +10,11 @@ DECOMPILER = ROOT / "decompiler"
 if str(DECOMPILER) not in sys.path:
     sys.path.insert(0, str(DECOMPILER))
 
-from postprocess_file import recover_context_slot_closure_names
+from postprocess_file import (
+    normalize_unique_string_function_names,
+    postprocess_level4_file,
+    recover_context_slot_closure_names,
+)
 
 
 class PostprocessFileTests(unittest.TestCase):
@@ -105,6 +109,88 @@ class PostprocessFileTests(unittest.TestCase):
         recovered = recover_context_slot_closure_names(text)
 
         self.assertIn("return context_slot[3](...arg0)", recovered)
+
+    def test_normalizes_unique_v8_string_function_names(self) -> None:
+        text = "\n".join(
+            [
+                "function String_9_parseLine(arg0) {",
+                "  return arg0",
+                "}",
+                "",
+                "function bytecode() {",
+                "  return create_closure(String_9_parseLine)",
+                "}",
+            ]
+        )
+
+        recovered = normalize_unique_string_function_names(text)
+
+        self.assertIn("function parseLine(arg0) {", recovered)
+        self.assertIn("return create_closure(parseLine)", recovered)
+        self.assertNotIn("String_9_parseLine", recovered)
+
+    def test_level4_file_postprocess_renames_recovered_context_slot_name(self) -> None:
+        text = "\n".join(
+            [
+                "function bytecode() {",
+                "  r2 = create_closure(String_7_Counter)",
+                "  script_context[3] = r2",
+                "  script_context[4] = new context_slot[3](2)",
+                "  return context_slot[4].inc(3)",
+                "}",
+                "",
+                "function String_7_Counter(arg0) {",
+                "  return arg0",
+                "}",
+            ]
+        )
+
+        recovered = postprocess_level4_file(text)
+
+        self.assertIn("script_context[4] = new Counter(2)", recovered)
+        self.assertIn("function Counter(arg0) {", recovered)
+        self.assertNotIn("String_7_Counter", recovered)
+
+    def test_keeps_duplicate_v8_string_function_names(self) -> None:
+        text = "\n".join(
+            [
+                "function String_3_Box(arg0) {",
+                "  return arg0",
+                "}",
+                "",
+                "function String_3_Box() {",
+                "  return undefined",
+                "}",
+                "",
+                "function bytecode() {",
+                "  return create_closure(String_3_Box)",
+                "}",
+            ]
+        )
+
+        recovered = normalize_unique_string_function_names(text)
+
+        self.assertIn("function String_3_Box(arg0) {", recovered)
+        self.assertIn("function String_3_Box() {", recovered)
+        self.assertIn("return create_closure(String_3_Box)", recovered)
+
+    def test_keeps_anonymous_string_zero_name(self) -> None:
+        text = "\n".join(
+            [
+                "function String_0(arg0) {",
+                "  return arg0",
+                "}",
+                "",
+                "function bytecode() {",
+                "  return create_closure(String_0)",
+                "}",
+            ]
+        )
+
+        recovered = normalize_unique_string_function_names(text)
+
+        self.assertIn("function String_0(arg0) {", recovered)
+        self.assertIn("return create_closure(String_0)", recovered)
 
 
 if __name__ == "__main__":

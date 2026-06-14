@@ -22,15 +22,19 @@ when `--snapshot_blob` and `--force-incompatible` are both present, `v8asm`
 enables `V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH=1` before V8 startup data is
 loaded. The mismatch is printed on stderr and initialization continues.
 
-That bypass is intentionally bounded to the same V8 baseline plus embedder
-suffix case. Rebuilding a patched `13.6.233.10` binary and pointing it at the
-`13.4.114.21-electron.0` startup snapshot got past `SnapshotImpl::CheckVersion`,
-but then segfaulted in `ReadOnlyDeserializer::PostProcessNewObjects()` while
-iterating the read-only heap. The snapshot object's map/size layout was already
-untrusted at that point. `v8asm` now checks the startup blob version string
-before `InitializeExternalStartupDataFromFile()`: `13.4.114.21` may force-load
-`13.4.114.21-electron.0`, while `13.6.233.10` cleanly refuses that 13.4 startup
-snapshot instead of entering V8's RO heap deserializer.
+That bypass is useful for the same V8 baseline plus embedder suffix case.
+Rebuilding patched `13.6.233.10` binaries and pointing them at the
+`13.4.114.21-electron.0` startup snapshot showed why a matching baseline is
+still required for usable output. A Node24-like no-pointer-compression 13.6
+build aborts immediately on the fixed-offset read-only-page encoding used by
+the Electron snapshot. A pointer-compression 13.6 build gets further, but then
+hits read-only heap post-processing, shared string-table insertion, startup
+external-reference sentinel, and root synchronization differences before the
+cached-data file is even deserialized. The 13.6 patch now allows this path only
+with explicit `--force-incompatible` and prints each forced recovery step, but
+the result is still not a usable atom recovery path. The practical fix remains
+using the matching `13.4.114.21` v8asm build with
+`v8context/v8_context_snapshot.bin`.
 
 The same Electron snapshot also has serialized external reference table size
 `1671`, while the vanilla V8 `13.4.114.21` build has size `1672`; in startup
@@ -265,12 +269,12 @@ local `tests/decomp_rounds/bin_cache/` cache before switching versions again.
 
 | patch | V8 tag used | synced Electron fixes | build/test status |
 | --- | --- | --- | --- |
-| `v8patch/v8asm.patch` | `13.6.233.10` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in, direct forced-load payload/cross-major guard | rebuilt with `autoninja -j10 -C out/v8asm.13.6.x64.release v8asm`; root `./v8asm` now reports `13.6.233.10`; 13.6 cleanly refuses the 13.4 Electron snapshot instead of crashing |
+| `v8patch/v8asm.patch` | `13.6.233.10` | `--snapshot_blob`, cached-data sanity bypass, forced snapshot suffix/baseline mismatch attempt, invalid `ReadOnlyHeapRef` fallback, startup external-reference sentinel range recovery, read-only postprocess/string-table/sync mismatch probes, direct forced-load payload guard and cross-major warning | rebuilt with `autoninja -j10 -C out/v8asm.13.6.x64.release v8asm`; patch applies on clean `13.6.233.10`; 13.6 still cannot produce usable output from the 13.4 Electron startup snapshot because startup root layout diverges |
 | `v8patch/v8asm-13.4.patch` | `13.4.114.21` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in | `autoninja -j10 -C out/v8asm.13.4.x64.release v8asm`; plain build forced-disassembles `atom.compiled.dist.jsc` with `v8_context_snapshot.bin`; level-4 decompiler passed |
 | `v8patch/v8asm-12.9.patch` | `12.9.202.28` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in | `git apply --check` previously passed on clean `12.9.202.28`; guard synced textually from the verified 13.6/13.4 implementation |
-| `v8patch/v8asm-12.4.patch` | `12.4.254.21` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback, direct forced-load payload/cross-major guard | `git apply --check` previously passed on clean `12.4.254.21`; cached Node22 build still passes forced disasm/decompiler |
+| `v8patch/v8asm-12.4.patch` | `12.4.254.21` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback, direct forced-load payload guard and cross-major warning | `git apply --check` passed on clean `12.4.254.21`; cached Node22 build still passes forced disasm/decompiler |
 | `v8patch/v8asm-11.9.patch` | `11.9.169.7` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback | `git apply --check` previously passed on clean `11.9.169.7`; guard synced textually |
-| `v8patch/v8asm-11.3.patch` | `11.3.244.8` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback adapted to the 11.3 `Object` API, direct forced-load payload/cross-major guard | `git apply --check` previously passed on clean `11.3.244.8`; cached Node20 build still passes forced disasm/decompiler |
+| `v8patch/v8asm-11.3.patch` | `11.3.244.8` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback adapted to the 11.3 `Object` API, direct forced-load payload guard and cross-major warning | `git apply --check` passed on clean `11.3.244.8`; cached Node20 build still passes forced disasm/decompiler |
 | `v8patch/v8asm-10.2.patch` | `10.2.154.26` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback adapted to the 10.2 cached-data header | `git apply --check` previously passed on clean `10.2.154.26`; cached Node18 build still passes forced disasm/decompiler |
 
 The snapshot version mismatch bypass is now present in all maintained patch
@@ -287,27 +291,23 @@ read-only snapshot checksum mismatches down into V8's real deserializer. That
 is required for Electron/Node research samples where the embedder snapshot or
 build flags differ from a vanilla V8 checkout.
 
-One mismatch is not recoverable at that layer: if the current V8 cached-data
-header layout reads an impossible payload length, the bytes are being
-interpreted with the wrong major header shape. The 2026-06-15 update treats
-both `payload_length > file_payload_size` and `payload_length == 0` with
-remaining payload bytes as implausible. It also adds a small table of common
-Node/Electron V8 version hashes (`10.2`, `11.3`, `12.4`, `13.4`, `13.6`) so
-known cross-major cache is refused before V8 deserialization even when the
-payload length happens to look plausible.
+One mismatch is still stopped before V8: if the current V8 cached-data header
+layout reads an impossible payload length, the bytes are being interpreted with
+the wrong major-header shape. The 2026-06-15 update treats both
+`payload_length > file_payload_size` and `payload_length == 0` with remaining
+payload bytes as implausible.
 
-Forced mode still attempts direct recovery for same-major or unknown but
-plausible mismatches. Known cross-major cases now exit cleanly with diagnostics
-instead of entering V8 and triggering SIGABRT/SIGSEGV. This replaced the old
-matrix failures where 11.3 mismatch probes exited `134` and 12.4/13.6 vs Node20
-probes exited `139`.
+For plausible payloads, forced mode now attempts direct recovery even when a
+known version hash points at another V8 major. It prints a cross-major warning
+instead of silently entering V8. This is intentional research behavior, not a
+compatibility guarantee.
 
-The same rule now applies to `--snapshot_blob`: the option is for loading the
-matching embedder startup blob for the same V8 baseline, including suffix
-mismatches such as `13.4.114.21-electron.0`. It is not a safe way to deserialize
-a 13.4 startup snapshot inside a 13.6 binary. That case is refused before V8
-startup initialization unless the manual escape hatch
-`V8ASM_ALLOW_CROSS_VERSION_SNAPSHOT_MISMATCH=1` is set.
+The same forced behavior now applies to `--snapshot_blob`: strict mode refuses
+baseline-mismatched startup blobs, while `--snapshot_blob ... --force-incompatible`
+sets the startup mismatch recovery flags before V8 initialization. The 13.6
+patch additionally probes several startup-snapshot mismatch points, but the
+13.6-vs-13.4 Electron test still fails in startup root deserialization. Matching
+baseline remains the only verified path for `atom.compiled.dist.jsc`.
 
 The matrix runner now passes a sibling `snapshot_blob.bin` automatically for
 cached `v8asm` binaries and can be pointed at an embedder snapshot with:
