@@ -11,12 +11,12 @@ DEFAULT_V8ASM_BINS=(
   "$ROOT_DIR/v8asm"
   "$ROUND_DIR/bin_cache/v8asm.10.2.node18.x64.release/v8asm"
   "$ROUND_DIR/bin_cache/v8asm.11.3.node20.x64.release/v8asm"
+  "$ROUND_DIR/bin_cache/v8asm.12.4.node22.x64.release/v8asm"
+  "$ROUND_DIR/bin_cache/v8asm.13.4.electron.x64.release/v8asm"
   "/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.11.9.x64.release/v8asm"
   "/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.12.4.x64.release/v8asm"
-  "/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.12.4.node22.x64.release/v8asm"
   "/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.12.9.x64.release/v8asm"
   "/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.13.4.x64.release/v8asm"
-  "/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.13.4.electron.x64.release/v8asm"
 )
 DEFAULT_NODE_VERSIONS=(18.20.8 20.20.2 22.17.0 24.7.0)
 VERSION_MATRIX_STRICT="${VERSION_MATRIX_STRICT:-1}"

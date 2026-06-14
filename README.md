@@ -81,8 +81,9 @@ through nvm.
 
 The default matrix can use cached support files under
 `tests/decomp_rounds/bin_cache/` for V8 builds that are expensive to recreate.
-Currently this includes the Node-aligned V8 `10.2.154.26` and `11.3.244.8`
-`v8asm` builds together with their `snapshot_blob.bin` and `icudtl.dat`.
+Currently this includes the Node-aligned V8 `10.2.154.26`, `11.3.244.8`, and
+`12.4.254.21` `v8asm` builds, plus the Electron-flavored `13.4.114.21` build,
+together with their `snapshot_blob.bin` and `icudtl.dat`.
 
 The script now behaves like a small CI gate by default:
 
@@ -136,10 +137,12 @@ V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH=1 \
   visibly instead of aborting in `ReadReadOnlyHeapRef`.
 - `v8patch/v8asm-12.4.patch`: V8 12.4 adaptation. Node 22/bytenode needs a
   separate no-pointer-compression build of this branch. Verified on
-  `12.4.254.21` with both the normal and Node22-like build args. This branch
-  has the `--snapshot_blob`, cached-data sanity bypass, and read-only heap
-  fallback fixes; it does not have the 13.x startup external-reference-table
-  validation hook.
+  `12.4.254.21` with both the normal and Node22-like build args. The cached
+  `tests/decomp_rounds/bin_cache/v8asm.12.4.node22.x64.release/v8asm`
+  build passes self-cache and Node22/bytenode forced disasm/decompile. This
+  branch has the `--snapshot_blob`, cached-data sanity bypass, and read-only
+  heap fallback fixes; it does not have the 13.x startup external-reference-
+  table validation hook.
 - `v8patch/v8asm-12.9.patch`: V8 12.9 adaptation, verified on `12.9.109`. It
   preserves the 12.x TrustedObject sandbox guard in `objects-printer.cc` and
   includes all four Electron recovery fixes from 13.4.
@@ -161,8 +164,8 @@ V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH=1 \
   predicate API, moves the short-print segfault guard to `src/objects/objects.cc`,
   and treats the read-only snapshot checksum as unavailable because the V8 11.3
   cached-data header does not contain that field. Verified with
-  `out/v8asm.11.3.node20.x64.release/v8asm`; self-cache and Node20/bytenode
-  forced disasm/decompile both pass.
+  `tests/decomp_rounds/bin_cache/v8asm.11.3.node20.x64.release/v8asm`;
+  self-cache and Node20/bytenode forced disasm/decompile both pass.
 
 ## some command for myself
 

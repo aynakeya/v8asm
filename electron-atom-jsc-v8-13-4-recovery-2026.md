@@ -185,14 +185,16 @@ The Electron recovery fixes from `v8patch/v8asm-13.4.patch` were audited
 against the other maintained major-version patches. Each V8 checkout was moved
 to the target tag and synchronized with the official `gclient sync
 --with_branch_heads --with_tags` flow before applying or refreshing the patch.
-Existing `out/*` build caches were kept.
+Existing `out/*` build caches were not manually deleted; when the official V8
+landmine step clobbered `out/*`, the rebuilt support files were copied into the
+local `tests/decomp_rounds/bin_cache/` cache before switching versions again.
 
 | patch | V8 tag used | synced Electron fixes | build/test status |
 | --- | --- | --- | --- |
 | `v8patch/v8asm.patch` | `13.6.233.10` | `--snapshot_blob`, cached-data sanity bypass, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in | `autoninja -j10 -C out/x64.release v8asm`; asm/checkversion/disasm/decompiler smoke passed |
 | `v8patch/v8asm-13.4.patch` | `13.4.114.21` | `--snapshot_blob`, cached-data sanity bypass, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in | `autoninja -j10 -C out/v8asm.13.4.electron.x64.release v8asm`; self-cache smoke and `atom.compiled.dist.jsc` forced disasm/decompiler passed |
 | `v8patch/v8asm-12.9.patch` | `12.9.109` | `--snapshot_blob`, cached-data sanity bypass, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in | `autoninja -j10 -C out/v8asm.12.9.x64.release v8asm`; asm/checkversion/disasm/decompiler smoke passed |
-| `v8patch/v8asm-12.4.patch` | `12.4.254.21` | `--snapshot_blob`, cached-data sanity bypass, invalid `ReadOnlyHeapRef` fallback | normal and Node22-like no-pointer-compression builds passed; asm/checkversion/disasm/decompiler smoke passed |
+| `v8patch/v8asm-12.4.patch` | `12.4.254.21` | `--snapshot_blob`, cached-data sanity bypass, invalid `ReadOnlyHeapRef` fallback | `autoninja -j10 -C out/v8asm.12.4.node22.x64.release v8asm`; self-cache smoke and Node22/bytenode forced disasm/decompiler passed |
 | `v8patch/v8asm-11.9.patch` | `11.9.172` | `--snapshot_blob`, cached-data sanity bypass, invalid `ReadOnlyHeapRef` fallback | final patch re-applied from clean source, rebuilt, and asm/checkversion/disasm/decompiler smoke passed |
 | `v8patch/v8asm-11.3.patch` | `11.3.244.8` | `--snapshot_blob`, cached-data sanity bypass, invalid `ReadOnlyHeapRef` fallback adapted to the 11.3 `Object` API | `autoninja -j10 -C out/v8asm.11.3.node20.x64.release v8asm`; self-cache smoke and Node20/bytenode forced disasm/decompiler passed |
 | `v8patch/v8asm-10.2.patch` | `10.2.154.26` | `--snapshot_blob`, cached-data sanity bypass, invalid `ReadOnlyHeapRef` fallback adapted to the 10.2 cached-data header | `autoninja -j10 -C out/v8asm.10.2.node18.x64.release v8asm`; self-cache smoke and Node18/bytenode forced disasm/decompiler passed |
@@ -228,14 +230,21 @@ lines:
 | `v22.17.0` | `12.4.254.21-node.26` | false | false |
 | `v24.7.0` | `13.6.233.10-node.26` | false | false |
 
-The current matrix run covered Node 18/20/22/24. Node 18 is covered by the
-cached `tests/decomp_rounds/bin_cache/v8asm.10.2.node18.x64.release/v8asm`
-build, and Node 20 is covered by
-`tests/decomp_rounds/bin_cache/v8asm.11.3.node20.x64.release/v8asm`. Both
-matching rows have numeric and pointer matches and pass forced disasm plus
-level-4 Python decompile. Existing binaries passed their self-cache checks,
-mismatch rows skipped forced deserialization, optional missing `out/*` binaries
-were warnings, and the gate summary reported zero failures.
+The current matrix run covered Node 18/20/22/24. Node 18, Node 20, and Node 22
+are covered by cached V8 builds:
+
+| Node | cached v8asm | forced bytenode row |
+| --- | --- | --- |
+| `v18.20.8` | `tests/decomp_rounds/bin_cache/v8asm.10.2.node18.x64.release/v8asm` | numeric match, pointer match, forced disasm ok, level-4 decompile ok |
+| `v20.20.2` | `tests/decomp_rounds/bin_cache/v8asm.11.3.node20.x64.release/v8asm` | numeric match, pointer match, forced disasm ok, level-4 decompile ok |
+| `v22.17.0` | `tests/decomp_rounds/bin_cache/v8asm.12.4.node22.x64.release/v8asm` | numeric match, pointer match, forced disasm ok, level-4 decompile ok |
+| `v24.7.0` | repo `v8asm` (`13.6.233.10`) | numeric match, pointer match, forced disasm ok, level-4 decompile ok |
+
+The Electron-flavored
+`tests/decomp_rounds/bin_cache/v8asm.13.4.electron.x64.release/v8asm` build
+also passes self-cache asm/strict-disasm/decompile in the matrix. Mismatch rows
+skipped forced deserialization, optional missing plain `out/*` binaries were
+warnings, and the gate summary reported zero failures.
 
 ## Remaining gap
 
