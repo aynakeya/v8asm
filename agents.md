@@ -128,6 +128,9 @@ tests/decomp_rounds/run_version_matrix.sh
   - `for...of` 恢复（支持嵌套场景）
   - `switch` 两分支模式恢复（`if (x===1) return ...; if (x===2) return ...; return ...`）
   - `+=` 归并（含 `+1`）
+  - bound method call 恢复可进入简单二元表达式，例如
+    `return (r3 + r4.call(r1))` -> `return (r3 + r1.sum())`
+  - 删除已被高层表达式吸收的纯临时寄存器赋值，但保留 call/new 等 effectful 表达式
 
 ## Collaboration Notes for Next Session
 

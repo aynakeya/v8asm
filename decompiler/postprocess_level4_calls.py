@@ -56,6 +56,47 @@ def _split_call_args(arg_text: str) -> Optional[List[str]]:
     return args
 
 
+def _split_wrapped_binary_expr(expr: str) -> Optional[tuple[str, str, str]]:
+    expr = expr.strip()
+    if not (expr.startswith("(") and expr.endswith(")")):
+        return None
+    inner = expr[1:-1].strip()
+    depth = 0
+    quote: Optional[str] = None
+    escaped = False
+    operators = (" === ", " !== ", " >= ", " <= ", " + ", " - ", " * ", " / ", " % ")
+
+    for idx, char in enumerate(inner):
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            continue
+        if char in "([{":
+            depth += 1
+            continue
+        if char in ")]}":
+            depth -= 1
+            if depth < 0:
+                return None
+            continue
+        if depth != 0:
+            continue
+        for op in operators:
+            if inner.startswith(op, idx):
+                lhs = inner[:idx].strip()
+                rhs = inner[idx + len(op) :].strip()
+                if lhs and rhs:
+                    return lhs, op.strip(), rhs
+    return None
+
+
 def _rewrite_call_expr(expr: str, reg_members: Dict[str, str]) -> str:
     outer = re.match(r"^String\((.+)\)$", expr.strip())
     if outer:
@@ -63,6 +104,14 @@ def _rewrite_call_expr(expr: str, reg_members: Dict[str, str]) -> str:
         rewritten_inner = _rewrite_call_expr(inner, reg_members)
         if rewritten_inner != inner:
             return f"String({rewritten_inner})"
+
+    binary = _split_wrapped_binary_expr(expr)
+    if binary:
+        lhs, op, rhs = binary
+        rewritten_lhs = _rewrite_call_expr(lhs, reg_members)
+        rewritten_rhs = _rewrite_call_expr(rhs, reg_members)
+        if rewritten_lhs != lhs or rewritten_rhs != rhs:
+            return f"({rewritten_lhs} {op} {rewritten_rhs})"
 
     match = re.match(r"^(.+)\.call\((.*)\)$", expr.strip())
     if not match:

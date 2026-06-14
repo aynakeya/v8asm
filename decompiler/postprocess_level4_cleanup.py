@@ -353,7 +353,11 @@ def _drop_unused_pure_reg_assignments(lines: List[str]) -> List[str]:
         if match:
             reg, expr = match.groups()
             rhs_regs = set(re.findall(r"\br\d+\b", expr))
-            if reg not in live and _is_pure_reg_rhs(expr.strip()):
+            if (
+                reg not in live
+                and _is_pure_reg_rhs(expr.strip())
+                and _has_following_executable_line(lines, idx + 1)
+            ):
                 keep[idx] = False
                 continue
             live.discard(reg)
@@ -363,6 +367,15 @@ def _drop_unused_pure_reg_assignments(lines: List[str]) -> List[str]:
         live.update(re.findall(r"\br\d+\b", stripped))
 
     return [line for idx, line in enumerate(lines) if keep[idx]]
+
+
+def _has_following_executable_line(lines: List[str], start: int) -> bool:
+    for idx in range(start, len(lines)):
+        stripped = lines[idx].strip()
+        if not stripped or stripped in {"}", "else {"}:
+            continue
+        return True
+    return False
 
 
 def _count_reg_uses(lines: List[str]) -> Dict[str, int]:
@@ -384,4 +397,4 @@ def _is_pure_reg_rhs(expr: str) -> bool:
         return False
     if "(" in expr:
         return False
-    return expr in {"Number", "String", "Object", "Array", "JSON", "Math"}
+    return _is_pure_expr_level4(expr)

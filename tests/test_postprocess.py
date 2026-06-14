@@ -205,7 +205,6 @@ class SimplifyLinesTests(unittest.TestCase):
         self.assertEqual(
             simplified,
             [
-                "r13 = r14.toUpperCase",
                 "r3 = r14.toUpperCase()",
             ],
         )
@@ -249,6 +248,30 @@ class SimplifyLinesTests(unittest.TestCase):
             simplified,
             ["r3 += Math.max(...r0)"],
         )
+
+    def test_rewrites_bound_method_call_inside_binary_return(self) -> None:
+        lines = [
+            "r4 = r1.sum",
+            "return (r3 + r4.call(r1))",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ["return (r3 + r1.sum())"])
+
+    def test_rewrites_direct_member_call_inside_binary_return(self) -> None:
+        lines = ['return (r3 + r2.join.call(r2, ","))']
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ['return (r3 + r2.join(","))'])
+
+    def test_keeps_call_with_different_receiver_inside_binary_return(self) -> None:
+        lines = ["return (r3 + Array.prototype.slice.call(arguments, 1))"]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ["return (r3 + Array.prototype.slice.call(arguments, 1))"])
 
     def test_rewrites_identifier_call_with_undefined_receiver(self) -> None:
         lines = ['r3 = collect.call(undefined, "x", ...r0)']
@@ -316,7 +339,6 @@ class SimplifyLinesTests(unittest.TestCase):
                 "return _AsyncFunctionResolve(r0, r5)",
                 "r5 = async_reject_exception",
                 "// SetPendingMessage",
-                "r4 = r0",
                 "return _AsyncFunctionReject(r0, r5)",
             ],
         )
@@ -380,7 +402,49 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertEqual(simplified, ["r1 = arg0.exec", "return Number(arg0)"])
+        self.assertEqual(simplified, ["return Number(arg0)"])
+
+    def test_drops_overwritten_unused_member_register_assignment(self) -> None:
+        lines = [
+            "r2 = r3.toUpperCase",
+            "r1 = String(r3.toUpperCase())",
+            "r2 = r0[2]",
+            "return r2",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(
+            simplified,
+            [
+                "r1 = String(r3.toUpperCase())",
+                "return r0[2]",
+            ],
+        )
+
+    def test_keeps_live_member_register_assignment(self) -> None:
+        lines = [
+            "r2 = r3.toUpperCase",
+            "return r2",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ["return r3.toUpperCase"])
+
+    def test_drops_unused_literal_and_alias_register_assignments(self) -> None:
+        lines = [
+            "r4 = collect",
+            "r5 = null",
+            'r6 = "v"',
+            "r7 = r0",
+            'r2 = collect.call(null, "v", ...r0)',
+            "return r2",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ['r2 = collect.call(null, "v", ...r0)', "return r2"])
 
     def test_keeps_unused_effectful_register_assignment(self) -> None:
         lines = [
@@ -808,7 +872,6 @@ class SimplifyLinesTests(unittest.TestCase):
             simplified,
             [
                 "r0 = [arg0, (arg0 + 1)]",
-                "r3 = context_slot[3]",
                 "r1 = new Pair(...r0)",
                 "return Math.max(...r0)",
             ],
@@ -825,7 +888,7 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertEqual(simplified, ["r0 = 0", "return arg0.name"])
+        self.assertEqual(simplified, ["return arg0.name"])
 
     def test_keeps_effectful_accu_expression_statement(self) -> None:
         lines = [
@@ -883,7 +946,6 @@ class SimplifyLinesTests(unittest.TestCase):
         self.assertEqual(
             simplified,
             [
-                "r2 = context_slot[2]",
                 "r3 = this[context_slot[2]]",
                 "return r3",
             ],

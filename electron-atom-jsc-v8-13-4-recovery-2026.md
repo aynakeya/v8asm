@@ -399,6 +399,34 @@ file that can simply be passed to `v8asm --snapshot_blob`. The next real
 recovery path is a Node-aligned V8/v8asm build or extracting/reconstructing the
 Node startup snapshot/RO heap, not another Python prettification pass.
 
+## Decompiler cleanup pass
+
+The 2026-06-15 level-4 Python decompiler pass now removes more dead temporary
+register assignments after higher-level expressions have been recovered. It
+keeps effectful calls and constructors, but drops pure temporary loads such as
+saved member references, literal argument setup, and overwritten register
+aliases once their values have already been inlined into a call expression.
+
+The call rewriter also recurses into simple parenthesized binary expressions, so
+patterns like:
+
+```text
+r4 = r1.sum
+return (r3 + r4.call(r1))
+```
+
+now become:
+
+```text
+return (r3 + r1.sum())
+```
+
+The refreshed round summary still reports `accu_lines=0`, `raw_goto=0`, and
+`unknown=0` across the checked cases. `reg_refs` dropped in the high-noise
+cases, for example `20_rest_spread_calls` went from `78` to `50` in v8asm mode
+and from `86` to `64` in bytenode mode. The remaining bytenode
+`undefined_fallbacks` continue to line up with `ro_snapshot=mismatch`.
+
 ## Remaining gap
 
 This is still forced recovery. The output is useful, but not equivalent to
