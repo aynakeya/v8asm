@@ -75,7 +75,25 @@ This writes `tests/decomp_rounds/version_matrix/summary.md`. The matrix uses
 one case by default, verifies self-generated `v8asm` cache strictly, and checks
 bytenode cache against each `v8asm`. It skips `--force-incompatible` when the
 Node V8 numeric version does not match the `v8asm` version, or when the Node
-and `v8asm` pointer-compression build layout differs.
+and `v8asm` pointer-compression build layout differs. The default Node set is
+18.20.8, 20.20.2, 22.17.0, and 24.7.0 when those versions are installed
+through nvm.
+
+The default matrix can use cached support files under
+`tests/decomp_rounds/bin_cache/` for V8 builds that are expensive to recreate.
+Currently this includes the Node-aligned V8 `10.2.154.26` and `11.3.244.8`
+`v8asm` builds together with their `snapshot_blob.bin` and `icudtl.dat`.
+
+The script now behaves like a small CI gate by default:
+
+- existing `v8asm` binaries must pass self-generated asm, strict disasm, and
+  level-4 decompile;
+- bytenode force-disasm is attempted only when numeric V8 and pointer
+  compression both match;
+- crash signatures such as SIGSEGV, CHECK/DCHECK failures, and sanitizer errors
+  are failures;
+- missing optional Node versions or optional `v8asm` binaries are warnings
+  unless `VERSION_MATRIX_REQUIRE_NODES=1` or `VERSION_MATRIX_REQUIRE_BINS=1`.
 
 ## cached-data compatibility
 
@@ -91,17 +109,60 @@ snapshot checksum must also match the current `v8asm` build.
 
 Use `--force-incompatible` only when intentionally inspecting cache from a
 different embedder/build, such as Node/bytenode cache with a vanilla V8 build.
+The V8 patches also bypass V8's internal `SerializedCodeData::SanityCheck*`
+rejection path in forced mode, so `--force-incompatible` reaches the real
+deserializer even when the cached-data `magic` or flags hash does not match.
+For Electron samples, pass the matching startup snapshot explicitly when it is
+available:
+
+```bash
+V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH=1 \
+./v8asm --snapshot_blob v8context/v8_context_snapshot.bin \
+  disasm atom.compiled.dist.jsc --force-incompatible
+```
 
 ## v8 patch variants
 
-- `v8patch/v8asm.patch`: current 13.6-oriented patch.
+- `v8patch/v8asm.patch`: current 13.6-oriented patch, verified on
+  `13.6.233.10`. It includes the Electron recovery fixes from the 13.4 patch:
+  global `--snapshot_blob`, internal cached-data sanity bypass, invalid
+  read-only heap reference fallback, and the opt-in external-reference-table
+  snapshot mismatch bypass.
+- `v8patch/v8asm-13.4.patch`: V8 13.4 adaptation used for the Electron
+  `atom.compiled.dist.jsc` recovery notes. It adds `--snapshot_blob`, a
+  direct V8 `SerializedCodeData::SanityCheck*` bypass for forced incompatible
+  loads, a research-only Electron startup snapshot external-reference-table
+  bypass, and a forced-mode read-only heap reference fallback so mismatches fail
+  visibly instead of aborting in `ReadReadOnlyHeapRef`.
 - `v8patch/v8asm-12.4.patch`: V8 12.4 adaptation. Node 22/bytenode needs a
-  separate no-pointer-compression build of this branch.
-- `v8patch/v8asm-12.9.patch`: V8 12.9 adaptation. It preserves the 12.x
-  TrustedObject sandbox guard in `objects-printer.cc`.
-- `v8patch/v8asm-11.9.patch`: V8 11.9 adaptation. It uses the 11.x
-  `CodeSerializer::Deserialize(..., ScriptOriginOptions())` API and older
-  object-cast helpers.
+  separate no-pointer-compression build of this branch. Verified on
+  `12.4.254.21` with both the normal and Node22-like build args. This branch
+  has the `--snapshot_blob`, cached-data sanity bypass, and read-only heap
+  fallback fixes; it does not have the 13.x startup external-reference-table
+  validation hook.
+- `v8patch/v8asm-12.9.patch`: V8 12.9 adaptation, verified on `12.9.109`. It
+  preserves the 12.x TrustedObject sandbox guard in `objects-printer.cc` and
+  includes all four Electron recovery fixes from 13.4.
+- `v8patch/v8asm-11.9.patch`: V8 11.9 adaptation, verified on `11.9.172`. It
+  uses the 11.x `CodeSerializer::Deserialize(..., ScriptOriginOptions())` API
+  and older object-cast helpers. This branch has the `--snapshot_blob`,
+  cached-data sanity bypass, and read-only heap fallback fixes; it does not have
+  the 13.x startup
+  external-reference-table validation hook.
+- `v8patch/v8asm-10.2.patch`: V8 10.2 adaptation for Node 18/bytenode
+  (`v18.20.8`, V8 `10.2.154.26-node.39`). It uses the older cached-data header
+  shape without a read-only snapshot checksum, keeps global `--snapshot_blob`,
+  bypasses internal cached-data sanity checks for forced recovery, and adds the
+  invalid `ReadOnlyHeapRef` fallback. Verified with the cached
+  `tests/decomp_rounds/bin_cache/v8asm.10.2.node18.x64.release/v8asm`;
+  self-cache and Node18/bytenode forced disasm/decompile both pass.
+- `v8patch/v8asm-11.3.patch`: V8 11.3 adaptation for Node 20/bytenode
+  (`v20.20.2`, V8 `11.3.244.8-node.38`). It uses the older `Object` member
+  predicate API, moves the short-print segfault guard to `src/objects/objects.cc`,
+  and treats the read-only snapshot checksum as unavailable because the V8 11.3
+  cached-data header does not contain that field. Verified with
+  `out/v8asm.11.3.node20.x64.release/v8asm`; self-cache and Node20/bytenode
+  forced disasm/decompile both pass.
 
 ## some command for myself
 

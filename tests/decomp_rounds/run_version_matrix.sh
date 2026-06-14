@@ -9,13 +9,22 @@ BYTENODE_PATH="${ROUND_BYTENODE_PATH:-/home/aynakeya/.npm/_npx/ea56e60f3ac75570/
 
 DEFAULT_V8ASM_BINS=(
   "$ROOT_DIR/v8asm"
+  "$ROUND_DIR/bin_cache/v8asm.10.2.node18.x64.release/v8asm"
+  "$ROUND_DIR/bin_cache/v8asm.11.3.node20.x64.release/v8asm"
   "/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.11.9.x64.release/v8asm"
   "/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.12.4.x64.release/v8asm"
   "/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.12.4.node22.x64.release/v8asm"
   "/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.12.9.x64.release/v8asm"
   "/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.13.4.x64.release/v8asm"
+  "/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.13.4.electron.x64.release/v8asm"
 )
-DEFAULT_NODE_VERSIONS=(22.17.0 24.7.0)
+DEFAULT_NODE_VERSIONS=(18.20.8 20.20.2 22.17.0 24.7.0)
+VERSION_MATRIX_STRICT="${VERSION_MATRIX_STRICT:-1}"
+VERSION_MATRIX_REQUIRE_BINS="${VERSION_MATRIX_REQUIRE_BINS:-0}"
+VERSION_MATRIX_REQUIRE_NODES="${VERSION_MATRIX_REQUIRE_NODES:-0}"
+
+gate_failures=()
+gate_warnings=()
 
 mkdir -p "$OUT_DIR"
 
@@ -47,6 +56,46 @@ status_of() {
   else
     printf "fail:%s" "$code"
   fi
+}
+
+append_unique() {
+  local value="$1"
+  shift
+  local -n target="$1"
+  local existing
+  for existing in "${target[@]}"; do
+    if [[ "$existing" == "$value" ]]; then
+      return
+    fi
+  done
+  target+=("$value")
+}
+
+record_failure() {
+  append_unique "$1" gate_failures
+}
+
+record_warning() {
+  append_unique "$1" gate_warnings
+}
+
+has_crash_signature() {
+  local file="$1"
+  [[ -s "$file" ]] || return 1
+  grep -Eiq \
+    "Segmentation fault|SIGSEGV|Received signal|Trace/breakpoint trap|core dumped|CHECK failed|DCHECK failed|AddressSanitizer|heap-use-after-free" \
+    "$file"
+}
+
+check_crash_output() {
+  local context="$1"
+  shift
+  local file
+  for file in "$@"; do
+    if has_crash_signature "$file"; then
+      record_failure "$context emitted crash signature in $file"
+    fi
+  done
 }
 
 strict_disasm_status() {
@@ -95,6 +144,7 @@ build_arg_value() {
   echo ""
   echo "- case: \`$CASE\`"
   echo "- bytenode_path: \`$BYTENODE_PATH\`"
+  echo "- strict_gate: \`$VERSION_MATRIX_STRICT\`"
   if [[ -f "$BYTENODE_PATH/package.json" ]]; then
     bytenode_version="$(node -e "const p=require(process.argv[1] + '/package.json'); console.log(p.version || 'unknown')" "$BYTENODE_PATH")"
     echo "- bytenode_version: \`$bytenode_version\`"
@@ -115,6 +165,11 @@ for bin in "${v8asm_bins[@]}"; do
   fi
   if [[ ! -x "$bin" ]]; then
     echo "| $label | \`$bin\` | missing | missing | n/a | n/a | n/a |" >>"$summary"
+    if [[ "$VERSION_MATRIX_REQUIRE_BINS" == "1" ]]; then
+      record_failure "required v8asm binary is missing: $bin"
+    else
+      record_warning "v8asm binary is missing: $bin"
+    fi
     continue
   fi
 
@@ -133,10 +188,13 @@ for bin in "${v8asm_bins[@]}"; do
   asm_code="$?"
   set -e
   asm_status="$(status_of "$asm_code")"
+  check_crash_output "self $label asm" "$work/$case_base.asm.log"
   if [[ "$asm_code" == "0" ]]; then
     strict_status="$(strict_disasm_status "$bin" "$jsc" "$dis" "$dis_err")"
+    check_crash_output "self $label strict disasm" "$dis_err" "$dis"
     if [[ "$strict_status" == "ok" ]]; then
       decompile="$(decompile_status "$dis" "$dec" "$dec_err")"
+      check_crash_output "self $label decompile" "$dec_err"
     else
       decompile="n/a"
     fi
@@ -145,6 +203,15 @@ for bin in "${v8asm_bins[@]}"; do
     decompile="n/a"
   fi
   echo "| $label | \`$bin\` | \`$version\` | \`$build_args\` | $asm_status | $strict_status | $decompile |" >>"$summary"
+  if [[ "$asm_status" != "ok" ]]; then
+    record_failure "self $label asm returned $asm_status"
+  fi
+  if [[ "$strict_status" != "ok" ]]; then
+    record_failure "self $label strict disasm returned $strict_status"
+  fi
+  if [[ "$decompile" != "ok" ]]; then
+    record_failure "self $label decompile returned $decompile"
+  fi
 done
 
 {
@@ -162,6 +229,11 @@ for node_version in "${node_versions[@]}"; do
   set -e
   if [[ "$nvm_code" != "0" ]]; then
     echo "| \`$node_version\` | n/a | all | n/a | n/a | n/a | n/a | n/a | n/a |" >>"$summary"
+    if [[ "$VERSION_MATRIX_REQUIRE_NODES" == "1" ]]; then
+      record_failure "required Node version is not installed: $node_version"
+    else
+      record_warning "Node version is not installed: $node_version"
+    fi
     continue
   fi
   node_actual="$(node -v)"
@@ -176,8 +248,10 @@ for node_version in "${node_versions[@]}"; do
     "$BYTENODE_PATH" "$CASE" "$btn_jsc" >"$btn_dir/$case_base.bytenode.asm.log" 2>&1
   btn_code="$?"
   set -e
+  check_crash_output "bytenode $node_actual compile" "$btn_dir/$case_base.bytenode.asm.log"
   if [[ "$btn_code" != "0" ]]; then
     echo "| \`$node_actual\` | \`$node_v8\` | all | n/a | n/a | n/a | bytenode-fail:$btn_code | n/a | n/a |" >>"$summary"
+    record_failure "bytenode compile failed for $node_actual with exit $btn_code"
     continue
   fi
 
@@ -188,6 +262,11 @@ for node_version in "${node_versions[@]}"; do
     fi
     if [[ ! -x "$bin" ]]; then
       echo "| \`$node_actual\` | \`$node_v8\` | $label | missing | n/a | n/a | n/a | n/a | n/a |" >>"$summary"
+      if [[ "$VERSION_MATRIX_REQUIRE_BINS" == "1" ]]; then
+        record_failure "required v8asm binary is missing for bytenode check: $bin"
+      else
+        record_warning "v8asm binary is missing for bytenode check: $bin"
+      fi
       continue
     fi
     version="$("$bin" version)"
@@ -207,23 +286,62 @@ for node_version in "${node_versions[@]}"; do
     work="$OUT_DIR/bytenode-${node_actual#v}-$label"
     mkdir -p "$work"
     "$bin" checkversion "$btn_jsc" >"$work/$case_base.checkversion.txt" 2>&1 || true
+    check_crash_output "bytenode $node_actual $label checkversion" "$work/$case_base.checkversion.txt"
     strict_status="$(strict_disasm_status "$bin" "$btn_jsc" "$work/$case_base.strict.disasm.txt" "$work/$case_base.strict.disasm.err")"
-    if [[ "$numeric_match" == "yes" && "$pointer_match" != "no" ]]; then
+    check_crash_output "bytenode $node_actual $label strict disasm" "$work/$case_base.strict.disasm.err" "$work/$case_base.strict.disasm.txt"
+    should_force="no"
+    if [[ "$numeric_match" == "yes" && "$pointer_match" == "yes" ]]; then
+      should_force="yes"
       force_status="$(force_disasm_status "$bin" "$btn_jsc" "$work/$case_base.force.disasm.txt" "$work/$case_base.force.disasm.err")"
+      check_crash_output "bytenode $node_actual $label force disasm" "$work/$case_base.force.disasm.err" "$work/$case_base.force.disasm.txt"
     else
-      if [[ "$numeric_match" == "yes" ]]; then
+      if [[ "$numeric_match" != "yes" ]]; then
+        force_status="skipped:numeric-mismatch"
+      elif [[ "$pointer_match" == "no" ]]; then
         force_status="skipped:pointer-mismatch"
       else
-        force_status="skipped:numeric-mismatch"
+        force_status="skipped:pointer-unknown"
       fi
     fi
     if [[ "$force_status" == "ok" ]]; then
       decompile="$(decompile_status "$work/$case_base.force.disasm.txt" "$work/$case_base.force.dec.l4.js" "$work/$case_base.force.decompile.err")"
+      check_crash_output "bytenode $node_actual $label force decompile" "$work/$case_base.force.decompile.err"
     else
       decompile="n/a"
     fi
     echo "| \`$node_actual\` | \`$node_v8\` | $label | \`$version\` | $numeric_match | $pointer_match | $strict_status | $force_status | $decompile |" >>"$summary"
+    if [[ "$should_force" == "yes" ]]; then
+      if [[ "$force_status" != "ok" ]]; then
+        record_failure "bytenode $node_actual vs $label should force successfully but returned $force_status"
+      fi
+      if [[ "$decompile" != "ok" ]]; then
+        record_failure "bytenode $node_actual vs $label force decompile returned $decompile"
+      fi
+    elif [[ "$force_status" != skipped:* ]]; then
+      record_failure "bytenode $node_actual vs $label should skip force but returned $force_status"
+    fi
   done
 done
 
+{
+  echo ""
+  echo "## Gate Summary"
+  echo ""
+  echo "- warnings: ${#gate_warnings[@]}"
+  for warning in "${gate_warnings[@]}"; do
+    echo "  - $warning"
+  done
+  echo "- failures: ${#gate_failures[@]}"
+  for failure in "${gate_failures[@]}"; do
+    echo "  - $failure"
+  done
+} >>"$summary"
+
 echo "Done. Summary: $summary"
+if [[ "${#gate_failures[@]}" -gt 0 ]]; then
+  printf "Gate failures:\n" >&2
+  printf "  - %s\n" "${gate_failures[@]}" >&2
+  if [[ "$VERSION_MATRIX_STRICT" == "1" ]]; then
+    exit 1
+  fi
+fi

@@ -338,8 +338,12 @@ def decompile_bytecode(ctx: DecompilerContext, bytecode: V8BytecodeArray, level:
     return "\n".join(lines)
 
 
+def _read_disassembly_lines(path: Path) -> List[str]:
+    return path.read_text(encoding="utf-8", errors="replace").splitlines()
+
+
 def decompile_file(path: Path, level: int, runtime: bool = False) -> str:
-    data = path.read_text().splitlines()
+    data = _read_disassembly_lines(path)
     objects = parse_objects(data)
     ctx = DecompilerContext(objects)
 

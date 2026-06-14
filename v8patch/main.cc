@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <fstream> 
+#include <fstream>
 #include <string.h>
 
 #include "include/libplatform/libplatform.h"
@@ -22,6 +22,7 @@
 #include <csignal>
 #include <csetjmp>
 #include <set>
+#include <vector>
 #include <unistd.h>
 
 
@@ -569,17 +570,73 @@ void print_compiled_args() {
   #endif
 }
 
+struct StartupOptions {
+  const char* snapshot_blob = nullptr;
+  int command_index = 1;
+};
+
+bool parse_startup_options(int argc, char* argv[], StartupOptions* options) {
+  options->command_index = 1;
+  while (options->command_index < argc) {
+    const char* arg = argv[options->command_index];
+    if (strcmp(arg, "--snapshot_blob") == 0) {
+      if (options->command_index + 1 >= argc) {
+        fprintf(stderr, "--snapshot_blob requires a file path\n");
+        return false;
+      }
+      options->snapshot_blob = argv[options->command_index + 1];
+      options->command_index += 2;
+      continue;
+    }
+
+    const char* snapshot_prefix = "--snapshot_blob=";
+    size_t snapshot_prefix_len = strlen(snapshot_prefix);
+    if (strncmp(arg, snapshot_prefix, snapshot_prefix_len) == 0) {
+      options->snapshot_blob = arg + snapshot_prefix_len;
+      options->command_index += 1;
+      continue;
+    }
+    break;
+  }
+  return true;
+}
+
 int main(int argc, char* argv[]) {
-  if (argc < 2) {
-    fprintf(stderr, "Usage: %s <asm|disasm|checkversion|version|build-args> ...\n", argv[0]);
+  StartupOptions startup_options;
+  if (!parse_startup_options(argc, argv, &startup_options)) {
+    fprintf(stderr,
+            "Usage: %s [--snapshot_blob file] "
+            "<asm|disasm|checkversion|version|build-args> ...\n",
+            argv[0]);
+    return 1;
+  }
+  if (startup_options.command_index >= argc) {
+    fprintf(stderr,
+            "Usage: %s [--snapshot_blob file] "
+            "<asm|disasm|checkversion|version|build-args> ...\n",
+            argv[0]);
     return 1;
   }
 
-  const char* cmd = argv[1];
+  std::vector<char*> command_argv;
+  command_argv.reserve(argc - startup_options.command_index + 1);
+  command_argv.push_back(argv[0]);
+  for (int i = startup_options.command_index; i < argc; ++i) {
+    command_argv.push_back(argv[i]);
+  }
+  int command_argc = static_cast<int>(command_argv.size());
+  char** command_args = command_argv.data();
+
+  const char* cmd = command_args[1];
 
   v8::V8::SetFlagsFromString("--no-lazy --no-flush-bytecode");
   v8::V8::InitializeICUDefaultLocation(argv[0]);
-  v8::V8::InitializeExternalStartupData(argv[0]);
+  if (startup_options.snapshot_blob != nullptr) {
+    v8::V8::InitializeExternalStartupDataFromFile(
+        startup_options.snapshot_blob);
+  } else {
+    v8::V8::InitializeExternalStartupData(argv[0]);
+  }
   std::unique_ptr<v8::Platform> platform = v8::platform::NewDefaultPlatform();
   v8::V8::InitializePlatform(platform.get());
   v8::V8::Initialize();
@@ -599,41 +656,44 @@ int main(int argc, char* argv[]) {
     goto finish;
   }
   if (strcmp(cmd, "checkversion") == 0) {
-    if (argc < 3) {
+    if (command_argc < 3) {
       fprintf(stderr, "Usage: %s checkversion file.jsc\n", argv[0]);
       ret = 1;
       goto finish;
     }
-    ret = do_checkversion(argv[2], isolate);
+    ret = do_checkversion(command_args[2], isolate);
     goto finish;
-  } 
+  }
   if (strcmp(cmd, "asm") == 0) {
-    ret = do_asm(argc, argv, isolate);
+    ret = do_asm(command_argc, command_args, isolate);
     goto finish;
   }
   if (strcmp(cmd, "disasm") == 0) {
-    if (argc < 3) {
+    if (command_argc < 3) {
       fprintf(stderr, "Usage: %s disasm file.jsc [--force-incompatible]\n", argv[0]);
       ret = 1;
       goto finish;
     }
     bool force_incompatible = false;
-    for (int i = 3; i < argc; ++i) {
-      if (strcmp(argv[i], "--force-incompatible") == 0 ||
-          strcmp(argv[i], "--best-effort") == 0) {
+    for (int i = 3; i < command_argc; ++i) {
+      if (strcmp(command_args[i], "--force-incompatible") == 0 ||
+          strcmp(command_args[i], "--best-effort") == 0) {
         force_incompatible = true;
       } else {
-        fprintf(stderr, "Unknown disasm option: %s\n", argv[i]);
+        fprintf(stderr, "Unknown disasm option: %s\n", command_args[i]);
         fprintf(stderr, "Usage: %s disasm file.jsc [--force-incompatible]\n", argv[0]);
         ret = 1;
         goto finish;
       }
     }
-    ret = do_disasm(argv[2], isolate, force_incompatible);
+    ret = do_disasm(command_args[2], isolate, force_incompatible);
     goto finish;
   }
   fprintf(stderr, "Unknown command: %s\n", cmd);
-  fprintf(stderr, "Usage: %s <asm|disasm|checkversion|version|build-args> ...\n", argv[0]);
+  fprintf(stderr,
+          "Usage: %s [--snapshot_blob file] "
+          "<asm|disasm|checkversion|version|build-args> ...\n",
+          argv[0]);
   ret = 1;
 finish:
   isolate->Dispose();
