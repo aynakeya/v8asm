@@ -131,6 +131,9 @@ tests/decomp_rounds/run_version_matrix.sh
   - bound method call 恢复可进入简单二元表达式，例如
     `return (r3 + r4.call(r1))` -> `return (r3 + r1.sum())`
   - 删除已被高层表达式吸收的纯临时寄存器赋值，但保留 call/new 等 effectful 表达式
+  - 文件级 level-4 后处理会用同函数内 `script_context[n] = create_closure(name)`
+    和 `ensureDefined("Name")` 的局部证据，把部分 `context_slot[n]` 恢复成闭包名；
+    不做跨函数全局替换，避免误改闭包变量或私有字段槽。
 
 ## Collaboration Notes for Next Session
 

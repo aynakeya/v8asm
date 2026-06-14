@@ -12,6 +12,7 @@ from context import DecompilerContext
 from instruction import Instruction
 from parser import parse_objects
 from postprocess import simplify_lines
+from postprocess_file import recover_context_slot_closure_names
 from structurer import decompile_to_statements
 from translator import InstructionTranslator
 from utils import parse_jump_target
@@ -353,7 +354,10 @@ def decompile_file(path: Path, level: int, runtime: bool = False) -> str:
     for obj in objects:
         if isinstance(obj, V8BytecodeArray):
             outputs.append(decompile_bytecode(ctx, obj, level))
-    return "\n\n".join(outputs)
+    output = "\n\n".join(outputs)
+    if level >= 4:
+        output = recover_context_slot_closure_names(output)
+    return output
 
 
 def main() -> None:

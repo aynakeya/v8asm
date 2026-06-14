@@ -427,6 +427,28 @@ cases, for example `20_rest_spread_calls` went from `78` to `50` in v8asm mode
 and from `86` to `64` in bytenode mode. The remaining bytenode
 `undefined_fallbacks` continue to line up with `ro_snapshot=mismatch`.
 
+A follow-up file-level pass recovers some local context-slot closure names. It
+uses only local evidence inside the same rendered function, either
+`script_context[n] = create_closure(Name)` or a V8
+`ThrowReferenceErrorIfHole` pattern rendered as `ensureDefined("Name")`
+immediately before a `context_slot[n]` use. That changes the `run` case from:
+
+```text
+ensureDefined("Pair")
+r1 = new context_slot[3](...r0)
+```
+
+to:
+
+```text
+ensureDefined("Pair")
+r1 = new Pair(...r0)
+```
+
+The pass intentionally does not perform broad cross-function `context_slot`
+replacement, because closure variables and private-field symbols share the same
+printed form and would be easy to corrupt without scope-level evidence.
+
 ## Remaining gap
 
 This is still forced recovery. The output is useful, but not equivalent to

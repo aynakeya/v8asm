@@ -37,7 +37,7 @@ python3 decompiler/v8decompiler.py samples/main.d8.jsc.txt --level 4 --runtime
 - level 3: level 2 + conservative simplification (register propagation, safer readability).
 - level 4: level 3 + high-level pattern recovery (e.g. iterator state
   machine -> `for...of`, `+=` folding, bound method calls, dead temporary
-  register cleanup).
+  register cleanup, local context-slot closure name recovery).
 
 ### regression rounds
 
