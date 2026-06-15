@@ -982,6 +982,14 @@ same chunk offset points to in the current snapshot, which helps prove whether a
 bytenode offset is a Node snapshot object that has drifted relative to the
 vanilla V8 snapshot.
 
+A later patch extends that idea from top-level explorer failures to
+`HeapObjectShortPrint` field fallbacks. Constant-pool placeholders can now carry
+the same `current_ro_object=[start,end)` boundary alongside their
+`object_chunk_offset`, but without recursively calling `ShortPrint` again from
+inside the fallback. That keeps the diagnostic focused on V8 read-only heap
+layout mismatch instead of hiding bytenode placeholders with Python-side name
+substitution.
+
 When switching V8 versions, follow the official V8 checkout flow. Do not just
 move a worktree or swap source directories. Checkout the target revision in the
 `fetch v8` checkout, then synchronize dependencies:

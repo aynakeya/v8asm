@@ -176,15 +176,17 @@ diff --git a/src/diagnostics/objects-printer.cc b/src/diagnostics/objects-printe
 index d3e5ec68657..5567eaec886 100644
 --- a/src/diagnostics/objects-printer.cc
 +++ b/src/diagnostics/objects-printer.cc
-@@ -16,6 +16,7 @@
+@@ -16,6 +16,9 @@
  #include "src/execution/isolate-utils-inl.h"
  #include "src/heap/heap-inl.h"  // For InOldSpace.
  #include "src/heap/heap-layout-inl.h"
 +#include "src/heap/memory-chunk.h"
++#include "src/heap/memory-chunk-metadata-inl.h"
++#include "src/heap/read-only-spaces.h"
  #include "src/heap/heap-write-barrier-inl.h"  // For GetIsolateFromWritableObj.
  #include "src/heap/marking-inl.h"
  #include "src/ic/handler-configuration-inl.h"
-@@ -34,6 +35,11 @@
+@@ -34,6 +37,11 @@
  #include "src/utils/ostreams.h"
  #include "third_party/fp16/src/include/fp16.h"
 
@@ -196,7 +198,7 @@ index d3e5ec68657..5567eaec886 100644
  #if V8_ENABLE_WEBASSEMBLY
  #include "src/debug/debug-wasm-objects-inl.h"
  #include "src/wasm/wasm-code-manager.h"
-@@ -157,7 +163,7 @@ namespace {
+@@ -157,7 +165,7 @@ namespace {
  void PrintHeapObjectHeaderWithoutMap(Tagged<HeapObject> object,
                                       std::ostream& os, const char* id) {
    PtrComprCageBase cage_base = GetPtrComprCageBase();
@@ -205,13 +207,60 @@ index d3e5ec68657..5567eaec886 100644
    if (id != nullptr) {
      os << id;
    } else {
-@@ -3368,15 +3374,42 @@ void HeapObject::Print(Tagged<Object> obj, std::ostream& os) {
+@@ -3368,15 +3376,106 @@ void HeapObject::Print(Tagged<Object> obj, std::ostream& os) {
    v8::internal::Print(obj, os);
  }
 
 +static sigjmp_buf g_jump_buffer;
++static sigjmp_buf g_diagnostics_jump_buffer;
++static volatile sig_atomic_t g_in_short_print_diagnostics = 0;
++
 +void segfault_jumper(int signal_number) {
++    (void)signal_number;
++    if (g_in_short_print_diagnostics) {
++        siglongjmp(g_diagnostics_jump_buffer, 1);
++    }
 +    siglongjmp(g_jump_buffer, 1);
++}
++
++void PrintV8AsmCurrentReadOnlyObjectBoundary(Tagged<HeapObject> object,
++                                             std::ostream& os,
++                                             ReadOnlyPageMetadata* page) {
++  Address object_addr = object.address();
++  if (!page->Contains(object_addr)) {
++    os << " current_ro_object=outside_area";
++    return;
++  }
++
++  std::ios_base::fmtflags flags = os.flags();
++  os << " area_offset=0x" << std::hex
++     << static_cast<size_t>(object_addr - page->area_start());
++  os.flags(flags);
++
++  Address cursor = page->area_start();
++  Address end = page->area_end();
++  while (cursor < end) {
++    Tagged<HeapObject> current = HeapObject::FromAddress(cursor);
++    int object_size = current->Size();
++    int aligned_size = ALIGN_TO_ALLOCATION_ALIGNMENT(object_size);
++    if (aligned_size <= 0) break;
++    Address next = cursor + aligned_size;
++    if (object_addr >= cursor && object_addr < next) {
++      size_t current_offset =
++          static_cast<size_t>(cursor - page->ChunkAddress());
++      size_t current_end =
++          static_cast<size_t>(next - page->ChunkAddress());
++      size_t delta = static_cast<size_t>(object_addr - cursor);
++      flags = os.flags();
++      os << " current_ro_object=[0x" << std::hex << current_offset
++         << ",0x" << current_end << ") delta=0x" << delta
++         << " hit=" << (delta == 0 ? "start" : "inside");
++      os.flags(flags);
++      return;
++    }
++    cursor = next;
++  }
++  os << " current_ro_object=n/a";
 +}
 +
 +void PrintV8AsmShortPrintAddressDiagnostics(Tagged<HeapObject> object,
@@ -222,6 +271,23 @@ index d3e5ec68657..5567eaec886 100644
 +     << " tagged_chunk_offset=0x"
 +     << MemoryChunk::AddressToOffset(object.ptr());
 +  os.flags(flags);
++
++  g_in_short_print_diagnostics = 1;
++  if (sigsetjmp(g_diagnostics_jump_buffer, 1) != 0) {
++    g_in_short_print_diagnostics = 0;
++    os << " current_ro_object=diagnostics_failed";
++    return;
++  }
++
++  MemoryChunkMetadata* metadata = MemoryChunkMetadata::FromHeapObject(object);
++  if (!metadata->Chunk()->InReadOnlySpace()) {
++    g_in_short_print_diagnostics = 0;
++    os << " current_ro_object=not_in_current_ro";
++    return;
++  }
++  PrintV8AsmCurrentReadOnlyObjectBoundary(
++      object, os, static_cast<ReadOnlyPageMetadata*>(metadata));
++  g_in_short_print_diagnostics = 0;
 +}
 +
  void HeapObject::HeapObjectShortPrint(std::ostream& os) {
@@ -248,7 +314,7 @@ index d3e5ec68657..5567eaec886 100644
      return;
    }
    if (IsJSObject(*this, cage_base)) {
-@@ -3384,6 +3417,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -3384,6 +3483,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
      StringStream accumulator(&allocator);
      Cast<JSObject>(*this)->JSObjectShortPrint(&accumulator);
      os << accumulator.ToCString().get();
@@ -256,7 +322,7 @@ index d3e5ec68657..5567eaec886 100644
      return;
    }
 
-@@ -3395,6 +3429,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -3395,6 +3495,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
    if (InstanceTypeChecker::IsTrustedObject(instance_type) &&
        !OutsideSandboxOrInReadonlySpace(*this)) {
      os << "<Invalid TrustedObject (outside trusted space)>\n";
@@ -264,7 +330,7 @@ index d3e5ec68657..5567eaec886 100644
      return;
    }
 
-@@ -3750,6 +3785,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -3750,6 +3851,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
        os << "<Other heap object (" << map()->instance_type() << ")>";
        break;
    }
@@ -277,7 +343,7 @@ new file mode 100644
 index 00000000000..e910ce9f5a8
 --- /dev/null
 +++ b/src/disassembler/main.cc
-@@ -0,0 +1,986 @@
+@@ -0,0 +1,959 @@
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <fstream>
@@ -1016,7 +1082,6 @@ index 00000000000..e910ce9f5a8
 +
 +struct StartupOptions {
 +  const char* snapshot_blob = nullptr;
-+  int command_index = 1;
 +  bool valid = true;
 +};
 +
@@ -1027,30 +1092,32 @@ index 00000000000..e910ce9f5a8
 +          program);
 +}
 +
-+StartupOptions parse_startup_options(int argc, char* argv[]) {
++StartupOptions parse_startup_options(int argc, char* argv[],
++                                     std::vector<char*>* command_argv) {
 +  StartupOptions options;
-+  while (options.command_index < argc) {
-+    const char* arg = argv[options.command_index];
++  command_argv->clear();
++  command_argv->push_back(argv[0]);
++  for (int i = 1; i < argc; ++i) {
++    const char* arg = argv[i];
 +    if (strcmp(arg, "--snapshot_blob") == 0) {
-+      if (options.command_index + 1 >= argc) {
++      if (i + 1 >= argc) {
 +        fprintf(stderr, "--snapshot_blob requires a file path\n");
 +        options.valid = false;
 +        return options;
 +      }
-+      options.snapshot_blob = argv[options.command_index + 1];
-+      options.command_index += 2;
++      options.snapshot_blob = argv[i + 1];
++      ++i;
 +      continue;
 +    }
 +    const char* snapshot_prefix = "--snapshot_blob=";
 +    size_t snapshot_prefix_len = strlen(snapshot_prefix);
 +    if (strncmp(arg, snapshot_prefix, snapshot_prefix_len) == 0) {
 +      options.snapshot_blob = arg + snapshot_prefix_len;
-+      options.command_index += 1;
 +      continue;
 +    }
-+    break;
++    command_argv->push_back(argv[i]);
 +  }
-+  if (options.command_index >= argc) {
++  if (command_argv->size() < 2) {
 +    options.valid = false;
 +  }
 +  return options;
@@ -1142,62 +1209,32 @@ index 00000000000..e910ce9f5a8
 +    return 1;
 +  }
 +
-+  StartupOptions startup_options = parse_startup_options(argc, argv);
++  std::vector<char*> command_argv;
++  StartupOptions startup_options =
++      parse_startup_options(argc, argv, &command_argv);
 +  if (!startup_options.valid) {
 +    print_usage(argv[0]);
 +    return 1;
 +  }
 +
-+  std::vector<char*> command_argv;
-+  command_argv.reserve(argc - startup_options.command_index + 1);
-+  command_argv.push_back(argv[0]);
-+  for (int i = startup_options.command_index; i < argc; ++i) {
-+    command_argv.push_back(argv[i]);
-+  }
-+  std::vector<char*> filtered_argv;
-+  filtered_argv.reserve(command_argv.size());
-+  filtered_argv.push_back(command_argv[0]);
-+  for (size_t i = 1; i < command_argv.size(); ++i) {
-+    const char* arg = command_argv[i];
-+    if (strcmp(arg, "--snapshot_blob") == 0) {
-+      if (i + 1 >= command_argv.size()) {
-+        fprintf(stderr, "--snapshot_blob requires a file path\n");
-+        return 1;
-+      }
-+      startup_options.snapshot_blob = command_argv[i + 1];
-+      ++i;
-+      continue;
-+    }
-+    const char* snapshot_prefix = "--snapshot_blob=";
-+    size_t snapshot_prefix_len = strlen(snapshot_prefix);
-+    if (strncmp(arg, snapshot_prefix, snapshot_prefix_len) == 0) {
-+      startup_options.snapshot_blob = arg + snapshot_prefix_len;
-+      continue;
-+    }
-+    filtered_argv.push_back(command_argv[i]);
-+  }
-+  command_argv.swap(filtered_argv);
-+  if (command_argv.size() < 2) {
-+    fprintf(stderr,
-+            "Usage: %s [--snapshot_blob file] "
-+            "<asm|disasm|checkversion|version|build-args> ...\n",
-+            argv[0]);
-+    return 1;
-+  }
 +  int command_argc = static_cast<int>(command_argv.size());
 +  const char* cmd = command_argv[1];
++  bool force_incompatible =
++      command_requests_force_incompatible(command_argc, command_argv.data());
 +
 +  v8::V8::SetFlagsFromString("--no-lazy --no-flush-bytecode");
 +  v8::V8::InitializeICUDefaultLocation(argv[0]);
 +  if (startup_options.snapshot_blob != nullptr) {
-+    bool force_incompatible =
-+        command_requests_force_incompatible(command_argc, command_argv.data());
++    bool snapshot_version_mismatch = false;
 +    if (!validate_snapshot_blob_version(startup_options.snapshot_blob,
-+                                        force_incompatible)) {
++                                        &snapshot_version_mismatch)) {
 +      return 1;
 +    }
-+    if (force_incompatible) {
++    if (snapshot_version_mismatch) {
 +      setenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH", "1", 0);
++    }
++    if (force_incompatible) {
++      setenv("V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH", "1", 0);
 +    }
 +    v8::V8::InitializeExternalStartupDataFromFile(
 +        startup_options.snapshot_blob);
@@ -1241,7 +1278,7 @@ index 00000000000..e910ce9f5a8
 +      ret = 1;
 +      goto finish;
 +    }
-+    bool force_incompatible = false;
++    force_incompatible = false;
 +    for (int i = 3; i < command_argc; ++i) {
 +      if (strcmp(command_argv[i], "--force-incompatible") == 0 ||
 +          strcmp(command_argv[i], "--best-effort") == 0) {

@@ -153,6 +153,23 @@ function sample() {
             },
         )
 
+    def test_groups_shortprint_current_ro_object_by_chunk_offset(self) -> None:
+        text = (
+            '  //   [6] = "0x332de880de49 <undefined: segmentfault, '
+            "might outside scope; object_chunk_offset=0xde48 "
+            "tagged_chunk_offset=0xde49 area_offset=0xde38 "
+            'current_ro_object=[0xde38,0xde50) delta=0x10 hit=inside>"\n'
+        )
+
+        self.assertEqual(
+            unresolved_current_ro_objects(text),
+            {"inside+0x10@[0xde38,0xde50)"},
+        )
+        self.assertEqual(
+            current_ro_objects_by_chunk_offset(text),
+            {"0xde48": {"inside+0x10@[0xde38,0xde50)"}},
+        )
+
     def test_parses_function_scoped_constant_pool_entries(self) -> None:
         entries = parse_constant_pool_entries(
             """

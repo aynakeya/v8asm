@@ -113,3 +113,20 @@ In the Node24 round, several unresolved bytenode names land inside current
 the remaining missing names are caused by Node/embedder snapshot layout
 mismatch. It is not a Python prettifier problem, and blindly recovering names in
 postprocess would hide the real V8-side incompatibility.
+
+The next patch moves the same boundary probe into
+`HeapObjectShortPrint`'s guarded fallback. Constant-pool placeholders now keep
+their stable `object_chunk_offset` and can also carry:
+
+```text
+area_offset=0xde38 current_ro_object=[0xde38,0xde50) delta=0x10 hit=inside
+```
+
+This matters because the earlier matrix could only attach
+`current_ro_object` to top-level `!0x... segmentfault` discovery/print lines.
+If a missing bytenode name only appeared as a field-level short-print
+placeholder, the report still had the offset but not the current vanilla
+read-only object boundary. With the new fallback, those rows can show whether
+the unresolved tagged address lands inside a current RO object, outside the
+current RO allocation area, outside RO space, or whether even diagnostics could
+not safely inspect the address.
