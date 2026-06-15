@@ -794,6 +794,27 @@ reduces the forced Atom sample from `raw_goto=4` to `raw_goto=3`. The remaining
 three raw gotos cross async, try/catch, or later body ranges and are intentionally
 left visible until their target ranges can be proven.
 
+The next Atom issue was real output loss in the try/catch renderer. V8 can emit
+a short-circuit guard before a protected range, then place the false branch after
+the catch and after the try-skip jump:
+
+```text
+load A; JumpIfTrue try_entry
+load B; JumpIfFalse alternate
+try { ... } catch { ... }
+Jump final
+alternate
+final
+```
+
+Rendering prefix, try/catch, and suffix independently left the `alternate`
+branch behind a raw goto, and cleanup could drop an unused `context_slot[...]()`
+call by treating every `context_slot[` expression as pure. The renderer now
+recovers this shape as `if (A || B) { try/catch } else { alternate }`, and the
+purity check rejects `context_slot[...]()` calls. In Atom this restores the
+`ensureDir(path, callback)` fallback branch and reduces the forced sample to
+`raw_goto=2`.
+
 # 0x5 Multi-Version Rule
 
 For common V8 targets, build and identify `v8asm` by the full compatibility tuple, not just by version:

@@ -145,6 +145,105 @@ def _instruction_index_at_or_after(
     return None
 
 
+def _accu_load_expr(translator: InstructionTranslator, instr: Instruction) -> Optional[str]:
+    text = translator.translate(instr).strip()
+    match = re.match(r"^ACCU\s*=\s*(.+)$", text)
+    if not match:
+        return None
+    expr = match.group(1).strip()
+    if "ACCU" in expr:
+        return None
+    return expr
+
+
+def _branch_path_condition(
+    translator: InstructionTranslator,
+    branch: Instruction,
+    *,
+    branch_taken: bool,
+) -> Optional[str]:
+    info = translator.branch_condition(branch)
+    if not info:
+        return None
+    expr, branch_on_true = info
+    if branch_taken == branch_on_true:
+        return expr
+    return f"!({expr})"
+
+
+def _condition_with_load(condition: str, expr: str) -> Optional[str]:
+    if not condition or not expr or "ACCU" in expr:
+        return None
+    return re.sub(r"\bACCU\b", expr, condition)
+
+
+def _match_short_circuit_try_alternate(
+    translator: InstructionTranslator,
+    instructions: List[Instruction],
+    prefix_instrs: List[Instruction],
+    guarded_entry_offset: int,
+    suffix_start_idx: Optional[int],
+) -> Optional[tuple[List[Instruction], str, List[Instruction], List[Instruction]]]:
+    if suffix_start_idx is None or suffix_start_idx >= len(instructions):
+        return None
+    if len(prefix_instrs) < 4:
+        return None
+
+    first_load, first_jump, second_load, second_jump = prefix_instrs[-4:]
+    if parse_jump_target(first_jump) != guarded_entry_offset:
+        return None
+    alternate_offset = parse_jump_target(second_jump)
+    if alternate_offset is None:
+        return None
+
+    after_try_jump = instructions[suffix_start_idx]
+    if after_try_jump.mnemonic not in {"Jump", "JumpConstant"}:
+        return None
+    final_offset = parse_jump_target(after_try_jump)
+    if final_offset is None:
+        return None
+
+    alternate_start_idx = _instruction_index_at_or_after(instructions, alternate_offset)
+    final_suffix_idx = _instruction_index_at_or_after(instructions, final_offset)
+    if (
+        alternate_start_idx is None
+        or final_suffix_idx is None
+        or not (suffix_start_idx < alternate_start_idx < final_suffix_idx)
+    ):
+        return None
+
+    first_expr = _accu_load_expr(translator, first_load)
+    second_expr = _accu_load_expr(translator, second_load)
+    first_condition = _branch_path_condition(
+        translator, first_jump, branch_taken=True
+    )
+    second_condition = _branch_path_condition(
+        translator, second_jump, branch_taken=False
+    )
+    if (
+        first_expr is None
+        or second_expr is None
+        or first_condition is None
+        or second_condition is None
+    ):
+        return None
+
+    first_condition = _condition_with_load(first_condition, first_expr)
+    second_condition = _condition_with_load(second_condition, second_expr)
+    if first_condition is None or second_condition is None:
+        return None
+
+    setup_instrs = prefix_instrs[:-4]
+    alternate_instrs = instructions[alternate_start_idx:final_suffix_idx]
+    final_suffix_instrs = instructions[final_suffix_idx:]
+    return (
+        setup_instrs,
+        f"{first_condition} || {second_condition}",
+        alternate_instrs,
+        final_suffix_instrs,
+    )
+
+
 def _catch_binding_name(
     ctx: DecompilerContext,
     translator: InstructionTranslator,
@@ -293,17 +392,37 @@ def _render_single_try_catch(
     if not try_lines or not catch_lines:
         return None
 
-    out: List[str] = []
-    if prefix_lines is not None:
-        out.extend(prefix_lines)
-    elif prefix_instrs:
-        out.extend(_render_level4_fragment(translator, prefix_instrs))
     try_catch_lines: List[str] = []
     try_catch_lines.append(f"{INDENT}try {{")
     try_catch_lines.extend(_indent_lines(try_lines))
     try_catch_lines.append(f"{INDENT}}} catch ({catch_name}) {{")
     try_catch_lines.extend(_indent_lines(catch_lines))
     try_catch_lines.append(f"{INDENT}}}")
+    out: List[str] = []
+    guarded_entry_offset = instructions[prefix_end_idx].offset
+    alternate = _match_short_circuit_try_alternate(
+        translator,
+        instructions,
+        prefix_instrs,
+        guarded_entry_offset,
+        suffix_start_idx,
+    )
+    if alternate is not None:
+        setup_instrs, condition, alternate_instrs, final_suffix_instrs = alternate
+        if setup_instrs:
+            out.extend(_render_level4_fragment(translator, setup_instrs))
+        out.append(f"{INDENT}if ({condition}) {{")
+        out.extend(_indent_lines(try_catch_lines))
+        out.append(f"{INDENT}}} else {{")
+        out.extend(_indent_lines(_render_level4_fragment(translator, alternate_instrs)))
+        out.append(f"{INDENT}}}")
+        if final_suffix_instrs:
+            out.extend(_render_level4_fragment(translator, final_suffix_instrs))
+        return out
+    if prefix_lines is not None:
+        out.extend(prefix_lines)
+    elif prefix_instrs:
+        out.extend(_render_level4_fragment(translator, prefix_instrs))
     if guard_condition:
         out.append(f"{INDENT}if ({guard_condition}) {{")
         out.extend(_indent_lines(try_catch_lines))

@@ -126,6 +126,22 @@ class SimplifyLinesTests(unittest.TestCase):
             ],
         )
 
+    def test_preserves_unused_context_slot_call_without_accu(self) -> None:
+        lines = [
+            "ACCU = context_slot[7]",
+            "r0 = ACCU",
+            "ACCU = r0()",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(
+            simplified,
+            [
+                "context_slot[7]()",
+            ],
+        )
+
     def test_compacts_string_concat_chain(self) -> None:
         lines = [
             "ACCU = r4",

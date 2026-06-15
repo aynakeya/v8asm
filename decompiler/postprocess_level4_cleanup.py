@@ -24,6 +24,8 @@ def _is_pure_expr_level4(expr: str) -> bool:
     ):
         return True
     if expr.startswith(("context_slot[", "script_context[", "globalThis[")):
+        if "(" in expr:
+            return False
         return True
     if expr.startswith("(") and expr.endswith(")") and "call(" not in expr:
         return True

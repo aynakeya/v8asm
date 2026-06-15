@@ -639,16 +639,19 @@ score:
   functions: 809
   unknown_comments: 0
   undefined_fallbacks: 0
-  raw_goto: 3
+  raw_goto: 2
 ```
 
 The recovered locale map includes keys for `zh-CN`, `zh-Hans`, `zh-TW`,
 `zh-Hant`, `it`, `it-IT`, and the remaining locale aliases, with fallback
 `"Base"`. A later level-4 cleanup also drops one redundant empty `if`/`else`
 guard where the else branch immediately re-tests the same truthy value through
-`ACCU` and jumps on the same condition. The remaining three raw gotos are
-separate async/control-flow structuring gaps, not missing opcode coverage or
-hidden output.
+`ACCU` and jumps on the same condition. The try/catch renderer now also handles
+the short-circuit guard shape where the false branch is emitted after the
+try-skip jump and catch body. That restored Atom's `ensureDir(path, callback)`
+fallback branch instead of leaving it behind a raw goto. The remaining two raw
+gotos are separate async/control-flow structuring gaps, not missing opcode
+coverage or hidden output.
 
 ## Remaining gap
 
