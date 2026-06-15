@@ -83,6 +83,14 @@ It returns non-zero for `disasm_failed`, `decompile_failed`, `disasm_skipped`,
 `crash_signature`, and missing outputs. `run_round.sh` records Node build flags
 and skips bytenode force-disasm when pointer compression differs, so a crash is
 reported as a real failure instead of appearing as a zero-residue decompile.
+`run_version_matrix.sh` now also records `raw`, `unknown`, and `undef` quality
+counts for every successful level-4 output. The defaults fail on any raw
+`goto offset_...` statement or missing-opcode `// 0x... @ ...` comment, while
+`undefined_fallbacks` remain a visible count unless a focused run sets
+`VERSION_MATRIX_MAX_UNDEFINED_FALLBACKS`. The matrix also skips numeric V8
+mismatches by default now; `VERSION_MATRIX_FORCE_MISMATCH=1` is only for
+research probes, and a signal-style result such as `fail:139` is promoted to a
+hard gate failure.
 The summary now also counts unique unresolved object-print failures in the
 disassembly and emits a low-address-suffix / `object_chunk_offset` table. Newer
 13.6 `v8asm` builds print that offset in both `!0x... segmentfault` lines and

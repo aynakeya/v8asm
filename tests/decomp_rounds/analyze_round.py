@@ -64,12 +64,22 @@ def mode_has_crash_signature(case_dir: Path, case: str, mode: str) -> bool:
     return False
 
 
+def count_raw_gotos(text: str) -> int:
+    return len(
+        re.findall(
+            r"^\s*(?:if \(.+\)\s+)?goto\s+offset_",
+            text,
+            flags=re.M,
+        )
+    )
+
+
 def score_text(text: str) -> dict[str, int]:
     return {
         "accu_lines": len(re.findall(r"^\s*ACCU\s*=", text, flags=re.M)),
         "reg_refs": len(re.findall(r"\br\d+\b", text)),
         "goto_comments": len(re.findall(r"//\s*goto\s+offset_", text)),
-        "raw_goto": len(re.findall(r"\bgoto\s+offset_", text)),
+        "raw_goto": count_raw_gotos(text),
         "unknown_comments": len(re.findall(r"//\s*0x[0-9a-f]+\s+@", text)),
         "undefined_fallbacks": len(re.findall(r"<undefined: segmentfault", text)),
         "holes": len(re.findall(r"\bHOLE\b", text)),

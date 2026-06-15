@@ -734,7 +734,6 @@ void print_compiled_args() {
 
 struct StartupOptions {
   const char* snapshot_blob = nullptr;
-  int command_index = 1;
   bool valid = true;
 };
 
@@ -745,30 +744,32 @@ void print_usage(const char* program) {
           program);
 }
 
-StartupOptions parse_startup_options(int argc, char* argv[]) {
+StartupOptions parse_startup_options(int argc, char* argv[],
+                                     std::vector<char*>* command_argv) {
   StartupOptions options;
-  while (options.command_index < argc) {
-    const char* arg = argv[options.command_index];
+  command_argv->clear();
+  command_argv->push_back(argv[0]);
+  for (int i = 1; i < argc; ++i) {
+    const char* arg = argv[i];
     if (strcmp(arg, "--snapshot_blob") == 0) {
-      if (options.command_index + 1 >= argc) {
+      if (i + 1 >= argc) {
         fprintf(stderr, "--snapshot_blob requires a file path\n");
         options.valid = false;
         return options;
       }
-      options.snapshot_blob = argv[options.command_index + 1];
-      options.command_index += 2;
+      options.snapshot_blob = argv[i + 1];
+      ++i;
       continue;
     }
     const char* snapshot_prefix = "--snapshot_blob=";
     size_t snapshot_prefix_len = strlen(snapshot_prefix);
     if (strncmp(arg, snapshot_prefix, snapshot_prefix_len) == 0) {
       options.snapshot_blob = arg + snapshot_prefix_len;
-      options.command_index += 1;
       continue;
     }
-    break;
+    command_argv->push_back(argv[i]);
   }
-  if (options.command_index >= argc) {
+  if (command_argv->size() < 2) {
     options.valid = false;
   }
   return options;
@@ -824,20 +825,22 @@ bool allow_cross_version_snapshot_mismatch() {
 }
 
 bool validate_snapshot_blob_version(const char* snapshot_blob,
-                                    bool force_incompatible) {
+                                    bool* version_mismatch) {
+  *version_mismatch = false;
   char snapshot_version[kV8AsmSnapshotVersionLength + 1];
   if (!read_snapshot_version(snapshot_blob, snapshot_version)) {
     return false;
   }
 
   const char* binary_version = v8::V8::GetVersion();
-  if (snapshot_matches_binary_base(snapshot_version, binary_version)) {
+  if (strcmp(snapshot_version, binary_version) == 0) {
     return true;
   }
 
-  if (force_incompatible || allow_cross_version_snapshot_mismatch()) {
+  *version_mismatch = true;
+  if (snapshot_matches_binary_base(snapshot_version, binary_version)) {
     fprintf(stderr,
-            "Warning: forcing cross-version snapshot blob load.\n"
+            "Warning: forcing snapshot blob version tag mismatch.\n"
             "#   V8 binary version: %s\n"
             "#    Snapshot version: %s\n",
             binary_version, snapshot_version);
@@ -845,14 +848,11 @@ bool validate_snapshot_blob_version(const char* snapshot_blob,
   }
 
   fprintf(stderr,
-          "Refusing to load snapshot_blob built for a different V8 baseline.\n"
+          "Warning: forcing cross-version snapshot blob load.\n"
           "#   V8 binary version: %s\n"
-          "#    Snapshot version: %s\n"
-          "Use a matching v8asm build for this snapshot, or set "
-          "V8ASM_ALLOW_CROSS_VERSION_SNAPSHOT_MISMATCH=1 for crash-prone "
-          "manual research.\n",
+          "#    Snapshot version: %s\n",
           binary_version, snapshot_version);
-  return false;
+  return true;
 }
 
 int main(int argc, char* argv[]) {
@@ -861,32 +861,31 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  StartupOptions startup_options = parse_startup_options(argc, argv);
+  std::vector<char*> command_argv;
+  StartupOptions startup_options =
+      parse_startup_options(argc, argv, &command_argv);
   if (!startup_options.valid) {
     print_usage(argv[0]);
     return 1;
   }
 
-  std::vector<char*> command_argv;
-  command_argv.reserve(argc - startup_options.command_index + 1);
-  command_argv.push_back(argv[0]);
-  for (int i = startup_options.command_index; i < argc; ++i) {
-    command_argv.push_back(argv[i]);
-  }
   int command_argc = static_cast<int>(command_argv.size());
   const char* cmd = command_argv[1];
+  bool force_incompatible =
+      command_requests_force_incompatible(command_argc, command_argv.data());
 
   v8::V8::SetFlagsFromString("--no-lazy --no-flush-bytecode");
   v8::V8::InitializeICUDefaultLocation(argv[0]);
   if (startup_options.snapshot_blob != nullptr) {
-    bool force_incompatible =
-        command_requests_force_incompatible(command_argc, command_argv.data());
+    bool snapshot_version_mismatch = false;
     if (!validate_snapshot_blob_version(startup_options.snapshot_blob,
-                                        force_incompatible)) {
+                                        &snapshot_version_mismatch)) {
       return 1;
     }
-    if (force_incompatible) {
+    if (snapshot_version_mismatch) {
       setenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH", "1", 0);
+    }
+    if (force_incompatible) {
       setenv("V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH", "1", 0);
     }
     v8::V8::InitializeExternalStartupDataFromFile(
@@ -931,7 +930,7 @@ int main(int argc, char* argv[]) {
       ret = 1;
       goto finish;
     }
-    bool force_incompatible = false;
+    force_incompatible = false;
     for (int i = 3; i < command_argc; ++i) {
       if (strcmp(command_argv[i], "--force-incompatible") == 0 ||
           strcmp(command_argv[i], "--best-effort") == 0) {

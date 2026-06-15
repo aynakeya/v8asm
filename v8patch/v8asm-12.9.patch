@@ -1,11 +1,11 @@
 diff --git a/BUILD.gn b/BUILD.gn
-index 5e386a08ef2..cc2a9bb2a3a 100644
+index 19e0d2b5847..a3c8a3c22ab 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -7765,6 +7765,26 @@ v8_executable("v8_hello_world") {
+@@ -7796,6 +7796,26 @@ v8_executable("v8_hello_world") {
    }
  }
- 
+
 +v8_executable("v8asm") {
 +  sources = [ "src/disassembler/main.cc" ]
 +
@@ -28,20 +28,20 @@ index 5e386a08ef2..cc2a9bb2a3a 100644
 +
  v8_executable("v8_sample_process") {
    sources = [ "samples/process.cc" ]
- 
+
 diff --git a/src/d8/d8.cc b/src/d8/d8.cc
-index 6101c651a0a..e0860769cf5 100644
+index bdc1b68481f..2f98bc2c7f4 100644
 --- a/src/d8/d8.cc
 +++ b/src/d8/d8.cc
 @@ -874,6 +874,7 @@ void D8WasmAsyncResolvePromiseCallback(
- 
+
  }  // namespace
- 
+
 +
  // Executes a string within the current v8 context.
  bool Shell::ExecuteString(Isolate* isolate, Local<String> source,
                            Local<String> name,
-@@ -3613,6 +3614,10 @@ Local<ObjectTemplate> Shell::CreateGlobalTemplate(Isolate* isolate) {
+@@ -3616,6 +3617,10 @@ Local<ObjectTemplate> Shell::CreateGlobalTemplate(Isolate* isolate) {
    global_template->Set(isolate, "performance",
                         Shell::CreatePerformanceTemplate(isolate));
    global_template->Set(isolate, "Worker", Shell::CreateWorkerTemplate(isolate));
@@ -49,11 +49,11 @@ index 6101c651a0a..e0860769cf5 100644
 +    v8::String::NewFromUtf8(isolate, "loadjsc", v8::NewStringType::kNormal)
 +        .ToLocalChecked(),
 +    v8::FunctionTemplate::New(isolate, v8::Shell::LoadJSC));
- 
+
    // Prevent fuzzers from creating side effects.
    if (!i::v8_flags.fuzzing) {
-@@ -6514,3 +6519,105 @@ int main(int argc, char* argv[]) { return v8::Shell::Main(argc, argv); }
- 
+@@ -6517,3 +6522,105 @@ int main(int argc, char* argv[]) { return v8::Shell::Main(argc, argv); }
+
  #undef CHECK
  #undef DCHECK
 +
@@ -166,20 +166,20 @@ index cbf270f0f16..9af9bfead4f 100644
 @@ -552,6 +552,8 @@ class Shell : public i::AllStatic {
    static bool CompleteMessageLoop(Isolate* isolate);
    static bool FinishExecuting(Isolate* isolate, const Global<Context>& context);
- 
+
 +  static void LoadJSC(const v8::FunctionCallbackInfo<v8::Value>& args);
 +
    static bool HandleUnhandledPromiseRejections(Isolate* isolate);
- 
+
    static std::unique_ptr<SerializationData> SerializeValue(
 diff --git a/src/diagnostics/objects-printer.cc b/src/diagnostics/objects-printer.cc
-index b0d02fa1b5b..5b52c4a7149 100644
+index 3fb40e6ea6a..3adbaf41a82 100644
 --- a/src/diagnostics/objects-printer.cc
 +++ b/src/diagnostics/objects-printer.cc
 @@ -28,6 +28,11 @@
  #include "src/utils/ostreams.h"
  #include "third_party/fp16/src/include/fp16.h"
- 
+
 +
 +#include <csignal>
 +#include <csetjmp>
@@ -197,10 +197,10 @@ index b0d02fa1b5b..5b52c4a7149 100644
    if (id != nullptr) {
      os << id;
    } else {
-@@ -3224,15 +3229,30 @@ void HeapObject::Print(Tagged<Object> obj, std::ostream& os) {
+@@ -3231,15 +3236,30 @@ void HeapObject::Print(Tagged<Object> obj, std::ostream& os) {
    v8::internal::Print(obj, os);
  }
- 
+
 +static sigjmp_buf g_jump_buffer;
 +void segfault_jumper(int signal_number) {
 +    siglongjmp(g_jump_buffer, 1);
@@ -209,7 +209,7 @@ index b0d02fa1b5b..5b52c4a7149 100644
  void HeapObject::HeapObjectShortPrint(std::ostream& os) {
    PtrComprCageBase cage_base = GetPtrComprCageBase();
    os << AsHex::Address(this->ptr()) << " ";
- 
+
 +  void (*old_handler)(int);
 +  old_handler = signal(SIGSEGV, segfault_jumper);
 +  if (sigsetjmp(g_jump_buffer, 1) != 0) {
@@ -228,7 +228,7 @@ index b0d02fa1b5b..5b52c4a7149 100644
      return;
    }
    if (IsJSObject(*this, cage_base)) {
-@@ -3240,9 +3260,22 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -3247,9 +3267,22 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
      StringStream accumulator(&allocator);
      Cast<JSObject>(*this)->JSObjectShortPrint(&accumulator);
      os << accumulator.ToCString().get();
@@ -252,20 +252,20 @@ index b0d02fa1b5b..5b52c4a7149 100644
      case MAP_TYPE: {
        Tagged<Map> map = Cast<Map>(*this);
        if (map->instance_type() == MAP_TYPE) {
-@@ -3579,6 +3612,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -3586,6 +3619,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
        os << "<Other heap object (" << map()->instance_type() << ")>";
        break;
    }
 +  signal(SIGSEGV, old_handler);
  }
- 
+
  void HeapNumber::HeapNumberShortPrint(std::ostream& os) {
 diff --git a/src/disassembler/main.cc b/src/disassembler/main.cc
 new file mode 100644
-index 00000000000..ec31b380e47
+index 00000000000..12ffb2eee24
 --- /dev/null
 +++ b/src/disassembler/main.cc
-@@ -0,0 +1,783 @@
+@@ -0,0 +1,887 @@
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <fstream>
@@ -998,20 +998,22 @@ index 00000000000..ec31b380e47
 +}
 +
 +bool validate_snapshot_blob_version(const char* snapshot_blob,
-+                                    bool force_incompatible) {
++                                    bool* version_mismatch) {
++  *version_mismatch = false;
 +  char snapshot_version[kV8AsmSnapshotVersionLength + 1];
 +  if (!read_snapshot_version(snapshot_blob, snapshot_version)) {
 +    return false;
 +  }
 +
 +  const char* binary_version = v8::V8::GetVersion();
-+  if (snapshot_matches_binary_base(snapshot_version, binary_version)) {
++  if (strcmp(snapshot_version, binary_version) == 0) {
 +    return true;
 +  }
 +
-+  if (force_incompatible || allow_cross_version_snapshot_mismatch()) {
++  *version_mismatch = true;
++  if (snapshot_matches_binary_base(snapshot_version, binary_version)) {
 +    fprintf(stderr,
-+            "Warning: forcing cross-version snapshot blob load.\n"
++            "Warning: forcing snapshot blob version tag mismatch.\n"
 +            "#   V8 binary version: %s\n"
 +            "#    Snapshot version: %s\n",
 +            binary_version, snapshot_version);
@@ -1019,14 +1021,11 @@ index 00000000000..ec31b380e47
 +  }
 +
 +  fprintf(stderr,
-+          "Refusing to load snapshot_blob built for a different V8 baseline.\n"
++          "Warning: forcing cross-version snapshot blob load.\n"
 +          "#   V8 binary version: %s\n"
-+          "#    Snapshot version: %s\n"
-+          "Use a matching v8asm build for this snapshot, or set "
-+          "V8ASM_ALLOW_CROSS_VERSION_SNAPSHOT_MISMATCH=1 for crash-prone "
-+          "manual research.\n",
++          "#    Snapshot version: %s\n",
 +          binary_version, snapshot_version);
-+  return false;
++  return true;
 +}
 +
 +int main(int argc, char* argv[]) {
@@ -1043,6 +1042,36 @@ index 00000000000..ec31b380e47
 +  for (int i = startup_options.command_index; i < argc; ++i) {
 +    command_argv.push_back(argv[i]);
 +  }
++  std::vector<char*> filtered_argv;
++  filtered_argv.reserve(command_argv.size());
++  filtered_argv.push_back(command_argv[0]);
++  for (size_t i = 1; i < command_argv.size(); ++i) {
++    const char* arg = command_argv[i];
++    if (strcmp(arg, "--snapshot_blob") == 0) {
++      if (i + 1 >= command_argv.size()) {
++        fprintf(stderr, "--snapshot_blob requires a file path\n");
++        return 1;
++      }
++      startup_options.snapshot_blob = command_argv[i + 1];
++      ++i;
++      continue;
++    }
++    const char* snapshot_prefix = "--snapshot_blob=";
++    size_t snapshot_prefix_len = strlen(snapshot_prefix);
++    if (strncmp(arg, snapshot_prefix, snapshot_prefix_len) == 0) {
++      startup_options.snapshot_blob = arg + snapshot_prefix_len;
++      continue;
++    }
++    filtered_argv.push_back(command_argv[i]);
++  }
++  command_argv.swap(filtered_argv);
++  if (command_argv.size() < 2) {
++    fprintf(stderr,
++            "Usage: %s [--snapshot_blob file] "
++            "<asm|disasm|checkversion|version|build-args> ...\n",
++            argv[0]);
++    return 1;
++  }
 +  int command_argc = static_cast<int>(command_argv.size());
 +
 +  v8::V8::SetFlagsFromString("--no-lazy --no-flush-bytecode");
@@ -1056,7 +1085,6 @@ index 00000000000..ec31b380e47
 +    }
 +    if (force_incompatible) {
 +      setenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH", "1", 0);
-+      setenv("V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH", "1", 0);
 +    }
 +    v8::V8::InitializeExternalStartupDataFromFile(
 +        startup_options.snapshot_blob);
@@ -1131,14 +1159,14 @@ index 485d044506f..1fb71d38f98 100644
 +++ b/src/objects/bytecode-array.cc
 @@ -158,11 +158,6 @@ void BytecodeArray::Disassemble(Handle<BytecodeArray> handle,
    }
- 
+
    os << "Constant pool (size = " << handle->constant_pool()->length() << ")\n";
 -#ifdef OBJECT_PRINT
 -  if (handle->constant_pool()->length() > 0) {
 -    Print(handle->constant_pool(), os);
 -  }
 -#endif
- 
+
    os << "Handler Table (size = " << handle->handler_table()->length() << ")\n";
  #ifdef ENABLE_DISASSEMBLER
 @@ -181,6 +176,11 @@ void BytecodeArray::Disassemble(Handle<BytecodeArray> handle,
@@ -1151,56 +1179,13 @@ index 485d044506f..1fb71d38f98 100644
 +  }
 +#endif
  }
- 
+
  void BytecodeArray::CopyBytecodesTo(Tagged<BytecodeArray> to) {
-diff --git a/src/snapshot/snapshot.cc b/src/snapshot/snapshot.cc
---- a/src/snapshot/snapshot.cc
-+++ b/src/snapshot/snapshot.cc
-@@ -27,4 +27,6 @@
- #include "src/utils/memcopy.h"
- #include "src/utils/version.h"
--
-+#include <cstdlib>
-+#include <cstring>
-+
- #ifdef V8_SNAPSHOT_COMPRESSION
-@@ -130,4 +133,12 @@ class SnapshotImpl : public AllStatic {
-   }
- };
--
-+
-+bool V8AsmAllowsSnapshotVersionMismatch() {
-+  const char* value = std::getenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH");
-+  if (value == nullptr || value[0] == '\0' || std::strcmp(value, "0") == 0) {
-+    value = std::getenv("V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH");
-+  }
-+  return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
-+}
-+
- }  // namespace
-@@ -745,6 +756,17 @@ void SnapshotImpl::CheckVersion(const v8::StartupData* data) {
-     CHECK_LT(kVersionStringOffset + kVersionStringLength,
-              static_cast<uint32_t>(data->raw_size));
-     Version::GetString(base::Vector<char>(version, kVersionStringLength));
-+    if (V8AsmAllowsSnapshotVersionMismatch()) {
-+      PrintF(stderr,
-+             "Warning: forcing snapshot version mismatch.\n"
-+             "#   V8 binary version: %.*s\n"
-+             "#    Snapshot version: %.*s\n"
-+             "# The snapshot consists of %d bytes and contains %d context(s).\n",
-+             kVersionStringLength, version, kVersionStringLength,
-+             data->data + kVersionStringOffset, data->raw_size,
-+             ExtractNumContexts(data));
-+      return;
-+    }
-     FATAL(
-         "Version mismatch between V8 binary and snapshot.\n"
-         "#   V8 binary version: %.*s\n"
 diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
-index c78b44570ad..b5ab41c1ee2 100644
+index 1f164b51de1..237733eb1e0 100644
 --- a/src/snapshot/code-serializer.cc
 +++ b/src/snapshot/code-serializer.cc
-@@ -699,10 +699,11 @@ SerializedCodeData::SerializedCodeData(const std::vector<uint8_t>* payload,
+@@ -700,10 +700,11 @@ SerializedCodeData::SerializedCodeData(const std::vector<uint8_t>* payload,
  SerializedCodeSanityCheckResult SerializedCodeData::SanityCheck(
      uint32_t expected_ro_snapshot_checksum,
      uint32_t expected_source_hash) const {
@@ -1214,10 +1199,10 @@ index c78b44570ad..b5ab41c1ee2 100644
 +  // if (result != SerializedCodeSanityCheckResult::kSuccess) return result;
 +  // return SanityCheckJustSource(expected_source_hash);
  }
- 
+
  SerializedCodeSanityCheckResult SerializedCodeData::SanityCheckJustSource(
-@@ -716,37 +717,37 @@ SerializedCodeSanityCheckResult SerializedCodeData::SanityCheckJustSource(
- 
+@@ -717,37 +718,37 @@ SerializedCodeSanityCheckResult SerializedCodeData::SanityCheckJustSource(
+
  SerializedCodeSanityCheckResult SerializedCodeData::SanityCheckWithoutSource(
      uint32_t expected_ro_snapshot_checksum) const {
 -  if (size_ < kHeaderSize) {
@@ -1284,9 +1269,9 @@ index c78b44570ad..b5ab41c1ee2 100644
 +  // }
    return SerializedCodeSanityCheckResult::kSuccess;
  }
- 
+
 diff --git a/src/snapshot/deserializer.cc b/src/snapshot/deserializer.cc
-index 7bc0586cd37..f450b17325d 100644
+index 3d11f48c480..e17f47495a7 100644
 --- a/src/snapshot/deserializer.cc
 +++ b/src/snapshot/deserializer.cc
 @@ -298,7 +298,7 @@ Deserializer<IsolateT>::Deserializer(IsolateT* isolate,
@@ -1296,179 +1281,48 @@ index 7bc0586cd37..f450b17325d 100644
 -  CHECK_EQ(magic_number_, SerializedData::kMagicNumber);
 +  // CHECK_EQ(magic_number_, SerializedData::kMagicNumber);
  }
- 
+
  template <typename IsolateT>
-@@ -1014,7 +1014,33 @@ int Deserializer<IsolateT>::ReadReadOnlyHeapRef(uint8_t data,
-   uint32_t chunk_offset = source_.GetUint30();
- 
-   ReadOnlySpace* read_only_space = isolate()->heap()->read_only_space();
--  ReadOnlyPageMetadata* page = read_only_space->pages()[chunk_index];
-+  const auto& pages = read_only_space->pages();
-+
-+  auto write_undefined_fallback = [&]() {
-+    PrintF(stderr,
-+           "v8asm: invalid ReadOnlyHeapRef [%u, %u], substituting undefined\n",
-+           chunk_index, chunk_offset);
-+    Tagged<HeapObject> heap_object =
-+        Cast<HeapObject>(ReadOnlyRoots(isolate()).undefined_value());
-+    return WriteHeapPointer(slot_accessor, heap_object,
-+                            GetAndResetNextReferenceDescriptor());
-+  };
-+
-+  if (chunk_index >= pages.size()) {
-+    return write_undefined_fallback();
-+  }
-+
-+  ReadOnlyPageMetadata* page = pages[chunk_index];
-+  Address address_in_page = page->ChunkAddress() + chunk_offset;
-+  if (COMPRESS_POINTERS_IN_MULTIPLE_CAGES_BOOL) {
-+    if (chunk_offset >= page->size()) {
-+      return write_undefined_fallback();
-+    }
-+  } else if (address_in_page < page->area_start() ||
-+             address_in_page >= page->area_end()) {
-+    return write_undefined_fallback();
-+  }
-+
-   Address address = page->OffsetToAddress(chunk_offset);
-   Tagged<HeapObject> heap_object = HeapObject::FromAddress(address);
- 
-diff --git a/src/snapshot/startup-deserializer.cc b/src/snapshot/startup-deserializer.cc
-index 30c6ca93d5c..cba46f53267 100644
---- a/src/snapshot/startup-deserializer.cc
-+++ b/src/snapshot/startup-deserializer.cc
-@@ -14,9 +14,22 @@
- #include "src/objects/oddball.h"
- #include "src/roots/roots-inl.h"
- 
+diff --git a/src/snapshot/snapshot.cc b/src/snapshot/snapshot.cc
+index 3d82fc79c55..0be34748bae 100644
+--- a/src/snapshot/snapshot.cc
++++ b/src/snapshot/snapshot.cc
+@@ -26,6 +26,8 @@
+ #include "src/snapshot/startup-serializer.h"
+ #include "src/utils/memcopy.h"
+ #include "src/utils/version.h"
 +#include <cstdlib>
 +#include <cstring>
-+
- namespace v8 {
- namespace internal {
- 
-+namespace {
-+
-+bool V8AsmAllowsExternalReferenceMismatch() {
-+  const char* value =
-+      std::getenv("V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH");
+
+ #ifdef V8_SNAPSHOT_COMPRESSION
+ #include "src/snapshot/snapshot-compression.h"
+@@ -130,6 +132,11 @@ class SnapshotImpl : public AllStatic {
+   }
+ };
+
++bool V8AsmAllowsSnapshotVersionMismatch() {
++  const char* value = std::getenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH");
 +  return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
 +}
 +
-+}  // namespace
-+
- void StartupDeserializer::DeserializeIntoIsolate() {
-   TRACE_EVENT0("v8", "V8.DeserializeIsolate");
-   RCS_SCOPE(isolate(), RuntimeCallCounterId::kDeserializeIsolate);
-@@ -96,12 +109,85 @@ void StartupDeserializer::DeserializeAndCheckExternalReferenceTable() {
-   // Verify that any external reference entries that were deduplicated in the
-   // serializer are also deduplicated in this isolate.
-   ExternalReferenceTable* table = isolate()->external_reference_table();
-+  bool allow_mismatch = V8AsmAllowsExternalReferenceMismatch();
-+  const uint32_t current_table_size = ExternalReferenceTable::kSize;
-+  const uint32_t snapshot_table_size = SnapshotExternalReferenceTableSize();
-+  const uint32_t current_end =
-+      ExternalReferenceTable::kSizeIsolateIndependent;
-+  uint32_t snapshot_end = current_end;
-+  if (allow_mismatch && snapshot_table_size != current_table_size) {
-+    int64_t table_delta = static_cast<int64_t>(current_table_size) -
-+                          static_cast<int64_t>(snapshot_table_size);
-+    int64_t inferred_end = static_cast<int64_t>(current_end) - table_delta;
-+    if (inferred_end >= 0 && inferred_end < (1LL << 30)) {
-+      snapshot_end = static_cast<uint32_t>(inferred_end);
-+      PrintF(
-+          "v8asm: using snapshot external reference table size %u "
-+          "(current %u), inferred startup sentinel %u (current %u)\n",
-+          snapshot_table_size, current_table_size, snapshot_end, current_end);
+ }  // namespace
+
+ SnapshotData MaybeDecompress(Isolate* isolate,
+@@ -751,6 +758,17 @@ void SnapshotImpl::CheckVersion(const v8::StartupData* data) {
+     CHECK_LT(kVersionStringOffset + kVersionStringLength,
+              static_cast<uint32_t>(data->raw_size));
+     Version::GetString(base::Vector<char>(version, kVersionStringLength));
++    if (V8AsmAllowsSnapshotVersionMismatch()) {
++      PrintF(stderr,
++             "Warning: forcing snapshot version mismatch.\n"
++             "#   V8 binary version: %.*s\n"
++             "#    Snapshot version: %.*s\n"
++             "# The snapshot consists of %d bytes and contains %d context(s).\n",
++             kVersionStringLength, version, kVersionStringLength,
++             data->data + kVersionStringOffset, data->raw_size,
++             ExtractNumContexts(data));
++      return;
 +    }
-+  }
-+  int mismatch_count = 0;
-   while (true) {
-     uint32_t index = source()->GetUint30();
--    if (index == ExternalReferenceTable::kSizeIsolateIndependent) break;
-+    if (index == current_end || (allow_mismatch && index == snapshot_end)) {
-+      break;
-+    }
-     uint32_t encoded_index = source()->GetUint30();
--    CHECK_EQ(table->address(index), table->address(encoded_index));
-+    if (index >= current_end) {
-+      if (!allow_mismatch) {
-+        CHECK_LT(index, current_end);
-+      }
-+      ++mismatch_count;
-+      if (mismatch_count <= 32) {
-+        PrintF(
-+            "v8asm: unknown startup external reference alias index=%u "
-+            "encoded_index=%u\n",
-+            index, encoded_index);
-+      }
-+      continue;
-+    }
-+    if (encoded_index >= static_cast<uint32_t>(ExternalReferenceTable::kSize)) {
-+      if (!allow_mismatch) {
-+        CHECK_LT(encoded_index,
-+                 static_cast<uint32_t>(ExternalReferenceTable::kSize));
-+      }
-+      ++mismatch_count;
-+      if (mismatch_count <= 32) {
-+        PrintF(
-+            "v8asm: invalid startup external reference alias index=%u(%s) "
-+            "encoded_index=%u\n",
-+            index, table->name(index), encoded_index);
-+      }
-+      continue;
-+    }
-+    Address address = table->address(index);
-+    Address encoded_address = table->address(encoded_index);
-+    if (address != encoded_address) {
-+      if (!allow_mismatch) {
-+        CHECK_EQ(address, encoded_address);
-+      }
-+      ++mismatch_count;
-+      if (mismatch_count <= 32) {
-+        PrintF(
-+            "v8asm: startup external reference alias mismatch "
-+            "index=%u(%s:%p) encoded_index=%u(%s:%p)\n",
-+            index, table->name(index), reinterpret_cast<void*>(address),
-+            encoded_index, table->name(encoded_index),
-+            reinterpret_cast<void*>(encoded_address));
-+      }
-+    }
-   }
-+  if (allow_mismatch && mismatch_count > 0) {
-+    PrintF("v8asm: ignored %d startup external reference alias mismatches\n",
-+           mismatch_count);
-+  }
-+}
-+
-+uint32_t StartupDeserializer::SnapshotExternalReferenceTableSize() const {
-+  const uint32_t magic_base =
-+      SerializedData::kMagicNumber ^ ExternalReferenceTable::kSize;
-+  return snapshot_magic_number_ ^ magic_base;
- }
- 
- void StartupDeserializer::LogNewMapEvents() {
-diff --git a/src/snapshot/startup-deserializer.h b/src/snapshot/startup-deserializer.h
-index 60ad43d5b54..967a845d13b 100644
---- a/src/snapshot/startup-deserializer.h
-+++ b/src/snapshot/startup-deserializer.h
-@@ -18,7 +18,8 @@ class StartupDeserializer final : public Deserializer<Isolate> {
-                                const SnapshotData* startup_data,
-                                bool can_rehash)
-       : Deserializer(isolate, startup_data->Payload(),
--                     startup_data->GetMagicNumber(), false, can_rehash) {}
-+                     startup_data->GetMagicNumber(), false, can_rehash),
-+        snapshot_magic_number_(startup_data->GetMagicNumber()) {}
- 
-   // Deserialize the snapshot into an empty heap.
-   void DeserializeIntoIsolate();
-@@ -27,6 +28,9 @@ class StartupDeserializer final : public Deserializer<Isolate> {
-   void FlushICache();
-   void LogNewMapEvents();
-   void DeserializeAndCheckExternalReferenceTable();
-+  uint32_t SnapshotExternalReferenceTableSize() const;
-+
-+  uint32_t snapshot_magic_number_;
- };
- 
- }  // namespace internal
+     FATAL(
+         "Version mismatch between V8 binary and snapshot.\n"
+         "#   V8 binary version: %.*s\n"

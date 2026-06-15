@@ -8,9 +8,9 @@ Target sample: `atom.compiled.dist.jsc`
 
 `atom.compiled.dist.jsc` is raw V8 cached data from an Electron build. The version hash resolves to V8 `13.4.114.21`, so the V8 checkout was moved to the official `13.4.114.21` tag and synchronized with `gclient sync --with_branch_heads --with_tags` using the local `start_env.md` depot_tools/proxy setup.
 
-The plain V8 13.4 build does not exactly match Electron cached data. `checkversion` reports the same V8 version hash, but different cached-data `magic`, `flags_hash`, and read-only snapshot checksum. Strict deserialization correctly refuses the file. Forced deserialization originally aborted before printing anything because the deserializer indexed the current build read-only heap pages with an Electron snapshot page index.
+The plain V8 13.4 build does not exactly match Electron cached data. `checkversion` reports the same V8 version hash, but different cached-data `magic` and `flags_hash`. Strict deserialization correctly refuses the file. The matching context snapshot also carries the Electron version suffix `13.4.114.21-electron.0`, so a plain `13.4.114.21` build needs an explicit forced startup-snapshot path before it can inspect the cached-data payload.
 
-The important fix is in V8, not in the Python decompiler and not in object-printer protection: `Deserializer::ReadReadOnlyHeapRef` now validates the read-only page index and page offset before touching `read_only_space->pages()[chunk_index]`. Invalid read-only heap references are replaced with `undefined` and reported on stderr. This makes forced Electron recovery produce a partial but useful disassembly instead of aborting.
+The current fix is intentionally narrow. With the correct context snapshot, the read-only snapshot checksum matches and `ReadReadOnlyHeapRef` fallback is not needed. The remaining V8-side incompatibility is the startup external-reference alias table: the Electron snapshot serializes table size `1671`, while the vanilla 13.4 build has `1672`. In forced mode, `v8asm` now enables one startup external-reference compatibility hook, infers the Electron sentinel from the snapshot magic, and keeps V8's other deserializer checks intact.
 
 After the matching files were added under `v8context/`, the correct startup blob for this `.jsc` turned out to be `v8context/v8_context_snapshot.bin`, not `v8context/snapshot_blob.bin`. Its header contains read-only snapshot checksum `0x4e6b3214`, exactly matching `atom.compiled.dist.jsc`.
 
@@ -39,10 +39,9 @@ using the matching `13.4.114.21` v8asm build with
 The same Electron snapshot also has serialized external reference table size
 `1671`, while the vanilla V8 `13.4.114.21` build has size `1672`; in startup
 deserialization that means the Electron sentinel is `1592` and the current
-binary sentinel is `1593`. The existing research-only external-reference-table
-hook infers the snapshot sentinel from the snapshot magic and continues. With
-the correct context snapshot, the `ReadReadOnlyHeapRef` fallback is no longer
-used.
+binary sentinel is `1593`. The research-only external-reference-table hook
+infers the snapshot sentinel from the snapshot magic and continues, but only
+when the user explicitly asks for forced incompatible recovery.
 
 ## Evidence
 
@@ -89,13 +88,13 @@ Cached data header:
 Found matching version: 13.4.114.21
 ```
 
-Strict mode result:
+Strict mode result for cached data without `--force-incompatible`:
 
 ```text
 Refusing to deserialize incompatible cached data. Use --force-incompatible for best-effort recovery.
 ```
 
-Original forced crash before the fix:
+Earlier forced crash when the wrong snapshot was used:
 
 ```text
 ../../third_party/libc++/src/include/__vector/vector.h:399: assertion __n < size() failed: vector[] index out of bounds
@@ -106,36 +105,23 @@ Original forced crash before the fix:
 #55 do_disasm(...)
 ```
 
-After the fix, forced disassembly succeeds:
-
-```text
-/tmp/atom.13.4.force.patched.disasm.txt   112389 lines, 6477509 bytes
-/tmp/atom.13.4.force.patched.disasm.err      171 lines,   11066 bytes
-```
-
-The stderr diagnostics show the remaining Electron read-only snapshot mismatch explicitly:
-
-```text
-v8asm: invalid ReadOnlyHeapRef [2, 35976], substituting undefined
-v8asm: invalid ReadOnlyHeapRef [2, 32336], substituting undefined
-...
-```
-
-After using `v8_context_snapshot.bin`, the forced disassembly no longer reports invalid read-only heap references:
+After using `v8_context_snapshot.bin`, forced disassembly no longer reports
+invalid read-only heap references:
 
 ```text
 /tmp/atom.13.4.v8context.force.disasm.txt   112391 lines, 6452189 bytes
 /tmp/atom.13.4.v8context.force.disasm.err        9 lines,     400 bytes
 ```
 
-The Python decompiler now handles this output and produces level-4 pseudo JS with runtime helpers:
+The Python decompiler handles this output and produces level-4 pseudo JS with
+runtime helpers:
 
 ```text
 /tmp/atom.13.4.v8context.force.dec.l4.js       36038 lines, 1187504 bytes
 /tmp/atom.13.4.v8context.force.decompile.err       0 bytes
 ```
 
-Plain V8 13.4 forced snapshot-version recovery after the 2026-06-15 patch:
+Plain V8 13.4 forced snapshot recovery after the 2026-06-15 patch:
 
 ```text
 /home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.13.4.x64.release/v8asm \
@@ -143,6 +129,9 @@ Plain V8 13.4 forced snapshot-version recovery after the 2026-06-15 patch:
   checkversion /home/aynakeya/workspace/v8asm/atom.compiled.dist.jsc \
   --force-incompatible
 
+Warning: forcing snapshot blob version tag mismatch.
+#   V8 binary version: 13.4.114.21
+#    Snapshot version: 13.4.114.21-electron.0
 Warning: forcing snapshot version mismatch.
 #   V8 binary version: 13.4.114.21
 #    Snapshot version: 13.4.114.21-electron.0
@@ -156,10 +145,26 @@ The same plain build now forced-disassembles the Atom sample without fatal
 signals and the Python level-4 decompiler consumes the output:
 
 ```text
-/tmp/atom.13.4.plain.force.disasm.txt          112391 lines, 6452189 bytes
-/tmp/atom.13.4.plain.force.disasm.err              13 lines,     592 bytes
-/tmp/atom.13.4.plain.force.decompiled.l4.js     35996 lines, 1185903 bytes
-/tmp/atom.13.4.plain.force.decompiled.l4.err        0 bytes
+/tmp/atom.13.4.current.v8context.force.disasm.txt       112391 lines, 6452189 bytes
+/tmp/atom.13.4.current.v8context.force.disasm.err           16 lines,     726 bytes
+/tmp/atom.13.4.current.v8context.force.dec.l4.js         28187 lines,  879244 bytes
+/tmp/atom.13.4.current.v8context.force.decompile.err         0 lines,       0 bytes
+```
+
+The final verification command used the correct version and snapshot directly,
+without manually setting environment variables:
+
+```bash
+/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.13.4.x64.release/v8asm \
+  --snapshot_blob /home/aynakeya/workspace/v8asm/v8context/v8_context_snapshot.bin \
+  disasm /home/aynakeya/workspace/v8asm/atom.compiled.dist.jsc \
+  --force-incompatible > /tmp/atom.13.4.current.v8context.force.disasm.txt \
+  2> /tmp/atom.13.4.current.v8context.force.disasm.err
+
+python3 /home/aynakeya/workspace/v8asm/decompiler/v8decompiler.py \
+  /tmp/atom.13.4.current.v8context.force.disasm.txt --level 4 --runtime \
+  > /tmp/atom.13.4.current.v8context.force.dec.l4.js \
+  2> /tmp/atom.13.4.current.v8context.force.decompile.err
 ```
 
 ## Code changes from this pass
@@ -171,13 +176,13 @@ signals and the Python level-4 decompiler consumes the output:
   recovery. When `v8asm` has already accepted `--force-incompatible`, V8 no
   longer rejects the cached data a second time because the cached-data `magic`
   or flags hash differs.
-- Added read-only heap reference bounds checks in `src/snapshot/deserializer.cc` for forced recovery.
 - Added a forced-mode snapshot version mismatch bypass in
   `src/snapshot/snapshot.cc`. `v8asm` enables it before V8 initialization only
   when `--snapshot_blob` and `--force-incompatible` are both present.
 - Added `V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH=1` as a research-only
   startup snapshot compatibility switch for Electron external-reference table
-  size drift.
+  size drift. `v8asm` sets it only for `--snapshot_blob` plus
+  `--force-incompatible`.
 - Kept the diagnostic visible on stderr so partial recovery is not mistaken for native compatibility.
 - Updated Python decompiler input reading to use UTF-8 replacement mode. V8 object printing can emit non-UTF-8 bytes for corrupted or embedder-specific string data.
 - Updated `V8String.parse()` to parse both `#value` and quoted string payloads such as `[String]: "...\x0a..."`; only missing payloads fall back to an address-derived placeholder.
@@ -186,8 +191,8 @@ signals and the Python level-4 decompiler consumes the output:
 Validation run:
 
 ```text
-python3 -m unittest discover -s tests -p test_*.py
-Ran 85 tests in 0.016s
+python3 -m unittest discover -s tests -p 'test_*.py'
+Ran 109 tests in 0.019s
 OK
 ```
 
@@ -277,20 +282,18 @@ local `tests/decomp_rounds/bin_cache/` cache before switching versions again.
 
 | patch | V8 tag used | synced Electron fixes | build/test status |
 | --- | --- | --- | --- |
-| `v8patch/v8asm.patch` | `13.6.233.10` | `--snapshot_blob`, cached-data sanity bypass, forced snapshot suffix/baseline mismatch attempt, invalid `ReadOnlyHeapRef` fallback, startup external-reference sentinel range recovery, read-only postprocess/string-table/sync mismatch probes, direct forced-load payload guard and cross-major warning | rebuilt with `autoninja -j10 -C out/v8asm.13.6.x64.release v8asm`; patch applies on clean `13.6.233.10`; 13.6 still cannot produce usable output from the 13.4 Electron startup snapshot because startup root layout diverges |
-| `v8patch/v8asm-13.4.patch` | `13.4.114.21` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in | `autoninja -j10 -C out/v8asm.13.4.x64.release v8asm`; plain build forced-disassembles `atom.compiled.dist.jsc` with `v8_context_snapshot.bin`; level-4 decompiler passed |
-| `v8patch/v8asm-12.9.patch` | `12.9.202.28` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback, startup external-reference mismatch opt-in | `git apply --check` previously passed on clean `12.9.202.28`; guard synced textually from the verified 13.6/13.4 implementation |
-| `v8patch/v8asm-12.4.patch` | `12.4.254.21` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback, direct forced-load payload guard and cross-major warning | `git apply --check` passed on clean `12.4.254.21`; cached Node22 build still passes forced disasm/decompiler |
-| `v8patch/v8asm-11.9.patch` | `11.9.169.7` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback | `git apply --check` previously passed on clean `11.9.169.7`; guard synced textually |
-| `v8patch/v8asm-11.3.patch` | `11.3.244.8` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback adapted to the 11.3 `Object` API, direct forced-load payload guard and cross-major warning | `git apply --check` passed on clean `11.3.244.8`; cached Node20 build still passes forced disasm/decompiler |
-| `v8patch/v8asm-10.2.patch` | `10.2.154.26` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup snapshot baseline guard, invalid `ReadOnlyHeapRef` fallback adapted to the 10.2 cached-data header | `git apply --check` previously passed on clean `10.2.154.26`; cached Node18 build still passes forced disasm/decompiler |
+| `v8patch/v8asm.patch` | `13.6.233.10` | `--snapshot_blob`, cached-data sanity bypass, forced snapshot suffix/baseline mismatch attempt, direct forced-load payload guard and cross-major warning | patch applies on clean `13.6.233.10`; 13.6 is not a usable Atom path for the 13.4 Electron startup snapshot |
+| `v8patch/v8asm-13.4.patch` | `13.4.114.21` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup external-reference mismatch opt-in | `autoninja -j10 -C out/v8asm.13.4.x64.release v8asm`; plain build forced-disassembles `atom.compiled.dist.jsc` with `v8_context_snapshot.bin`; level-4 decompiler passed |
+| `v8patch/v8asm-12.9.patch` | `12.9.202.28` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch | `git apply --check` passed on clean `12.9.202.28` |
+| `v8patch/v8asm-12.4.patch` | `12.4.254.21` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, direct forced-load payload guard and cross-major warning | `git apply --check` passed on clean `12.4.254.21`; cached Node22 build still passes forced disasm/decompiler |
+| `v8patch/v8asm-11.9.patch` | `11.9.169.7` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch | `git apply --check` passed on clean `11.9.169.7` |
+| `v8patch/v8asm-11.3.patch` | `11.3.244.8` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, direct forced-load payload guard and cross-major warning | `git apply --check` passed on clean `11.3.244.8`; cached Node20 build still passes forced disasm/decompiler |
+| `v8patch/v8asm-10.2.patch` | `10.2.154.26` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch | `git apply --check` passed on clean `10.2.154.26`; cached Node18 build still passes forced disasm/decompiler |
 
-The snapshot version mismatch bypass is now present in all maintained patch
-variants. The startup external-reference-table mismatch switch is still only
-present where that branch exposes the same startup deserializer validation hook
-to intercept. For the other branches the portable crash fix remains the
-read-only heap reference bounds check, which prevents a bad snapshot reference
-from aborting before useful disassembly can be printed.
+The snapshot version mismatch bypass is present in all maintained patch
+variants. The startup external-reference-table mismatch switch is retained only
+for the verified 13.4 Atom path, where it is required by the Electron context
+snapshot's one-entry external-reference table drift.
 
 ## Direct forced-load guard
 
@@ -346,12 +349,18 @@ The lightweight matrix runner was tightened into a CI-style gate:
   decompile for every existing binary in the matrix;
 - bytenode cache requires forced disassembly when numeric V8 and pointer
   compression both match;
-- numeric mismatches are also probed when pointer compression is compatible,
-  so direct forced-load regressions are visible; impossible header layouts
-  should exit cleanly rather than aborting inside V8;
-- pointer-layout mismatches still skip forced deserialization;
+- numeric mismatches and pointer-layout mismatches skip forced deserialization
+  by default, so incompatible serializer layouts are not fed into V8 during the
+  CI gate;
+- `VERSION_MATRIX_FORCE_MISMATCH=1` can still opt into research probes, but a
+  signal-style exit such as `fail:139` is always a gate failure;
 - crash signatures such as SIGSEGV, CHECK/DCHECK failures, and sanitizer
   failures make the script exit non-zero;
+- successful level-4 outputs now also carry a `quality` field. By default
+  `raw_goto` and missing-opcode `unknown` comments must stay at zero; tune
+  `VERSION_MATRIX_MAX_RAW_GOTO` or `VERSION_MATRIX_MAX_UNKNOWN` only for a
+  focused regression capture. `undefined_fallbacks` are recorded and can be
+  made fatal with `VERSION_MATRIX_MAX_UNDEFINED_FALLBACKS`;
 - missing optional Node versions or optional `v8asm` binaries are warnings by
   default, and can be promoted with `VERSION_MATRIX_REQUIRE_NODES=1` or
   `VERSION_MATRIX_REQUIRE_BINS=1`.

@@ -54,15 +54,16 @@ def inline_accu_condition_loads(lines: List[str]) -> List[str]:
             s0 = lines[i].strip()
             s1 = lines[i + 1].strip()
             m_value = re.match(r"^ACCU\s*=\s*(.+)$", s0)
-            m_if = re.match(r"^if \((!?)truthy\(ACCU\)\) \{$", s1)
-            if m_value and m_if:
+            m_if = _match_accu_truthy_if(s1, allow_wrapped_negation=True)
+            if m_value and m_if is not None:
                 end = _find_block_end(lines, i + 1)
                 value = m_value.group(1).strip()
                 if end is not None and "ACCU" not in value:
-                    if not _body_reads_accu_before_reassign(lines, i + 2, end):
+                    if not _body_reads_accu_before_reassign(
+                        lines, i + 2, end
+                    ) and not _reads_accu_before_reassign(lines, end + 1):
                         indent = _extract_indent(lines[i + 1])
-                        neg = m_if.group(1)
-                        out.append(f"{indent}if ({neg}truthy({value})) {{")
+                        out.append(_format_truthy_if(indent, m_if, value))
                         i += 2
                         continue
         out.append(lines[i])
@@ -159,7 +160,7 @@ def rewrite_accu_condition_after_duplicate_store(lines: List[str]) -> List[str]:
             m_accu = re.match(r"^ACCU\s*=\s*(.+)$", s0)
             m_store = re.match(r"^(r\d+)\s*=\s*(.+)$", s1)
             m_if = _match_accu_truthy_if(s2, allow_wrapped_negation=True)
-            if m_accu and m_store and m_if:
+            if m_accu and m_store and m_if is not None:
                 expr = m_accu.group(1).strip()
                 if expr == m_store.group(2).strip() and "ACCU" not in expr:
                     out.append(lines[i + 1])

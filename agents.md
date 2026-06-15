@@ -110,6 +110,13 @@ tests/decomp_rounds/run_version_matrix.sh
   snapshot checksum。
 - pointer compression 不匹配时不强跑 force，因为这会把不同对象布局的
   serializer 数据喂给 V8，容易在反序列化阶段崩溃。
+- 数字版本不匹配也默认 skip；只有显式设置
+  `VERSION_MATRIX_FORCE_MISMATCH=1` 才做研究性 probe，而且 `fail:128+`
+  这类 signal 退出必须视为 gate failure。
+- matrix 现在也对成功 decompile 输出做质量门禁：默认 `raw_goto=0`、
+  `unknown=0`，并把 `undefined_fallbacks` 记录到 summary。需要研究已知
+  退化时再显式调整 `VERSION_MATRIX_MAX_RAW_GOTO`、
+  `VERSION_MATRIX_MAX_UNKNOWN` 或 `VERSION_MATRIX_MAX_UNDEFINED_FALLBACKS`。
 
 ## Known Issues (as of latest run)
 

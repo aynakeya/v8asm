@@ -786,7 +786,7 @@ v8asm self cache:
   out/v8asm.12.4.x64.release: 12.4.254.21, ok
   out/v8asm.12.4.node22.x64.release: 12.4.254.21, ok
   out/v8asm.12.9.x64.release: 12.9.99, ok
-  out/v8asm.13.4.x64.release: binary missing in the current filesystem
+  out/v8asm.13.4.x64.release: 13.4.114.21, rebuilt and usable for Atom with the matching Electron context snapshot
 
 nvm nodes:
   Node v22.17.0: V8 12.4.254.21-node.26
@@ -802,9 +802,12 @@ version, but forcing the bytenode cache into it crashes in
 This happens before bytecode object traversal or printing, so adding more print
 guards cannot fix it.
 
-The matrix now records both `numeric_match` and `pointer_match`. It only tries
-`--force-incompatible` when the numeric V8 version matches and the pointer
-compression layout is not known to differ. With the Node-22-aligned 12.4 build:
+The matrix now records both `numeric_match` and `pointer_match`. It tries
+`--force-incompatible` by default only when the numeric V8 version matches and
+the pointer compression layout is not known to differ. Numeric mismatches can
+still be probed with `VERSION_MATRIX_FORCE_MISMATCH=1`, but signal-style exits
+such as `fail:139` are hard failures, not warnings. With the Node-22-aligned
+12.4 build:
 
 ```text
 Node v22.17.0 / V8 12.4.254.21-node.26
@@ -817,6 +820,20 @@ Node v22.17.0 / V8 12.4.254.21-node.26
 This is the current answer to the bytenode-version question: bytenode must be
 checked against both the matching V8 major/minor revision and the compatible
 embedder build layout.
+
+The matrix is now a stricter CI-style gate instead of a passive report. In
+addition to exit status and crash-signature checks, every successful level-4
+output records:
+
+```text
+quality = raw:<n> unknown:<n> undef:<n>
+```
+
+The default thresholds require `raw=0` and `unknown=0`, so a structurer
+regression or missing opcode translation fails immediately. `undef` remains a
+reported count by default because it is often evidence for the Node/Electron
+snapshot mismatch being investigated; set
+`VERSION_MATRIX_MAX_UNDEFINED_FALLBACKS` when a focused run should fail on it.
 
 For Node 24/bytenode versus repo `v8asm` 13.6, the numeric V8 version matches,
 but strict deserialization still refuses the file:

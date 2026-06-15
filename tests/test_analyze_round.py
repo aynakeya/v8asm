@@ -13,6 +13,7 @@ if str(ROUND_DIR) not in sys.path:
 from analyze_round import (
     classify_decompile_status,
     parse_header_diagnostics,
+    score_text,
     unresolved_current_ro_objects,
     unresolved_object_addresses,
     unresolved_object_chunk_offsets,
@@ -78,6 +79,20 @@ Cached data header:
             "input_missing",
         )
         self.assertEqual(classify_decompile_status("function ok() {}\n"), "ok")
+
+    def test_raw_goto_score_ignores_preserved_comments(self) -> None:
+        score = score_text(
+            """
+function sample() {
+  // goto offset_12
+  if (truthy(r0)) goto offset_20
+  goto offset_30
+}
+"""
+        )
+
+        self.assertEqual(score["goto_comments"], 1)
+        self.assertEqual(score["raw_goto"], 2)
 
     def test_extracts_unique_unresolved_object_addresses(self) -> None:
         text = (
