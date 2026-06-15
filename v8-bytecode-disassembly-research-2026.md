@@ -745,6 +745,23 @@ because spread calls can appear inside compound assignments such as
 `r3 += r4.call(Math, ...r0)`. That now recovers `Math.max(...r0)` when the
 saved callee register is still known.
 
+The next readability pass folds string concatenation chains that survive until
+file-level output assembly. This matters because some chains are only visible
+after late binary compaction turns `r3 = (r3 + part)` into `r3 += part`.
+The pass is deliberately gated on string evidence such as string literals or
+`String(...)`, so numeric accumulators like `r9 = 2; r9 += 1; return r9` are
+left alone. In the current round, `20_rest_spread_calls` now returns:
+
+```js
+return (collect("x", ...r0) + ":" + r2 + ":" + Math.max(...r0) + ":" + r1.sum())
+```
+
+instead of carrying a temporary `r3` string builder through six lines. The same
+file-level pass also folds the `09_all_features` success/fallback message
+builders. The v8asm rows remain at `ACCU=0`, `raw_goto=0`, and `unknown=0`;
+`reg_refs` drops from `74` to `62` for `09_all_features` and from `50` to `43`
+for `20_rest_spread_calls`.
+
 The current 20-case round has `ACCU = 0`, `unknown = 0`, and `raw_goto = 0` for
 every vanilla-v8asm row. The same ACCU cleanup now also reaches zero in the
 forced-incompatible bytenode rows by converting unused best-effort placeholder

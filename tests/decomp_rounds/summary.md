@@ -36,8 +36,8 @@
 | 07_try_catch | bytenode | ok | magic,flags_hash,ro_snapshot | mismatch | 0 | 13 | 0 | 0 | 0 | 5 | 2 | 2 |
 | 08_switch | v8asm | ok | ok | ok | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 2 |
 | 08_switch | bytenode | ok | magic,flags_hash,ro_snapshot | mismatch | 0 | 7 | 0 | 0 | 0 | 0 | 0 | 2 |
-| 09_all_features | v8asm | ok | ok | ok | 0 | 74 | 0 | 0 | 0 | 0 | 0 | 2 |
-| 09_all_features | bytenode | ok | magic,flags_hash,ro_snapshot | mismatch | 0 | 87 | 0 | 0 | 0 | 8 | 3 | 2 |
+| 09_all_features | v8asm | ok | ok | ok | 0 | 62 | 0 | 0 | 0 | 0 | 0 | 2 |
+| 09_all_features | bytenode | ok | magic,flags_hash,ro_snapshot | mismatch | 0 | 75 | 0 | 0 | 0 | 8 | 3 | 2 |
 | 10_array_index | v8asm | ok | ok | ok | 0 | 6 | 0 | 0 | 0 | 0 | 0 | 2 |
 | 10_array_index | bytenode | ok | magic,flags_hash,ro_snapshot | mismatch | 0 | 9 | 0 | 0 | 0 | 0 | 0 | 2 |
 | 11_object_mutation | v8asm | ok | ok | ok | 0 | 3 | 0 | 0 | 0 | 0 | 0 | 2 |
@@ -58,7 +58,7 @@
 | 18_private_fields | bytenode | ok | magic,flags_hash,ro_snapshot | mismatch | 0 | 34 | 0 | 0 | 0 | 0 | 0 | 3 |
 | 19_generator_yield | v8asm | ok | ok | ok | 0 | 47 | 0 | 0 | 0 | 0 | 0 | 2 |
 | 19_generator_yield | bytenode | ok | magic,flags_hash,ro_snapshot | mismatch | 0 | 47 | 0 | 0 | 0 | 0 | 0 | 2 |
-| 20_rest_spread_calls | v8asm | ok | ok | ok | 0 | 50 | 0 | 0 | 0 | 0 | 0 | 3 |
+| 20_rest_spread_calls | v8asm | ok | ok | ok | 0 | 43 | 0 | 0 | 0 | 0 | 0 | 3 |
 | 20_rest_spread_calls | bytenode | ok | magic,flags_hash,ro_snapshot | mismatch | 0 | 64 | 0 | 0 | 0 | 11 | 4 | 4 |
 
 ## Unresolved Read-Only Object Suffixes

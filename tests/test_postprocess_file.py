@@ -11,6 +11,7 @@ if str(DECOMPILER) not in sys.path:
     sys.path.insert(0, str(DECOMPILER))
 
 from postprocess_file import (
+    compact_file_register_concat_returns,
     normalize_unique_string_function_names,
     postprocess_level4_file,
     recover_context_slot_closure_names,
@@ -18,6 +19,27 @@ from postprocess_file import (
 
 
 class PostprocessFileTests(unittest.TestCase):
+    def test_compacts_register_concat_chain_after_function_assembly(self) -> None:
+        text = "\n".join(
+            [
+                "function run(arg0) {",
+                '  r3 = collect("x", ...r0)',
+                '  r3 += ":"',
+                "  r3 += r2",
+                '  r3 += ":"',
+                "  return (r3 + r1.sum())",
+                "}",
+            ]
+        )
+
+        recovered = compact_file_register_concat_returns(text)
+
+        self.assertIn(
+            'return (collect("x", ...r0) + ":" + r2 + ":" + r1.sum())',
+            recovered,
+        )
+        self.assertNotIn("r3 +", recovered)
+
     def test_recovers_context_slot_closure_name_inside_same_function(self) -> None:
         text = "\n".join(
             [

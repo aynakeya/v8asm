@@ -4,6 +4,8 @@ import re
 from collections import Counter
 from typing import Dict, List
 
+from postprocess_level4_strings import _compact_register_concat_returns
+
 
 IDENT = r"[A-Za-z_$][A-Za-z0-9_$]*"
 FUNCTION_DECL_RE = re.compile(rf"^\s*function\s+({IDENT})\s*\(")
@@ -13,8 +15,16 @@ SYNTHETIC_STRING_FUNCTION_DECL_RE = re.compile(
 
 
 def postprocess_level4_file(text: str) -> str:
+    text = compact_file_register_concat_returns(text)
     text = recover_context_slot_closure_names(text)
     return normalize_unique_string_function_names(text)
+
+
+def compact_file_register_concat_returns(text: str) -> str:
+    lines = _compact_register_concat_returns(text.splitlines())
+    if text.endswith("\n"):
+        return "\n".join(lines) + "\n"
+    return "\n".join(lines)
 
 
 def recover_context_slot_closure_names(text: str) -> str:

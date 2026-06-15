@@ -46,6 +46,7 @@ def _has_following_concat_append(lines: List[str], start: int, reg: str) -> bool
 
 
 def _compact_string_concat_chains(lines: List[str]) -> List[str]:
+    lines = _compact_register_concat_returns(lines)
     out: List[str] = []
     i = 0
     while i < len(lines):
@@ -109,4 +110,83 @@ def _compact_string_concat_chains(lines: List[str]) -> List[str]:
 
         out.append(lines[i])
         i += 1
+    return _compact_register_concat_returns(out)
+
+
+def _compact_register_concat_returns(lines: List[str]) -> List[str]:
+    out: List[str] = []
+    i = 0
+    while i < len(lines):
+        base = re.match(r"^(\s*)(r\d+)\s*=\s*(.+)$", lines[i])
+        if not base:
+            out.append(lines[i])
+            i += 1
+            continue
+
+        indent, reg, expr = base.groups()
+        expr = expr.strip()
+        if _expr_mentions_reg(expr, reg):
+            out.append(lines[i])
+            i += 1
+            continue
+
+        parts = [expr]
+        cursor = i + 1
+        saw_append = False
+        while cursor < len(lines):
+            if _extract_indent(lines[cursor]) != indent:
+                break
+            append = re.match(rf"^{re.escape(reg)}\s*\+=\s*(.+)$", lines[cursor].strip())
+            if not append:
+                break
+            part = append.group(1).strip()
+            if _expr_mentions_reg(part, reg):
+                break
+            parts.append(part)
+            saw_append = True
+            cursor += 1
+
+        if not saw_append or cursor >= len(lines):
+            out.append(lines[i])
+            i += 1
+            continue
+
+        ret = lines[cursor].strip()
+        suffix = None
+        if ret == f"return {reg}":
+            suffix = ""
+        else:
+            return_binary = re.match(
+                rf"^return\s+\(\s*{re.escape(reg)}\s*\+\s*(.+)\)$",
+                ret,
+            )
+            if return_binary:
+                suffix = return_binary.group(1).strip()
+
+        if suffix is None or _expr_mentions_reg(suffix, reg):
+            out.append(lines[i])
+            i += 1
+            continue
+        if suffix:
+            parts.append(suffix)
+        if not _has_string_concat_evidence(parts):
+            out.append(lines[i])
+            i += 1
+            continue
+
+        out.append(f"{indent}return ({' + '.join(parts)})")
+        i = cursor + 1
+
     return out
+
+
+def _expr_mentions_reg(expr: str, reg: str) -> bool:
+    return bool(re.search(rf"\b{re.escape(reg)}\b", expr))
+
+
+def _has_string_concat_evidence(parts: List[str]) -> bool:
+    for part in parts:
+        part = part.strip()
+        if part.startswith(("String(", '"', "'")):
+            return True
+    return False

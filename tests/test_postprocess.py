@@ -178,6 +178,46 @@ class SimplifyLinesTests(unittest.TestCase):
 
         self.assertEqual(simplified, ["return (r13 + String(r7))"])
 
+    def test_compacts_register_concat_chain_before_return(self) -> None:
+        lines = [
+            'r3 = collect("x", ...r0)',
+            'r3 += ":"',
+            "r3 += r2",
+            'r3 += ":"',
+            "r3 += Math.max(...r0)",
+            'r3 += ":"',
+            "return (r3 + r1.sum())",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(
+            simplified,
+            [
+                'return (collect("x", ...r0) + ":" + r2 + ":" + Math.max(...r0) + ":" + r1.sum())'
+            ],
+        )
+
+    def test_keeps_self_dependent_register_concat_chain(self) -> None:
+        lines = [
+            '"seed"',
+            "r3 = r4",
+            "r3 += r3.value",
+            "return r3",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(
+            simplified,
+            [
+                '"seed"',
+                "r3 = r4",
+                "r3 += r4.value",
+                "return r3",
+            ],
+        )
+
     def test_normalizes_nested_block_indentation(self) -> None:
         lines = [
             "  if (outer) {",
