@@ -777,9 +777,14 @@ branches. Previously it printed `if (...) goto offset_X` and then advanced to
 bytecode. Large V8 constant-dispatch tables, such as Atom's locale normalization
 chain, exposed this as real missing output. The fallback now keeps the raw goto
 and continues through fallthrough blocks, tracking pending raw branch targets so
-case bodies and default bodies are emitted. This deliberately raises `raw_goto`
-for that Atom function until a proper switch/map recovery pass is added, but it
-avoids hiding bytecode.
+case bodies and default bodies are emitted.
+
+Once that non-lossy shape is visible, level 4 can safely fold a complete
+constant-dispatch assignment table into an object-map expression. The Atom
+locale normalizer now becomes one `script_context[36] = ({...}[r0] ?? "Base")`
+assignment instead of dozens of `if (ACCU) goto offset_...` lines, reducing the
+forced Atom sample's `raw_goto` score from 86 to 4 while preserving the recovered
+case/default bodies.
 
 # 0x5 Multi-Version Rule
 

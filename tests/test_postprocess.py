@@ -66,6 +66,38 @@ class SimplifyLinesTests(unittest.TestCase):
 
         self.assertEqual(simplified, lines)
 
+    def test_recovers_constant_dispatch_assignment_map(self) -> None:
+        lines = [
+            "r0 = context_slot[36]",
+            'ACCU = "zh-CN"',
+            "ACCU = (context_slot[36] === ACCU)",
+            "if (ACCU) goto offset_657",
+            'ACCU = "zh-Hans"',
+            "ACCU = (r0 === ACCU)",
+            "if (ACCU) goto offset_657",
+            'ACCU = "zh-TW"',
+            "ACCU = (r0 === ACCU)",
+            "if (ACCU) goto offset_663",
+            "// goto offset_873",
+            'script_context[36] = "zh-Hans"',
+            "// goto offset_877",
+            'script_context[36] = "zh-Hant"',
+            "// goto offset_877",
+            'script_context[36] = "Base"',
+            "return context_slot[36]",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(
+            simplified,
+            [
+                "r0 = context_slot[36]",
+                'script_context[36] = ({"zh-CN": "zh-Hans", "zh-Hans": "zh-Hans", "zh-TW": "zh-Hant"}[r0] ?? "Base")',
+                "return context_slot[36]",
+            ],
+        )
+
     def test_compacts_string_concat_chain(self) -> None:
         lines = [
             "ACCU = r4",

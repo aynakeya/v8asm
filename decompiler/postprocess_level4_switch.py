@@ -1,9 +1,173 @@
 from __future__ import annotations
 
+from collections import Counter
 import re
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from postprocess_level4_common import _extract_indent
+
+
+def _recover_constant_dispatch_assignments(lines: List[str]) -> List[str]:
+    out: List[str] = []
+    i = 0
+    while i < len(lines):
+        replacement = _match_constant_dispatch_assignment(lines, i)
+        if replacement is None:
+            out.append(lines[i])
+            i += 1
+            continue
+        rendered, consumed = replacement
+        out.extend(rendered)
+        i = consumed
+    return out
+
+
+def _match_constant_dispatch_assignment(
+    lines: List[str], start: int
+) -> Optional[Tuple[List[str], int]]:
+    cases: List[Tuple[str, str, int]] = []
+    cursor = start
+    while cursor + 2 < len(lines):
+        case_value = _match_accu_load(lines[cursor].strip())
+        comparison = _match_accu_compare(lines[cursor + 1].strip())
+        target = _match_truthy_goto(lines[cursor + 2].strip())
+        if case_value is None or comparison is None or target is None:
+            break
+        if not _is_dispatch_literal(case_value):
+            return None
+        cases.append((case_value, comparison, target))
+        cursor += 3
+
+    if len(cases) < 2:
+        return None
+
+    default_target = (
+        _match_goto_comment(lines[cursor].strip()) if cursor < len(lines) else None
+    )
+    if default_target is None:
+        return None
+    cursor += 1
+
+    ordered_targets = sorted({target for _, _, target in cases})
+    body_targets = ordered_targets + [default_target]
+    body_values: Dict[int, str] = {}
+    destination: Optional[str] = None
+
+    for target in body_targets:
+        while cursor < len(lines) and _match_goto_comment(lines[cursor].strip()) is not None:
+            cursor += 1
+        parsed = _parse_assignment_body(lines, cursor)
+        if parsed is None:
+            return None
+        dst, expr, cursor = parsed
+        if destination is None:
+            destination = dst
+        elif destination != dst:
+            return None
+        body_values[target] = expr
+
+    if destination is None or default_target not in body_values:
+        return None
+
+    subject = _dominant_dispatch_subject([subject for _, subject, _ in cases])
+    if subject is None:
+        return None
+
+    entries: List[str] = []
+    for key, _, target in cases:
+        value = body_values.get(target)
+        if value is None:
+            return None
+        entries.append(f"{key}: {value}")
+
+    indent = _extract_indent(lines[start])
+    mapping = "{" + ", ".join(entries) + "}"
+    default_expr = body_values[default_target]
+    rendered = [f"{indent}{destination} = ({mapping}[{subject}] ?? {default_expr})"]
+    return rendered, cursor
+
+
+def _match_accu_load(stripped: str) -> Optional[str]:
+    match = re.match(r"^ACCU\s*=\s*(.+)$", stripped)
+    return match.group(1).strip() if match else None
+
+
+def _match_accu_compare(stripped: str) -> Optional[str]:
+    match = re.match(r"^ACCU\s*=\s*\((.+?)\s*(?:===|==)\s*ACCU\)$", stripped)
+    return match.group(1).strip() if match else None
+
+
+def _match_truthy_goto(stripped: str) -> Optional[int]:
+    match = re.match(r"^if \((?:truthy\(ACCU\)|ACCU)\) goto offset_(\d+)$", stripped)
+    return int(match.group(1)) if match else None
+
+
+def _match_goto_comment(stripped: str) -> Optional[int]:
+    match = re.match(r"^// goto offset_(\d+)$", stripped)
+    return int(match.group(1)) if match else None
+
+
+def _parse_assignment_body(lines: List[str], start: int) -> Optional[Tuple[str, str, int]]:
+    if start >= len(lines):
+        return None
+
+    stripped = lines[start].strip()
+    accu_expr = _match_accu_load(stripped)
+    if accu_expr is not None:
+        if start + 1 >= len(lines):
+            return None
+        assignment = _match_non_accu_assignment(lines[start + 1].strip())
+        if assignment is None:
+            return None
+        dst, expr = assignment
+        if expr == "ACCU":
+            expr = accu_expr
+        if expr != accu_expr:
+            return None
+        return dst, expr, start + 2
+
+    assignment = _match_non_accu_assignment(stripped)
+    if assignment is None:
+        return None
+    dst, expr = assignment
+    return dst, expr, start + 1
+
+
+def _match_non_accu_assignment(stripped: str) -> Optional[Tuple[str, str]]:
+    if stripped.startswith(("if ", "while ", "for ", "return ", "throw ", "//")):
+        return None
+    match = re.match(r"^(.+?)\s*=\s*(.+)$", stripped)
+    if not match:
+        return None
+    dst, expr = match.group(1).strip(), match.group(2).strip()
+    if dst == "ACCU":
+        return None
+    return dst, expr
+
+
+def _dominant_dispatch_subject(subjects: List[str]) -> Optional[str]:
+    if not subjects:
+        return None
+    counts = Counter(subjects)
+    candidates = sorted(
+        counts.items(),
+        key=lambda item: (item[1], bool(re.fullmatch(r"r\d+", item[0]))),
+        reverse=True,
+    )
+    subject, count = candidates[0]
+    if count < len(subjects) - 1:
+        return None
+    return subject
+
+
+def _is_dispatch_literal(expr: str) -> bool:
+    if re.fullmatch(r"[-+]?\d+", expr):
+        return True
+    if re.fullmatch(r'"(?:\\.|[^"\\])*"', expr):
+        return expr != '"__proto__"'
+    if re.fullmatch(r"'(?:\\.|[^'\\])*'", expr):
+        return expr != "'__proto__'"
+    return False
 
 
 def _recover_switch_assignments(lines: List[str]) -> List[str]:

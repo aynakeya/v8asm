@@ -56,7 +56,11 @@ from postprocess_level4_properties import (
     _compact_keyed_property_reads,
 )
 from postprocess_level4_strings import _compact_string_concat_chains
-from postprocess_level4_switch import _recover_switch_assignments, _recover_two_case_switch
+from postprocess_level4_switch import (
+    _recover_constant_dispatch_assignments,
+    _recover_switch_assignments,
+    _recover_two_case_switch,
+)
 
 
 def recover_js_structures(lines: List[str]) -> List[str]:
@@ -85,6 +89,7 @@ def recover_js_structures(lines: List[str]) -> List[str]:
     current = _simplify_accu_throw(current)
     current = _flatten_else_after_early_exit(current)
     current = _recover_two_case_switch(current)
+    current = _recover_constant_dispatch_assignments(current)
     current = _compact_accu_compare_if(current)
     current = _convert_unused_accu_assign_to_expr(current)
     current = inline_accu_equality_condition_loads(current)

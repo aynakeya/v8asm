@@ -611,8 +611,19 @@ That hides the fallthrough bytecode. In Atom this truncated a large
 locale-normalization dispatch after the first `zh-CN`/`zh-Hans` case. The
 fallback now keeps raw conditional gotos but continues through the fallthrough
 path and tracks pending raw branch targets so intervening case bodies and the
-default body are still emitted. The output is intentionally more raw for this
-large dispatch, but it no longer silently drops cases.
+default body are still emitted.
+
+A follow-up level-4 switch pass now recognizes that recovered raw dispatch
+shape when every target body assigns the same destination. It folds the
+compare/goto table plus its case/default bodies into an object-map expression
+such as:
+
+```js
+script_context[36] = ({"zh-CN": "zh-Hans", "zh-Hans": "zh-Hans"}[r0] ?? "Base")
+```
+
+This keeps the non-lossy fallback behavior while removing the large dispatch's
+raw gotos from normal output.
 
 Current forced Atom check with the correct binary and supplied snapshot:
 
@@ -628,14 +639,13 @@ score:
   functions: 809
   unknown_comments: 0
   undefined_fallbacks: 0
-  raw_goto: 86
+  raw_goto: 4
 ```
 
-The increased `raw_goto` count is not a new opcode gap. It is the visible form
-of a previously hidden constant-dispatch chain. Representative recovered bodies
-now include `script_context[36] = "zh-Hans"`,
-`script_context[36] = "zh-Hant"`, `script_context[36] = "it-IT"`, and the
-default `script_context[36] = "Base"`.
+The recovered locale map includes keys for `zh-CN`, `zh-Hans`, `zh-TW`,
+`zh-Hant`, `it`, `it-IT`, and the remaining locale aliases, with fallback
+`"Base"`. The remaining four raw gotos are separate async/control-flow
+structuring gaps, not missing opcode coverage or hidden output.
 
 ## Remaining gap
 
