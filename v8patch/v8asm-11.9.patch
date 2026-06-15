@@ -172,10 +172,19 @@ index 11c3b6b1c04..bda405d7e52 100644
 
    static void PostForegroundTask(Isolate* isolate, std::unique_ptr<Task> task);
 diff --git a/src/diagnostics/objects-printer.cc b/src/diagnostics/objects-printer.cc
-index e1a13748b27..1b3601226fa 100644
+index e1a13748b27..6959a939bf0 100644
 --- a/src/diagnostics/objects-printer.cc
 +++ b/src/diagnostics/objects-printer.cc
-@@ -22,6 +22,11 @@
+@@ -10,6 +10,8 @@
+ #include "src/diagnostics/disassembler.h"
+ #include "src/execution/isolate-utils-inl.h"
+ #include "src/heap/heap-inl.h"                // For InOldSpace.
++#include "src/heap/basic-memory-chunk.h"
++#include "src/heap/read-only-spaces.h"
+ #include "src/heap/heap-write-barrier-inl.h"  // For GetIsolateFromWritableObj.
+ #include "src/ic/handler-configuration-inl.h"
+ #include "src/init/bootstrapper.h"
+@@ -22,6 +24,11 @@
  #include "src/strings/string-stream.h"
  #include "src/utils/ostreams.h"
 
@@ -187,7 +196,7 @@ index e1a13748b27..1b3601226fa 100644
  #if V8_ENABLE_WEBASSEMBLY
  #include "src/debug/debug-wasm-objects-inl.h"
  #include "src/wasm/wasm-code-manager.h"
-@@ -63,7 +68,7 @@ namespace {
+@@ -63,7 +70,7 @@ namespace {
  void PrintHeapObjectHeaderWithoutMap(Tagged<HeapObject> object,
                                       std::ostream& os, const char* id) {
    PtrComprCageBase cage_base = GetPtrComprCageBase();
@@ -196,13 +205,86 @@ index e1a13748b27..1b3601226fa 100644
    if (id != nullptr) {
      os << id;
    } else {
-@@ -2818,15 +2823,30 @@ void HeapNumber::HeapNumberPrint(std::ostream& os) {
+@@ -2818,15 +2825,105 @@ void HeapNumber::HeapNumberPrint(std::ostream& os) {
 
  #endif  // OBJECT_PRINT
 
 +static sigjmp_buf g_jump_buffer;
++static sigjmp_buf g_diagnostics_jump_buffer;
++static volatile sig_atomic_t g_in_short_print_diagnostics = 0;
++
 +void segfault_jumper(int signal_number) {
++    (void)signal_number;
++    if (g_in_short_print_diagnostics) {
++        siglongjmp(g_diagnostics_jump_buffer, 1);
++    }
 +    siglongjmp(g_jump_buffer, 1);
++}
++
++void PrintV8AsmCurrentReadOnlyObjectBoundary(Tagged<HeapObject> object,
++                                             std::ostream& os,
++                                             ReadOnlyPage* page) {
++  Address object_addr = object.address();
++  if (object_addr < page->area_start() || object_addr >= page->area_end()) {
++    os << " current_ro_object=outside_area";
++    return;
++  }
++
++  std::ios_base::fmtflags flags = os.flags();
++  os << " area_offset=0x" << std::hex
++     << static_cast<size_t>(object_addr - page->area_start());
++  os.flags(flags);
++
++  Address cursor = page->area_start();
++  Address end = page->area_end();
++  while (cursor < end) {
++    Tagged<HeapObject> current = HeapObject::FromAddress(cursor);
++    int object_size = current->Size();
++    int aligned_size = ALIGN_TO_ALLOCATION_ALIGNMENT(object_size);
++    if (aligned_size <= 0) break;
++    Address next = cursor + aligned_size;
++    if (object_addr >= cursor && object_addr < next) {
++      size_t current_offset =
++          static_cast<size_t>(cursor - page->address());
++      size_t current_end =
++          static_cast<size_t>(next - page->address());
++      size_t delta = static_cast<size_t>(object_addr - cursor);
++      flags = os.flags();
++      os << " current_ro_object=[0x" << std::hex << current_offset
++         << ",0x" << current_end << ") delta=0x" << delta
++         << " hit=" << (delta == 0 ? "start" : "inside");
++      os.flags(flags);
++      return;
++    }
++    cursor = next;
++  }
++  os << " current_ro_object=n/a";
++}
++
++void PrintV8AsmShortPrintAddressDiagnostics(Tagged<HeapObject> object,
++                                            std::ostream& os) {
++  BasicMemoryChunk* chunk = BasicMemoryChunk::FromHeapObject(object);
++  std::ios_base::fmtflags flags = os.flags();
++  os << "; object_chunk_offset=0x" << std::hex
++     << chunk->Offset(object.address())
++     << " tagged_chunk_offset=0x" << chunk->Offset(object.ptr());
++  os.flags(flags);
++
++  g_in_short_print_diagnostics = 1;
++  if (sigsetjmp(g_diagnostics_jump_buffer, 1) != 0) {
++    g_in_short_print_diagnostics = 0;
++    os << " current_ro_object=diagnostics_failed";
++    return;
++  }
++
++  if (!chunk->InReadOnlySpace()) {
++    g_in_short_print_diagnostics = 0;
++    os << " current_ro_object=not_in_current_ro";
++    return;
++  }
++  PrintV8AsmCurrentReadOnlyObjectBoundary(
++      object, os, static_cast<ReadOnlyPage*>(chunk));
++  g_in_short_print_diagnostics = 0;
 +}
 +
  void HeapObject::HeapObjectShortPrint(std::ostream& os) {
@@ -212,7 +294,9 @@ index e1a13748b27..1b3601226fa 100644
 +  void (*old_handler)(int);
 +  old_handler = signal(SIGSEGV, segfault_jumper);
 +  if (sigsetjmp(g_jump_buffer, 1) != 0) {
-+    os << "<undefined: segmentfault, might outside scope>";
++    os << "<undefined: segmentfault, might outside scope";
++    PrintV8AsmShortPrintAddressDiagnostics(*this, os);
++    os << ">";
 +    signal(SIGSEGV, old_handler);
 +    return;
 +  }
@@ -227,14 +311,13 @@ index e1a13748b27..1b3601226fa 100644
      return;
    }
    if (IsJSObject(*this, cage_base)) {
-@@ -2834,9 +2854,22 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -2834,9 +2931,22 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
      StringStream accumulator(&allocator);
      JSObject::cast(*this)->JSObjectShortPrint(&accumulator);
      os << accumulator.ToCString().get();
 +    signal(SIGSEGV, old_handler);
-     return;
-   }
--  switch (map(cage_base)->instance_type()) {
++    return;
++  }
 +  InstanceType instance_type = map(cage_base)->instance_type();
 +
 +  // Skip invalid trusted objects. Technically it'd be fine to still handle
@@ -244,14 +327,15 @@ index e1a13748b27..1b3601226fa 100644
 +      !ReadOnlyHeap::Contains(*this)) {
 +    os << "<Invalid TrustedObject (outside trusted space)>\n";
 +    signal(SIGSEGV, old_handler);
-+    return;
-+  }
+     return;
+   }
+-  switch (map(cage_base)->instance_type()) {
 +
 +  switch (instance_type) {
      case MAP_TYPE: {
        os << "<Map";
        Tagged<Map> mapInstance = Map::cast(*this);
-@@ -3156,6 +3189,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -3156,6 +3266,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
        os << "<Other heap object (" << map()->instance_type() << ")>";
        break;
    }

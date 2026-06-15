@@ -173,10 +173,20 @@ index b1388f129b8..2aa768e0d4f 100644
 
    static std::unique_ptr<SerializationData> SerializeValue(
 diff --git a/src/diagnostics/objects-printer.cc b/src/diagnostics/objects-printer.cc
-index 7677022ce31..0c7c77633da 100644
+index 7677022ce31..01b50332d57 100644
 --- a/src/diagnostics/objects-printer.cc
 +++ b/src/diagnostics/objects-printer.cc
-@@ -23,6 +23,11 @@
+@@ -9,6 +9,9 @@
+ #include "src/diagnostics/disasm.h"
+ #include "src/diagnostics/disassembler.h"
+ #include "src/execution/frames-inl.h"
++#include "src/heap/memory-chunk.h"
++#include "src/heap/memory-chunk-metadata.h"
++#include "src/heap/read-only-spaces.h"
+ #include "src/execution/isolate-utils-inl.h"
+ #include "src/heap/heap-inl.h"                // For InOldSpace.
+ #include "src/heap/heap-write-barrier-inl.h"  // For GetIsolateFromWritableObj.
+@@ -23,6 +26,11 @@
  #include "src/strings/string-stream.h"
  #include "src/utils/ostreams.h"
 
@@ -188,7 +198,7 @@ index 7677022ce31..0c7c77633da 100644
  #if V8_ENABLE_WEBASSEMBLY
  #include "src/debug/debug-wasm-objects-inl.h"
  #include "src/wasm/wasm-code-manager.h"
-@@ -64,7 +69,7 @@ namespace {
+@@ -64,7 +72,7 @@ namespace {
  void PrintHeapObjectHeaderWithoutMap(Tagged<HeapObject> object,
                                       std::ostream& os, const char* id) {
    PtrComprCageBase cage_base = GetPtrComprCageBase();
@@ -197,13 +207,87 @@ index 7677022ce31..0c7c77633da 100644
    if (id != nullptr) {
      os << id;
    } else {
-@@ -2962,15 +2967,30 @@ void HeapObject::Print(Tagged<Object> obj, std::ostream& os) {
+@@ -2962,15 +2970,106 @@ void HeapObject::Print(Tagged<Object> obj, std::ostream& os) {
    v8::internal::Print(obj, os);
  }
 
 +static sigjmp_buf g_jump_buffer;
++static sigjmp_buf g_diagnostics_jump_buffer;
++static volatile sig_atomic_t g_in_short_print_diagnostics = 0;
++
 +void segfault_jumper(int signal_number) {
++    (void)signal_number;
++    if (g_in_short_print_diagnostics) {
++        siglongjmp(g_diagnostics_jump_buffer, 1);
++    }
 +    siglongjmp(g_jump_buffer, 1);
++}
++
++void PrintV8AsmCurrentReadOnlyObjectBoundary(Tagged<HeapObject> object,
++                                             std::ostream& os,
++                                             ReadOnlyPageMetadata* page) {
++  Address object_addr = object.address();
++  if (!page->Contains(object_addr)) {
++    os << " current_ro_object=outside_area";
++    return;
++  }
++
++  std::ios_base::fmtflags flags = os.flags();
++  os << " area_offset=0x" << std::hex
++     << static_cast<size_t>(object_addr - page->area_start());
++  os.flags(flags);
++
++  Address cursor = page->area_start();
++  Address end = page->area_end();
++  while (cursor < end) {
++    Tagged<HeapObject> current = HeapObject::FromAddress(cursor);
++    int object_size = current->Size();
++    int aligned_size = ALIGN_TO_ALLOCATION_ALIGNMENT(object_size);
++    if (aligned_size <= 0) break;
++    Address next = cursor + aligned_size;
++    if (object_addr >= cursor && object_addr < next) {
++      size_t current_offset =
++          static_cast<size_t>(cursor - page->ChunkAddress());
++      size_t current_end =
++          static_cast<size_t>(next - page->ChunkAddress());
++      size_t delta = static_cast<size_t>(object_addr - cursor);
++      flags = os.flags();
++      os << " current_ro_object=[0x" << std::hex << current_offset
++         << ",0x" << current_end << ") delta=0x" << delta
++         << " hit=" << (delta == 0 ? "start" : "inside");
++      os.flags(flags);
++      return;
++    }
++    cursor = next;
++  }
++  os << " current_ro_object=n/a";
++}
++
++void PrintV8AsmShortPrintAddressDiagnostics(Tagged<HeapObject> object,
++                                            std::ostream& os) {
++  std::ios_base::fmtflags flags = os.flags();
++  os << "; object_chunk_offset=0x" << std::hex
++     << MemoryChunk::AddressToOffset(object.address())
++     << " tagged_chunk_offset=0x"
++     << MemoryChunk::AddressToOffset(object.ptr());
++  os.flags(flags);
++
++  g_in_short_print_diagnostics = 1;
++  if (sigsetjmp(g_diagnostics_jump_buffer, 1) != 0) {
++    g_in_short_print_diagnostics = 0;
++    os << " current_ro_object=diagnostics_failed";
++    return;
++  }
++
++  MemoryChunkMetadata* metadata = MemoryChunkMetadata::FromHeapObject(object);
++  if (!metadata->Chunk()->InReadOnlySpace()) {
++    g_in_short_print_diagnostics = 0;
++    os << " current_ro_object=not_in_current_ro";
++    return;
++  }
++  PrintV8AsmCurrentReadOnlyObjectBoundary(
++      object, os, static_cast<ReadOnlyPageMetadata*>(metadata));
++  g_in_short_print_diagnostics = 0;
 +}
 +
  void HeapObject::HeapObjectShortPrint(std::ostream& os) {
@@ -213,7 +297,9 @@ index 7677022ce31..0c7c77633da 100644
 +  void (*old_handler)(int);
 +  old_handler = signal(SIGSEGV, segfault_jumper);
 +  if (sigsetjmp(g_jump_buffer, 1) != 0) {
-+    os << "<undefined: segmentfault, might outside scope>";
++    os << "<undefined: segmentfault, might outside scope";
++    PrintV8AsmShortPrintAddressDiagnostics(*this, os);
++    os << ">";
 +    signal(SIGSEGV, old_handler);
 +    return;
 +  }
@@ -228,14 +314,13 @@ index 7677022ce31..0c7c77633da 100644
      return;
    }
    if (IsJSObject(*this, cage_base)) {
-@@ -2978,9 +2998,22 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -2978,9 +3077,22 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
      StringStream accumulator(&allocator);
      JSObject::cast(*this)->JSObjectShortPrint(&accumulator);
      os << accumulator.ToCString().get();
 +    signal(SIGSEGV, old_handler);
-     return;
-   }
--  switch (map(cage_base)->instance_type()) {
++    return;
++  }
 +  InstanceType instance_type = map(cage_base)->instance_type();
 +
 +  // Skip invalid trusted objects. Technically it'd be fine to still handle
@@ -245,14 +330,15 @@ index 7677022ce31..0c7c77633da 100644
 +      !OutsideSandboxOrInReadonlySpace(*this)) {
 +    os << "<Invalid TrustedObject (outside trusted space)>\n";
 +    signal(SIGSEGV, old_handler);
-+    return;
-+  }
+     return;
+   }
+-  switch (map(cage_base)->instance_type()) {
 +
 +  switch (instance_type) {
      case MAP_TYPE: {
        Tagged<Map> map = Map::cast(*this);
        if (map->instance_type() == MAP_TYPE) {
-@@ -3317,6 +3350,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -3317,6 +3429,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
        os << "<Other heap object (" << map()->instance_type() << ")>";
        break;
    }
@@ -262,10 +348,10 @@ index 7677022ce31..0c7c77633da 100644
  void HeapNumber::HeapNumberShortPrint(std::ostream& os) {
 diff --git a/src/disassembler/main.cc b/src/disassembler/main.cc
 new file mode 100644
-index 00000000000..00f0a96a63c
+index 00000000000..2b54d2851a6
 --- /dev/null
 +++ b/src/disassembler/main.cc
-@@ -0,0 +1,888 @@
+@@ -0,0 +1,887 @@
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <fstream>
@@ -1078,13 +1164,12 @@ index 00000000000..00f0a96a63c
 +  v8::V8::SetFlagsFromString("--no-lazy --no-flush-bytecode");
 +  v8::V8::InitializeICUDefaultLocation(argv[0]);
 +  if (startup_options.snapshot_blob != nullptr) {
-+    bool force_incompatible =
-+        command_requests_force_incompatible(command_argc, command_argv.data());
++    bool snapshot_version_mismatch = false;
 +    if (!validate_snapshot_blob_version(startup_options.snapshot_blob,
-+                                        force_incompatible)) {
++                                        &snapshot_version_mismatch)) {
 +      return 1;
 +    }
-+    if (force_incompatible) {
++    if (snapshot_version_mismatch) {
 +      setenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH", "1", 0);
 +    }
 +    v8::V8::InitializeExternalStartupDataFromFile(
