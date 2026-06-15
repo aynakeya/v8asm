@@ -240,6 +240,43 @@ def _render_single_try_catch(
 
     prefix_instrs = instructions[:prefix_end_idx]
     suffix_instrs = instructions[suffix_start_idx:] if suffix_start_idx is not None else []
+    guard_condition: Optional[str] = None
+    prefix_lines: Optional[List[str]] = None
+    if prefix_instrs and resume_offset is not None:
+        guard = prefix_instrs[-1]
+        guarded_prefix_offsets = {instr.offset for instr in prefix_instrs[:-1]}
+        guard_is_branch_target = any(
+            parse_jump_target(instr) == guard.offset for instr in prefix_instrs[:-1]
+        )
+        prefix_has_external_jump = any(
+            (target := parse_jump_target(instr)) is not None
+            and target not in guarded_prefix_offsets
+            for instr in prefix_instrs[:-1]
+        )
+        if (
+            not guard_is_branch_target
+            and not prefix_has_external_jump
+            and guard.mnemonic.startswith("JumpIf")
+            and parse_jump_target(guard) == resume_offset
+        ):
+            guard_condition = translator.fallthrough_condition(guard)
+            if guard_condition:
+                prefix_instrs = prefix_instrs[:-1]
+                if "ACCU" in guard_condition and prefix_instrs:
+                    last_prefix_text = translator.translate(prefix_instrs[-1]).strip()
+                    last_accu = re.match(r"^ACCU\s*=\s*(.+)$", last_prefix_text)
+                    if last_accu:
+                        accu_expr = last_accu.group(1).strip()
+                        prefix_instrs = prefix_instrs[:-1]
+                        if "ACCU" not in accu_expr:
+                            guard_condition = re.sub(
+                                r"\bACCU\b", accu_expr, guard_condition
+                            )
+                        else:
+                            prefix_lines = _render_level4_fragment(
+                                translator, prefix_instrs
+                            )
+                            prefix_lines.append(f"{INDENT}{last_prefix_text}")
 
     catch_ctx_instr = next(
         (instr for instr in catch_instrs[:push_idx] if instr.mnemonic == "CreateCatchContext"),
@@ -257,13 +294,22 @@ def _render_single_try_catch(
         return None
 
     out: List[str] = []
-    if prefix_instrs:
+    if prefix_lines is not None:
+        out.extend(prefix_lines)
+    elif prefix_instrs:
         out.extend(_render_level4_fragment(translator, prefix_instrs))
-    out.append(f"{INDENT}try {{")
-    out.extend(_indent_lines(try_lines))
-    out.append(f"{INDENT}}} catch ({catch_name}) {{")
-    out.extend(_indent_lines(catch_lines))
-    out.append(f"{INDENT}}}")
+    try_catch_lines: List[str] = []
+    try_catch_lines.append(f"{INDENT}try {{")
+    try_catch_lines.extend(_indent_lines(try_lines))
+    try_catch_lines.append(f"{INDENT}}} catch ({catch_name}) {{")
+    try_catch_lines.extend(_indent_lines(catch_lines))
+    try_catch_lines.append(f"{INDENT}}}")
+    if guard_condition:
+        out.append(f"{INDENT}if ({guard_condition}) {{")
+        out.extend(_indent_lines(try_catch_lines))
+        out.append(f"{INDENT}}}")
+    else:
+        out.extend(try_catch_lines)
     if suffix_instrs:
         out.extend(_render_level4_fragment(translator, suffix_instrs))
     return out

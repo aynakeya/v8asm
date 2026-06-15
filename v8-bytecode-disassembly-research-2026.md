@@ -755,6 +755,16 @@ Remaining `<undefined: segmentfault...>` placeholders in bytenode rows are
 compatibility fallout, not proof that older 11.x/12.x bytenode variants were
 tested.
 
+The larger Atom/Electron sample exposed a separate try/catch fragmentation
+issue. Handler-table recovery renders prefix, protected body, catch body, and
+suffix as separate fragments. A linear prefix guard such as "skip the protected
+region when this value is false" used to lose its target because the resume
+block lived outside the prefix fragment, leaving a raw `if (...) goto
+offset_...`. The renderer now wraps the recovered try/catch in the guard when
+the prefix is linear and the guard target equals the resume offset. It does not
+apply the rewrite when the prefix itself contains external branches, because
+async/generator state machines can otherwise duplicate setup code.
+
 # 0x5 Multi-Version Rule
 
 For common V8 targets, build and identify `v8asm` by the full compatibility tuple, not just by version:

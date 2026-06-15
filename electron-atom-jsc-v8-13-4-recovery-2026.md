@@ -555,9 +555,34 @@ python3 decompiler/v8decompiler.py \
 
 unknown_comments: 0
 undefined_fallbacks: 0
+raw_goto: 5
 functions: 809
 decompiler stderr: 0 bytes
 ```
+
+One remaining raw-goto source was in the Python try/catch renderer, not V8
+object recovery. The renderer splits bytecode with a handler table into
+prefix/try/catch/suffix fragments. If the prefix ended with a conditional guard
+that jumped directly to the try/catch resume offset, that target was outside
+the separately rendered prefix fragment, so the structurer had no local block
+to consume and emitted `if (...) goto offset_...`.
+
+The renderer now recognizes only the safe linear form of that pattern and emits:
+
+```js
+if (truthy(r1.length)) {
+  try {
+    ...
+  } catch (a) {
+    ...
+  }
+}
+```
+
+It deliberately refuses the rewrite when the prefix already contains branches
+to outside the fragment, which avoids duplicating async/generator state-machine
+setup code. On the Atom sample this removes the `File.reloadContent` raw guard
+without hiding the remaining async/control-flow gaps.
 
 The remaining `ACCU`/register/goto residue is now structural cleanup work, not
 missing opcode coverage. The normal 20-case round still reports `raw_goto=0`
