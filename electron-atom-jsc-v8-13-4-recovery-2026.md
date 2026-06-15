@@ -588,6 +588,55 @@ The remaining `ACCU`/register/goto residue is now structural cleanup work, not
 missing opcode coverage. The normal 20-case round still reports `raw_goto=0`
 and `unknown=0` for both self-cache and bytenode rows.
 
+2026-06-15 follow-up: the Atom sample exposed two Python decompiler correctness
+bugs after the try/catch fix.
+
+First, unused-`ACCU` cleanup was treating any following `ACCU = ...` as a hard
+overwrite, even when the right-hand side read the previous accumulator. This
+deleted real producers such as:
+
+```js
+ACCU = -1
+ACCU = (r6 == ACCU)
+```
+
+and left misleading comparisons like `(r6 == ACCU)`. The cleanup and logical
+passes now treat `ACCU = rhs` as a read before overwrite when `rhs` mentions
+`ACCU`, so numeric sentinels and string constants used by the next compare are
+kept.
+
+Second, the structurer fallback for an unrecovered conditional branch used to
+emit the raw `if (...) goto offset_X` line and then continue at `offset_X`.
+That hides the fallthrough bytecode. In Atom this truncated a large
+locale-normalization dispatch after the first `zh-CN`/`zh-Hans` case. The
+fallback now keeps raw conditional gotos but continues through the fallthrough
+path and tracks pending raw branch targets so intervening case bodies and the
+default body are still emitted. The output is intentionally more raw for this
+large dispatch, but it no longer silently drops cases.
+
+Current forced Atom check with the correct binary and supplied snapshot:
+
+```text
+V8 binary:       13.4.114.21
+snapshot blob:   13.4.114.21-electron.0
+version_hash:    0x2135fe8d ok
+ro checksum:     0x4e6b3214 ok
+disasm stderr:   forced Electron/plain-V8 warnings only
+decompile stderr: 0 bytes
+
+score:
+  functions: 809
+  unknown_comments: 0
+  undefined_fallbacks: 0
+  raw_goto: 86
+```
+
+The increased `raw_goto` count is not a new opcode gap. It is the visible form
+of a previously hidden constant-dispatch chain. Representative recovered bodies
+now include `script_context[36] = "zh-Hans"`,
+`script_context[36] = "zh-Hant"`, `script_context[36] = "it-IT"`, and the
+default `script_context[36] = "Base"`.
+
 ## Remaining gap
 
 This is still forced recovery. The output is useful, but not equivalent to

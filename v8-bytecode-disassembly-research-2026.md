@@ -765,6 +765,22 @@ the prefix is linear and the guard target equals the resume offset. It does not
 apply the rewrite when the prefix itself contains external branches, because
 async/generator state machines can otherwise duplicate setup code.
 
+The same Atom run found that the level-4 cleanup could silently remove an
+accumulator producer when the next accumulator assignment was self-referential.
+For example, `ACCU = -1; ACCU = (r6 == ACCU)` was incorrectly reduced to
+`ACCU = (r6 == ACCU)`. The read-before-reassign scan now checks the right-hand
+side of `ACCU = ...` before declaring the old accumulator dead.
+
+The structurer also changed its fallback policy for unrecovered conditional
+branches. Previously it printed `if (...) goto offset_X` and then advanced to
+`offset_X`, which made the output look cleaner but could skip the fallthrough
+bytecode. Large V8 constant-dispatch tables, such as Atom's locale normalization
+chain, exposed this as real missing output. The fallback now keeps the raw goto
+and continues through fallthrough blocks, tracking pending raw branch targets so
+case bodies and default bodies are emitted. This deliberately raises `raw_goto`
+for that Atom function until a proper switch/map recovery pass is added, but it
+avoids hiding bytecode.
+
 # 0x5 Multi-Version Rule
 
 For common V8 targets, build and identify `v8asm` by the full compatibility tuple, not just by version:

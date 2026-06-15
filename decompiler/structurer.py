@@ -26,6 +26,7 @@ class Structurer:
         self.loop_regions = find_loop_regions(blocks)
         self.active_loops: Set[int] = set()
         self.active_if_builds: Set[int] = set()
+        self.pending_raw_branch_targets: Set[int] = set()
 
     def build(self) -> List[Statement]:
         if not self.blocks:
@@ -58,6 +59,7 @@ class Structurer:
     ) -> Tuple[List[Statement], int]:
         block = self.blocks[block_idx]
         statements: List[Statement] = []
+        self.pending_raw_branch_targets.discard(block.start)
 
         if stop_offset is not None and block.start >= stop_offset:
             return statements, block_idx
@@ -87,11 +89,13 @@ class Structurer:
             return statements, block_idx + 1
 
         if is_conditional(term.mnemonic):
-            built = self._build_if(block_idx, stop_offset)
-            if built:
-                stmt, next_idx = built
-                statements.append(stmt)
-                return statements, next_idx
+            target = parse_jump_target(term)
+            if not self._is_pending_raw_dispatch_target(block.start, target):
+                built = self._build_if(block_idx, stop_offset)
+                if built:
+                    stmt, next_idx = built
+                    statements.append(stmt)
+                    return statements, next_idx
 
         if term.mnemonic == "Return":
             statements.append(SimpleStatement(self.translator.translate(term)))
@@ -105,6 +109,9 @@ class Structurer:
             target = parse_jump_target(term)
             if target is not None:
                 statements.append(SimpleStatement(f"goto offset_{target}"))
+                if self._has_pending_raw_target_between(block.start, target):
+                    self.pending_raw_branch_targets.add(target)
+                    return statements, block_idx + 1
                 next_idx = self.offset_to_index.get(target, block_idx + 1)
                 return statements, next_idx
 
@@ -112,12 +119,9 @@ class Structurer:
             # Fallback when structure reconstruction failed.
             statements.append(SimpleStatement(self.translator.translate(term)))
             target = parse_jump_target(term)
-            next_idx = (
-                self.offset_to_index.get(target, block_idx + 1)
-                if target is not None
-                else block_idx + 1
-            )
-            return statements, next_idx
+            if target is not None and target > block.start:
+                self.pending_raw_branch_targets.add(target)
+            return statements, block_idx + 1
 
         text = self.translator.translate(term)
         if text:
@@ -206,6 +210,19 @@ class Structurer:
             else:
                 break
         return result
+
+    def _has_pending_raw_target_between(self, start: int, end: int) -> bool:
+        if end <= start:
+            return False
+        return any(start < target < end for target in self.pending_raw_branch_targets)
+
+    def _is_pending_raw_dispatch_target(
+        self, start: int, target: Optional[int]
+    ) -> bool:
+        if target is None or target <= start or not self.pending_raw_branch_targets:
+            return False
+        first_pending = min(self.pending_raw_branch_targets)
+        return target >= first_pending
 
 
 def decompile_to_statements(

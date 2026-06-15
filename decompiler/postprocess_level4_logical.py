@@ -9,7 +9,10 @@ from postprocess_level4_common import _extract_indent, _find_block_end
 def _body_reads_accu_before_reassign(lines: List[str], start: int, end: int) -> bool:
     for idx in range(start, min(end, len(lines))):
         stripped = lines[idx].strip()
-        if re.match(r"^ACCU\s*=", stripped):
+        reassignment = re.match(r"^ACCU\s*=\s*(.+)$", stripped)
+        if reassignment:
+            if re.search(r"\bACCU\b", reassignment.group(1)):
+                return True
             return False
         if re.search(r"\bACCU\b", stripped):
             return True
@@ -123,7 +126,10 @@ def _replace_accu_reads_until_store(lines: List[str], value: str) -> List[str] |
 def _reads_accu_before_reassign(lines: List[str], start: int) -> bool:
     for idx in range(start, len(lines)):
         stripped = lines[idx].strip()
-        if re.match(r"^ACCU\s*=", stripped):
+        reassignment = re.match(r"^ACCU\s*=\s*(.+)$", stripped)
+        if reassignment:
+            if re.search(r"\bACCU\b", reassignment.group(1)):
+                return True
             return False
         if re.search(r"\bACCU\b", stripped):
             return True

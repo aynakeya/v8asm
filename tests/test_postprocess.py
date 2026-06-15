@@ -44,6 +44,28 @@ class SimplifyLinesTests(unittest.TestCase):
         self.assertIn("ACCU = (r13 + ACCU)", simplified)
         self.assertNotIn("ACCU = (ACCU + ACCU)", simplified)
 
+    def test_preserves_accu_load_used_by_next_accu_assignment(self) -> None:
+        lines = [
+            "ACCU = -1",
+            "ACCU = (r6 == ACCU)",
+            "if (ACCU) goto offset_379",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, lines)
+
+    def test_preserves_string_accu_load_used_by_next_accu_assignment(self) -> None:
+        lines = [
+            'ACCU = "zh-Hans"',
+            "ACCU = (context_slot[36] === ACCU)",
+            "if (ACCU) goto offset_657",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, lines)
+
     def test_compacts_string_concat_chain(self) -> None:
         lines = [
             "ACCU = r4",

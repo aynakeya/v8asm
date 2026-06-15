@@ -266,9 +266,12 @@ def _collapse_accu_push_context(lines: List[str]) -> List[str]:
 def _reads_accu_before_reassign(lines: List[str], start: int) -> bool:
     for idx in range(start, len(lines)):
         stripped = lines[idx].strip()
-        if re.match(r"^ACCU\s*=", stripped):
+        reassignment = re.match(r"^ACCU\s*=\s*(.+)$", stripped)
+        if reassignment:
+            if re.search(r"\bACCU\b", reassignment.group(1)):
+                return True
             return False
-        if "ACCU" in stripped:
+        if re.search(r"\bACCU\b", stripped):
             return True
         if stripped in {"}", "else {"} or stripped.startswith(("return ", "throw ")):
             return False
@@ -294,7 +297,10 @@ def _drop_unused_pure_accu_loads(lines: List[str]) -> List[str]:
             if next_stripped in {"}", "else {"}:
                 used = True
                 break
-            if re.match(r"^ACCU\s*=", next_stripped):
+            next_reassignment = re.match(r"^ACCU\s*=\s*(.+)$", next_stripped)
+            if next_reassignment:
+                if re.search(r"\bACCU\b", next_reassignment.group(1)):
+                    used = True
                 break
             if re.search(r"\bACCU\b", next_stripped):
                 used = True
