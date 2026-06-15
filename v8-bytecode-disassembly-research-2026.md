@@ -269,6 +269,14 @@ After the opcode pass, `unknown` is zero across the current corpus. The remainin
 non-zero `undefined_fallbacks` are only in bytenode mode, which is expected when
 using `--force-incompatible` against Node cached data.
 
+The round analyzer now adds `Bytenode Placeholder Name Hints` for that remaining
+class of failures. It compares a bytenode placeholder constant with the same
+case's self-generated `v8asm` constant at the same function name and constant
+pool index, so offsets like `0xde48`, `0xee78`, and `0xe088` can be tied to
+`"toUpperCase"`, `"JSON"`, and `"parse"` without baking those names into the
+decompiler output. This keeps the investigation on V8/Node snapshot recovery
+while making the missing RO-heap objects concrete.
+
 The new cases also found two ACCU propagation bugs:
 
 1. Register propagation must not inline an array/object literal into an

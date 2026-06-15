@@ -68,7 +68,10 @@ codex resume 019c42ba-60e2-7cb0-905b-0edd833425d3
   `current_ro_objects`；完整地址会随进程基址变动，chunk offset 更适合跨 run
   对比和后续 RO heap 定位。`current_ro_objects` 如果显示 `inside+...`，说明
   失败地址落在当前 V8 RO 对象内部，更像 snapshot/布局错位，而不是单纯缺一个
-  printer guard。
+  printer guard。`Bytenode Placeholder Name Hints` 会把 bytenode 常量池里的
+  `<undefined: segmentfault...>` 和同 case self-cache 的常量池按函数/index
+  对照，给出 `toUpperCase`、`JSON`、`parse` 这类候选对象名；这些是定位
+  Node snapshot/RO heap 的证据，不要直接作为 Python 层替换规则。
 
 流水线执行：
 

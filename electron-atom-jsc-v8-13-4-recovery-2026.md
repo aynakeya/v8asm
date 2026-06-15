@@ -192,7 +192,7 @@ Validation run:
 
 ```text
 python3 -m unittest discover -s tests -p 'test_*.py'
-Ran 111 tests in 0.020s
+Ran 114 tests in 0.022s
 OK
 ```
 
@@ -436,19 +436,30 @@ the full process address. For top-level print/discovery crashes, it also prints
 Node object pointer resolves into the middle of a current V8 RO object, which
 keeps the investigation focused on snapshot/build alignment.
 
-| suffix | object chunk offset | cases | inferred source role |
-|---|---:|---|---|
-| `de49` | `0xde48` | `05_object_calls`, `09_all_features`, `16_regex_template` | likely `toUpperCase` |
-| `e089`, `ee79` | `0xe088`, `0xee78` | `07_try_catch`, `09_all_features` | likely `JSON` / `parse` from `JSON.parse` |
-| `08e1` | `0x108e0` | `11_object_mutation` | likely object key `count` |
-| `d321` | `0xd320` | `13_destructuring_spread` | likely `Object.values` property `values` |
-| `0919` | `0x10918` | `14_optional_chaining` | likely object key `profile` |
-| `a701`, `d479`, `eed1`, `f0e1` | `0xa700`, `0xd478`, `0xeed0`, `0xf0e0` | `20_rest_spread_calls` | likely `join`, `call`, `Math`, `max` |
+`tests/decomp_rounds/analyze_round.py` now adds a second table,
+`Bytenode Placeholder Name Hints`, by comparing the bytenode constant-pool
+placeholder at `(function name, constant-pool index)` with the same case's
+self-cache constant-pool value. This is still diagnostic evidence for
+snapshot/RO-heap recovery, not a Python replacement rule, but it removes most
+of the manual guessing:
 
-Those inferred names are useful for manual triage only. They should not be
-blindly patched into the Python output, because the authoritative failure is
-still in V8 object recovery: Node's read-only heap objects are being interpreted
-through a non-Node startup snapshot.
+| suffix | object chunk offset | cases | self-cache value hint |
+|---|---:|---|---|
+| `de49` | `0xde48` | `05_object_calls`, `09_all_features`, `16_regex_template` | `"toUpperCase"` |
+| `ee79` | `0xee78` | `07_try_catch`, `09_all_features` | `"JSON"` |
+| `e089` | `0xe088` | `07_try_catch`, `09_all_features` | `"parse"` |
+| `08e1` | `0x108e0` | `11_object_mutation` | `"seen"`, `"count"` |
+| `d321` | `0xd320` | `13_destructuring_spread` | `"values"` |
+| `0919` | `0x10918` | `14_optional_chaining` | `"address"`, `"profile"` |
+| `a701` | `0xa700` | `20_rest_spread_calls` | `"right"` |
+| `d479` | `0xd478` | `20_rest_spread_calls` | `"collect"` |
+| `eed1` | `0xeed0` | `20_rest_spread_calls` | `":"` |
+| `f0e1` | `0xf0e0` | `20_rest_spread_calls` | `"Math"` |
+
+The same offset mapping across multiple cases is useful for manual triage only.
+It should not be blindly patched into the Python output, because the
+authoritative failure is still in V8 object recovery: Node's read-only heap
+objects are being interpreted through a non-Node startup snapshot.
 
 The local Node 24 check was rerun with the correct nvm activation:
 

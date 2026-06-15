@@ -74,9 +74,31 @@
 | 16_regex_template | bytenode | `de49` | `0xde48` | `n/a` |
 | 20_rest_spread_calls | bytenode | `a701,d479,eed1,f0e1` | `0xa700,0xd478,0xeed0,0xf0e0` | `inside+0x10@[0xa6f0,0xa708),inside+0x10@[0xd468,0xd480),inside+0x10@[0xeec0,0xeed8),inside+0x10@[0xf0d0,0xf0e8)` |
 
+## Bytenode Placeholder Name Hints
+
+| case | function | cp_index | object_chunk_offsets | bytenode_placeholder | self_cache_value |
+|---|---|---:|---|---|---|
+| 05_object_calls | greet | 2 | `0xde48` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xde48 tagged_chunk_offset=0xde49>` | `"toUpperCase"` |
+| 07_try_catch | safeJson | 0 | `0xee78` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xee78 tagged_chunk_offset=0xee79>` | `"JSON"` |
+| 07_try_catch | safeJson | 1 | `0xe088` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xe088 tagged_chunk_offset=0xe089>` | `"parse"` |
+| 09_all_features | allFeatures | 6 | `0xde48` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xde48 tagged_chunk_offset=0xde49>` | `"toUpperCase"` |
+| 09_all_features | allFeatures | 10 | `0xee78` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xee78 tagged_chunk_offset=0xee79>` | `"JSON"` |
+| 09_all_features | allFeatures | 11 | `0xe088` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xe088 tagged_chunk_offset=0xe089>` | `"parse"` |
+| 11_object_mutation | String_0 | 1 | `0x108e0` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0x108e0 tagged_chunk_offset=0x108e1>` | `"seen"` |
+| 11_object_mutation | updateUser | 0 | `0x108e0` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0x108e0 tagged_chunk_offset=0x108e1>` | `"count"` |
+| 13_destructuring_spread | collect | 4 | `0xd320` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xd320 tagged_chunk_offset=0xd321>` | `"values"` |
+| 14_optional_chaining | String_0 | 1 | `0x10918` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0x10918 tagged_chunk_offset=0x10919>` | `"address"` |
+| 14_optional_chaining | readUser | 0 | `0x10918` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0x10918 tagged_chunk_offset=0x10919>` | `"profile"` |
+| 16_regex_template | parseLine | 3 | `0xde48` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xde48 tagged_chunk_offset=0xde49>` | `"toUpperCase"` |
+| 20_rest_spread_calls | collect | 1 | `0xa700` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xa700 tagged_chunk_offset=0xa701>` | `"right"` |
+| 20_rest_spread_calls | run | 2 | `0xd478` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xd478 tagged_chunk_offset=0xd479>` | `"collect"` |
+| 20_rest_spread_calls | run | 6 | `0xeed0` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xeed0 tagged_chunk_offset=0xeed1>` | `":"` |
+| 20_rest_spread_calls | run | 7 | `0xf0e0` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xf0e0 tagged_chunk_offset=0xf0e1>` | `"Math"` |
+
 ## Quick Inspection Targets
 - Prefer cases with highest `accu_lines` and `reg_refs` for next cleanups.
 - Any non-zero `raw_goto` indicates structurer fallback/regression.
 - Non-zero `unknown` usually means translator opcode coverage is missing.
 - Non-zero `undefined_fallbacks` with `ro_snapshot=mismatch` points at V8/embedder snapshot object recovery, not Python translation.
 - Non-zero `unresolved_objects` counts unique object-print failures in the disasm, before Python decompilation; `object_chunk_offsets` and `current_ro_objects` are printed by newer v8asm builds.
+- `Bytenode Placeholder Name Hints` compares bytenode constant-pool placeholders with the same case's self-cache constant pool. Treat it as a root-cause aid for snapshot/RO-heap recovery, not as a Python name substitution source.

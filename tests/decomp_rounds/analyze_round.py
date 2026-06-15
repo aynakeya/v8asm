@@ -32,6 +32,9 @@ CURRENT_RO_OBJECT_RE = re.compile(
     r"current_ro_object=\[(0x[0-9a-fA-F]+),(0x[0-9a-fA-F]+)\) "
     r"delta=(0x[0-9a-fA-F]+) hit=([a-z]+)"
 )
+FUNCTION_RE = re.compile(r"^function\s+([A-Za-z_$][A-Za-z0-9_$]*|bytecode_[0-9a-fA-F]+)\(")
+CONSTANT_POOL_ENTRY_RE = re.compile(r"^\s*//\s+\[(\d+)\]\s+=\s+(.+)$")
+UNDEFINED_PLACEHOLDER_RE = re.compile(r"<undefined: segmentfault[^>]*>")
 
 
 class UnresolvedDiagnostics(TypedDict):
@@ -39,6 +42,22 @@ class UnresolvedDiagnostics(TypedDict):
     unresolved_suffixes: list[str]
     object_chunk_offsets: list[str]
     current_ro_objects: list[str]
+
+
+class ConstantPoolEntry(TypedDict):
+    function_ordinal: int
+    function_name: str
+    index: int
+    value: str
+
+
+class PlaceholderNameHint(TypedDict):
+    case: str
+    function_name: str
+    constant_index: int
+    object_chunk_offsets: list[str]
+    placeholder: str
+    self_value: str
 
 
 def classify_decompile_status(text: str) -> str:
@@ -117,6 +136,86 @@ def unresolved_current_ro_objects(text: str) -> set[str]:
         hit = match.group(4)
         objects.add(f"{hit}+{delta}@[{start},{end})")
     return objects
+
+
+def parse_constant_pool_entries(text: str) -> dict[tuple[int, int], ConstantPoolEntry]:
+    entries: dict[tuple[int, int], ConstantPoolEntry] = {}
+    function_ordinal = -1
+    function_name = "<module>"
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        function_match = FUNCTION_RE.match(stripped)
+        if function_match:
+            function_ordinal += 1
+            function_name = function_match.group(1)
+            continue
+
+        entry_match = CONSTANT_POOL_ENTRY_RE.match(line)
+        if not entry_match or function_ordinal < 0:
+            continue
+        index = int(entry_match.group(1))
+        entries[(function_ordinal, index)] = {
+            "function_ordinal": function_ordinal,
+            "function_name": function_name,
+            "index": index,
+            "value": entry_match.group(2).strip(),
+        }
+    return entries
+
+
+def infer_placeholder_name_hints(case_dir: Path, case: str) -> list[PlaceholderNameHint]:
+    v8asm_dec = case_dir / f"{case}.v8asm.dec.l4.js"
+    bytenode_dec = case_dir / f"{case}.bytenode.dec.l4.js"
+    if not v8asm_dec.exists() or not bytenode_dec.exists():
+        return []
+
+    v8_entries = parse_constant_pool_entries(
+        v8asm_dec.read_text(encoding="utf-8", errors="ignore")
+    )
+    v8_entries_by_name_index: dict[tuple[str, int], ConstantPoolEntry | None] = {}
+    for entry in v8_entries.values():
+        key = (entry["function_name"], entry["index"])
+        if key in v8_entries_by_name_index:
+            v8_entries_by_name_index[key] = None
+        else:
+            v8_entries_by_name_index[key] = entry
+
+    bytenode_entries = parse_constant_pool_entries(
+        bytenode_dec.read_text(encoding="utf-8", errors="ignore")
+    )
+    hints: list[PlaceholderNameHint] = []
+    seen: set[tuple[int, int, str]] = set()
+
+    for key, bytenode_entry in sorted(bytenode_entries.items()):
+        placeholder_match = UNDEFINED_PLACEHOLDER_RE.search(bytenode_entry["value"])
+        if not placeholder_match:
+            continue
+        v8_entry = v8_entries.get(key)
+        if not v8_entry:
+            v8_entry = v8_entries_by_name_index.get(
+                (bytenode_entry["function_name"], bytenode_entry["index"])
+            )
+        if not v8_entry or UNDEFINED_PLACEHOLDER_RE.search(v8_entry["value"]):
+            continue
+        placeholder = placeholder_match.group(0)
+        seen_key = (key[0], key[1], placeholder)
+        if seen_key in seen:
+            continue
+        seen.add(seen_key)
+        offsets = sorted(unresolved_object_chunk_offsets(placeholder))
+        hints.append(
+            {
+                "case": case,
+                "function_name": bytenode_entry["function_name"],
+                "constant_index": bytenode_entry["index"],
+                "object_chunk_offsets": offsets,
+                "placeholder": placeholder,
+                "self_value": v8_entry["value"],
+            }
+        )
+
+    return hints
 
 
 def parse_header_diagnostics(text: str) -> dict[str, str]:
@@ -201,8 +300,10 @@ def main() -> int:
 
     failure_count = 0
     unresolved_rows: list[tuple[str, str, list[str], list[str], list[str]]] = []
+    placeholder_hints: list[PlaceholderNameHint] = []
     for case_dir in case_dirs:
         case = case_dir.name
+        placeholder_hints.extend(infer_placeholder_name_hints(case_dir, case))
         for mode in ("v8asm", "bytenode"):
             header = read_mode_header_diagnostics(case_dir, case, mode)
             unresolved = read_mode_unresolved_diagnostics(case_dir, case, mode)
@@ -257,6 +358,24 @@ def main() -> int:
                 f"`{current}` |"
             )
 
+    if placeholder_hints:
+        print("")
+        print("## Bytenode Placeholder Name Hints")
+        print("")
+        print("| case | function | cp_index | object_chunk_offsets | bytenode_placeholder | self_cache_value |")
+        print("|---|---|---:|---|---|---|")
+        for hint in placeholder_hints:
+            offsets = (
+                ",".join(hint["object_chunk_offsets"])
+                if hint["object_chunk_offsets"]
+                else "n/a"
+            )
+            print(
+                f"| {hint['case']} | {hint['function_name']} | "
+                f"{hint['constant_index']} | `{offsets}` | "
+                f"`{hint['placeholder']}` | `{hint['self_value']}` |"
+            )
+
     print("")
     print("## Quick Inspection Targets")
     print("- Prefer cases with highest `accu_lines` and `reg_refs` for next cleanups.")
@@ -270,6 +389,12 @@ def main() -> int:
         "- Non-zero `unresolved_objects` counts unique object-print failures in "
         "the disasm, before Python decompilation; `object_chunk_offsets` and "
         "`current_ro_objects` are printed by newer v8asm builds."
+    )
+    print(
+        "- `Bytenode Placeholder Name Hints` compares bytenode constant-pool "
+        "placeholders with the same case's self-cache constant pool. Treat it "
+        "as a root-cause aid for snapshot/RO-heap recovery, not as a Python "
+        "name substitution source."
     )
     if failure_count:
         print("")

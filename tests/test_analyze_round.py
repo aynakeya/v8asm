@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -12,7 +13,9 @@ if str(ROUND_DIR) not in sys.path:
 
 from analyze_round import (
     classify_decompile_status,
+    infer_placeholder_name_hints,
     parse_header_diagnostics,
+    parse_constant_pool_entries,
     score_text,
     unresolved_current_ro_objects,
     unresolved_object_addresses,
@@ -120,6 +123,100 @@ function sample() {
             unresolved_current_ro_objects(text),
             {"inside+0x10@[0xd468,0xd480)"},
         )
+
+    def test_parses_function_scoped_constant_pool_entries(self) -> None:
+        entries = parse_constant_pool_entries(
+            """
+function wrapper() {
+  // Constant pool:
+  //   [0] = [run, 0]
+}
+
+function run(arg0) {
+  // Constant pool:
+  //   [6] = "toUpperCase"
+}
+"""
+        )
+
+        self.assertEqual(entries[(0, 0)]["function_name"], "wrapper")
+        self.assertEqual(entries[(0, 0)]["value"], "[run, 0]")
+        self.assertEqual(entries[(1, 6)]["function_name"], "run")
+        self.assertEqual(entries[(1, 6)]["value"], '"toUpperCase"')
+
+    def test_infers_bytenode_placeholder_names_from_self_cache_constants(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            case_dir = Path(tmp) / "sample"
+            case_dir.mkdir()
+            (case_dir / "sample.v8asm.dec.l4.js").write_text(
+                """
+function run(arg0) {
+  // Constant pool:
+  //   [6] = "toUpperCase"
+}
+""",
+                encoding="utf-8",
+            )
+            (case_dir / "sample.bytenode.dec.l4.js").write_text(
+                """
+function run(arg0) {
+  // Constant pool:
+  //   [6] = "<undefined: segmentfault, might outside scope; object_chunk_offset=0xde48 tagged_chunk_offset=0xde49>"
+}
+""",
+                encoding="utf-8",
+            )
+
+            hints = infer_placeholder_name_hints(case_dir, "sample")
+
+        self.assertEqual(len(hints), 1)
+        self.assertEqual(hints[0]["function_name"], "run")
+        self.assertEqual(hints[0]["constant_index"], 6)
+        self.assertEqual(hints[0]["object_chunk_offsets"], ["0xde48"])
+        self.assertEqual(hints[0]["self_value"], '"toUpperCase"')
+
+    def test_infers_placeholder_names_when_bytenode_has_extra_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            case_dir = Path(tmp) / "sample"
+            case_dir.mkdir()
+            (case_dir / "sample.v8asm.dec.l4.js").write_text(
+                """
+function wrapper() {
+  // Constant pool:
+  //   [0] = [allFeatures, 0]
+}
+function allFeatures() {
+  // Constant pool:
+  //   [10] = "JSON"
+}
+""",
+                encoding="utf-8",
+            )
+            (case_dir / "sample.bytenode.dec.l4.js").write_text(
+                """
+function wrapper() {
+  // Constant pool:
+  //   [0] = String[11]: #allFeatures
+}
+function String_0() {
+  // Constant pool:
+  //   [0] = "extra"
+}
+function allFeatures() {
+  // Constant pool:
+  //   [10] = "<undefined: segmentfault, might outside scope; object_chunk_offset=0xee78 tagged_chunk_offset=0xee79>"
+}
+""",
+                encoding="utf-8",
+            )
+
+            hints = infer_placeholder_name_hints(case_dir, "sample")
+
+        self.assertEqual(len(hints), 1)
+        self.assertEqual(hints[0]["function_name"], "allFeatures")
+        self.assertEqual(hints[0]["constant_index"], 10)
+        self.assertEqual(hints[0]["object_chunk_offsets"], ["0xee78"])
+        self.assertEqual(hints[0]["self_value"], '"JSON"')
 
 
 if __name__ == "__main__":
