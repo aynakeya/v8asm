@@ -815,6 +815,16 @@ purity check rejects `context_slot[...]()` calls. In Atom this restores the
 `ensureDir(path, callback)` fallback branch and reduces the forced sample to
 `raw_goto=2`.
 
+The final two raw gotos were caused by a smaller condition coverage gap.
+`JumpIfTrueConstant` and `JumpIfFalseConstant` had opcode translators, but were
+missing from the CFG condition map used by the high-level structurer. Atom's
+license-window branch was therefore emitted as a raw jump even though its bytecode
+was a normal conditional branch with an explicit join. Adding those constant
+conditional jumps to the condition map lets the structurer recover that branch
+and the remaining async guard, so the current forced Atom sample reports
+`raw_goto=0`, `unknown=0`, and `undefined_fallbacks=0` with the correct
+`13.4.114.21` binary and supplied Electron context snapshot.
+
 # 0x5 Multi-Version Rule
 
 For common V8 targets, build and identify `v8asm` by the full compatibility tuple, not just by version:

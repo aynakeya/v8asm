@@ -120,6 +120,38 @@ class DecompilerFileTests(unittest.TestCase):
         self.assertIn("} else {", output)
         self.assertIn("context_slot[7]()", output)
 
+    def test_jump_if_constant_branches_are_structured(self) -> None:
+        dump = (
+            "0x1000: [BytecodeArray]\n"
+            "Parameter count 1\n"
+            "Register count 0\n"
+            "Frame size 0\n"
+            "         0x1000 @    0 : 17 01             LdaCurrentContextSlot [1]\n"
+            "         0x1002 @    2 : 9b 00             JumpIfFalseConstant [0] (0x100a @ 10)\n"
+            "         0x1004 @    4 : 11                LdaTrue\n"
+            "         0x1005 @    5 : 27 02             StaCurrentContextSlot [2]\n"
+            "         0x1006 @    6 : 93 07             Jump [7] (0x100d @ 13)\n"
+            "         0x100a @   10 : 12                LdaFalse\n"
+            "         0x100b @   11 : 27 02             StaCurrentContextSlot [2]\n"
+            "         0x100d @   13 : 0e                LdaUndefined\n"
+            "         0x100e @   14 : b3                Return\n"
+            "Constant pool (size = 0)\n"
+            "Handler Table (size = 0)\n"
+            "Source Position Table (size = 0)\n"
+        )
+        path = ROOT / "tests" / "tmp_jump_if_constant_disasm.txt"
+        try:
+            path.write_text(dump, encoding="utf-8")
+            output = decompile_file(path, level=4)
+        finally:
+            path.unlink(missing_ok=True)
+
+        self.assertNotIn("goto offset_", output)
+        self.assertIn("if (truthy(context_slot[1])) {", output)
+        self.assertIn("else {", output)
+        self.assertIn("script_context[2] = true", output)
+        self.assertIn("script_context[2] = false", output)
+
     def test_constant_jump_chain_preserves_fallthrough_cases(self) -> None:
         dump = (
             "0x1000: [BytecodeArray]\n"

@@ -639,7 +639,7 @@ score:
   functions: 809
   unknown_comments: 0
   undefined_fallbacks: 0
-  raw_goto: 2
+  raw_goto: 0
 ```
 
 The recovered locale map includes keys for `zh-CN`, `zh-Hans`, `zh-TW`,
@@ -649,9 +649,16 @@ guard where the else branch immediately re-tests the same truthy value through
 `ACCU` and jumps on the same condition. The try/catch renderer now also handles
 the short-circuit guard shape where the false branch is emitted after the
 try-skip jump and catch body. That restored Atom's `ensureDir(path, callback)`
-fallback branch instead of leaving it behind a raw goto. The remaining two raw
-gotos are separate async/control-flow structuring gaps, not missing opcode
-coverage or hidden output.
+fallback branch instead of leaving it behind a raw goto.
+
+The last two raw gotos were a Python decompiler coverage bug rather than a V8
+deserialization problem. The bytecode translator already knew how to emit
+`JumpIfTrueConstant` and `JumpIfFalseConstant`, but `CONDITION_MAP` did not list
+those opcodes, so the CFG structurer refused otherwise ordinary `if`/`else`
+branches and fell back to raw `if (...) goto offset_...` output. Adding those
+constant conditional jumps to the condition map structures the Electron license
+window branch and the remaining async guard, bringing the Atom forced-decompile
+score to `raw_goto=0` without adding print guards or suppressing output.
 
 ## Remaining gap
 

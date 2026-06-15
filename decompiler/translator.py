@@ -28,6 +28,8 @@ TYPEOF_LITERAL_FLAGS = {
 CONDITION_MAP: Dict[str, Tuple[str, bool]] = {
     "JumpIfTrue": ("truthy(ACCU)", True),
     "JumpIfFalse": ("truthy(ACCU)", False),
+    "JumpIfTrueConstant": ("truthy(ACCU)", True),
+    "JumpIfFalseConstant": ("truthy(ACCU)", False),
     "JumpIfToBooleanTrue": ("truthy(ACCU)", True),
     "JumpIfToBooleanFalse": ("truthy(ACCU)", False),
     "JumpIfToBooleanTrueConstant": ("truthy(ACCU)", True),
