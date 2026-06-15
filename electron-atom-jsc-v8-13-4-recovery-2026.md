@@ -639,13 +639,16 @@ score:
   functions: 809
   unknown_comments: 0
   undefined_fallbacks: 0
-  raw_goto: 4
+  raw_goto: 3
 ```
 
 The recovered locale map includes keys for `zh-CN`, `zh-Hans`, `zh-TW`,
 `zh-Hant`, `it`, `it-IT`, and the remaining locale aliases, with fallback
-`"Base"`. The remaining four raw gotos are separate async/control-flow
-structuring gaps, not missing opcode coverage or hidden output.
+`"Base"`. A later level-4 cleanup also drops one redundant empty `if`/`else`
+guard where the else branch immediately re-tests the same truthy value through
+`ACCU` and jumps on the same condition. The remaining three raw gotos are
+separate async/control-flow structuring gaps, not missing opcode coverage or
+hidden output.
 
 ## Remaining gap
 

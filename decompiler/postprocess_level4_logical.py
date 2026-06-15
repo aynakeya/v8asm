@@ -281,3 +281,54 @@ def combine_nested_truthy_ifs(lines: List[str]) -> List[str]:
         out.append(f"{indent}}}")
         i = outer_end + 1
     return out
+
+
+def drop_redundant_empty_else_truthy_guards(lines: List[str]) -> List[str]:
+    out: List[str] = []
+    i = 0
+    while i < len(lines):
+        if i + 5 < len(lines):
+            condition = _match_truthy_block_condition(lines[i].strip())
+            m_accu = re.match(r"^ACCU\s*=\s*(.+)$", lines[i + 3].strip())
+            goto_condition = _match_accu_truthy_goto(lines[i + 4].strip())
+            if (
+                condition is not None
+                and m_accu
+                and goto_condition is not None
+                and goto_condition[0] == condition[0]
+                and lines[i + 1].strip() == "}"
+                and lines[i + 2].strip() == "else {"
+                and lines[i + 5].strip() == "}"
+                and m_accu.group(1).strip() == condition[1]
+            ):
+                i += 6
+                continue
+        out.append(lines[i])
+        i += 1
+    return out
+
+
+def _match_truthy_block_condition(stripped: str) -> tuple[bool, str] | None:
+    positive = re.match(r"^if \(truthy\((.+)\)\) \{$", stripped)
+    if positive:
+        return False, positive.group(1).strip()
+    negative = re.match(r"^if \(!truthy\((.+)\)\) \{$", stripped)
+    if negative:
+        return True, negative.group(1).strip()
+    wrapped_negative = re.match(r"^if \(!\(truthy\((.+)\)\)\) \{$", stripped)
+    if wrapped_negative:
+        return True, wrapped_negative.group(1).strip()
+    return None
+
+
+def _match_accu_truthy_goto(stripped: str) -> tuple[bool, str] | None:
+    positive = re.match(r"^if \((?:truthy\(ACCU\)|ACCU)\) goto offset_\d+$", stripped)
+    if positive:
+        return False, "ACCU"
+    negative = re.match(r"^if \((?:!truthy\(ACCU\)|!ACCU)\) goto offset_\d+$", stripped)
+    if negative:
+        return True, "ACCU"
+    wrapped_negative = re.match(r"^if \(!\(truthy\(ACCU\)\)\) goto offset_\d+$", stripped)
+    if wrapped_negative:
+        return True, "ACCU"
+    return None

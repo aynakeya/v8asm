@@ -786,6 +786,14 @@ assignment instead of dozens of `if (ACCU) goto offset_...` lines, reducing the
 forced Atom sample's `raw_goto` score from 86 to 4 while preserving the recovered
 case/default bodies.
 
+One more local Atom cleanup removes an empty-then/else guard whose else branch
+immediately re-tests the same truthy value through `ACCU` and jumps on the same
+condition. Because entering the else branch proves that condition false, the
+whole block is dead and can be dropped without guessing the jump target. This
+reduces the forced Atom sample from `raw_goto=4` to `raw_goto=3`. The remaining
+three raw gotos cross async, try/catch, or later body ranges and are intentionally
+left visible until their target ranges can be proven.
+
 # 0x5 Multi-Version Rule
 
 For common V8 targets, build and identify `v8asm` by the full compatibility tuple, not just by version:

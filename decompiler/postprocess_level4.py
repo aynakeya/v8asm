@@ -42,6 +42,7 @@ from postprocess_level4_guards import (
 from postprocess_level4_inline import _inline_single_use_registers
 from postprocess_level4_logical import (
     combine_nested_truthy_ifs,
+    drop_redundant_empty_else_truthy_guards,
     inline_accu_equality_condition_loads,
     inline_accu_condition_loads,
     recover_nullish_assignments,
@@ -115,6 +116,7 @@ def recover_js_structures(lines: List[str]) -> List[str]:
     current = _drop_unused_pure_reg_assignments(current)
     current = recover_or_fallback_returns(current)
     current = combine_nested_truthy_ifs(current)
+    current = drop_redundant_empty_else_truthy_guards(current)
     current = _normalize_block_indentation(current)
     return current
 

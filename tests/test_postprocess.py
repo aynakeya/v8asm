@@ -98,6 +98,34 @@ class SimplifyLinesTests(unittest.TestCase):
             ],
         )
 
+    def test_drops_redundant_empty_else_truthy_guard(self) -> None:
+        lines = [
+            "if (!truthy(arg0.hasUnsaved)) {",
+            "}",
+            "else {",
+            "  ACCU = arg0.hasUnsaved",
+            "  if (!truthy(ACCU)) goto offset_288",
+            "}",
+            "try {",
+            '  console.record("recoverWindow")',
+            "} catch (e) {",
+            "  throw e",
+            "}",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(
+            simplified,
+            [
+                "try {",
+                '  console.record("recoverWindow")',
+                "} catch (e) {",
+                "  throw e",
+                "}",
+            ],
+        )
+
     def test_compacts_string_concat_chain(self) -> None:
         lines = [
             "ACCU = r4",
