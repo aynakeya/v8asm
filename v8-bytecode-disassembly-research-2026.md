@@ -880,13 +880,16 @@ The current local evidence is:
 ```text
 v8asm self cache:
   repo-v8asm 13.6.233.10: ok
-  out/v8asm.11.9.x64.release: 11.9.172, ok
-  out/v8asm.12.4.x64.release: 12.4.254.21, ok
-  out/v8asm.12.4.node22.x64.release: 12.4.254.21, ok
-  out/v8asm.12.9.x64.release: 12.9.99, ok
+  bin_cache/v8asm.10.2.node18.x64.release: 10.2.154.26, ok
+  bin_cache/v8asm.11.3.node20.x64.release: 11.3.244.8, ok
+  bin_cache/v8asm.12.4.node22.x64.release: 12.4.254.21, ok
+  bin_cache/v8asm.13.4.electron.x64.release: 13.4.114.21-electron.0, ok
+  bin_cache/v8asm.13.6.node24.x64.release: 13.6.233.10, ok
   out/v8asm.13.4.x64.release: 13.4.114.21, rebuilt and usable for Atom with the matching Electron context snapshot
 
 nvm nodes:
+  Node v18.20.8: V8 10.2.154.26-node.39
+  Node v20.20.2: V8 11.3.244.8-node.38
   Node v22.17.0: V8 12.4.254.21-node.26
   Node v24.7.0: V8 13.6.233.10-node.26
 ```
@@ -932,6 +935,10 @@ regression or missing opcode translation fails immediately. `undef` remains a
 reported count by default because it is often evidence for the Node/Electron
 snapshot mismatch being investigated; set
 `VERSION_MATRIX_MAX_UNDEFINED_FALLBACKS` when a focused run should fail on it.
+The default binary list now avoids stale local `out/` paths, so
+`VERSION_MATRIX_REQUIRE_BINS=1` can be used as a real gate for the cached common
+targets. Experimental local builds such as 11.9 or 12.9 should be supplied
+explicitly through `VERSION_MATRIX_V8ASM_BINS`.
 
 For Node 24/bytenode versus repo `v8asm` 13.6, the numeric V8 version matches,
 but strict deserialization still refuses the file:
@@ -945,6 +952,19 @@ read_only_snapshot_checksum: 0xd31c4342 (expected 0x436e38a3) mismatch
 So even this row remains forced-incompatible research coverage, not a native
 embedder match.
 
+For the remaining bytenode `<undefined: segmentfault...>` placeholders, the
+13.6 patch now prints one more read-only-heap diagnostic when the unresolved
+tagged address lands inside a current vanilla read-only object:
+
+```text
+current_ro_object=[start,end) delta=0x... hit=inside current_ro_short=<brief object>
+```
+
+This does not substitute names in Python output. It records what object the
+same chunk offset points to in the current snapshot, which helps prove whether a
+bytenode offset is a Node snapshot object that has drifted relative to the
+vanilla V8 snapshot.
+
 When switching V8 versions, follow the official V8 checkout flow. Do not just
 move a worktree or swap source directories. Checkout the target revision in the
 `fetch v8` checkout, then synchronize dependencies:
@@ -953,7 +973,7 @@ move a worktree or swap source directories. Checkout the target revision in the
 git checkout 13.4.114.21
 gclient sync --with_branch_heads --with_tags
 gn gen out/v8asm.13.4.x64.release --args='is_debug=false v8_enable_object_print=true v8_enable_disassembler=true v8_enable_pointer_compression=true'
-autoninja -C out/v8asm.13.4.x64.release v8asm
+autoninja -j10 -C out/v8asm.13.4.x64.release v8asm
 ```
 
 Build output directories should be versioned and kept:
@@ -982,10 +1002,9 @@ v8_enable_disassembler=true
 v8_enable_pointer_compression=true
 ```
 
-The current filesystem matrix, however, reports no
-`out/v8asm.13.4.x64.release/v8asm` binary. Treat the earlier 13.4 result as a
-historical build record unless that output is rebuilt or restored and the
-matrix sees the binary again.
+The current filesystem matrix sees the restored
+`out/v8asm.13.4.x64.release/v8asm` binary and its self-generated cache row is
+green.
 
 For Node 22/bytenode, the corresponding upstream V8 revision is 12.4:
 

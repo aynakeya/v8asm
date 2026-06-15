@@ -136,12 +136,20 @@ def unresolved_object_chunk_offsets(text: str) -> set[str]:
 
 def unresolved_current_ro_objects(text: str) -> set[str]:
     objects: set[str] = set()
-    for match in CURRENT_RO_OBJECT_RE.finditer(text):
-        start = f"0x{int(match.group(1), 16):x}"
-        end = f"0x{int(match.group(2), 16):x}"
-        delta = f"0x{int(match.group(3), 16):x}"
-        hit = match.group(4)
-        objects.add(f"{hit}+{delta}@[{start},{end})")
+    for line in text.splitlines():
+        for match in CURRENT_RO_OBJECT_RE.finditer(line):
+            start = f"0x{int(match.group(1), 16):x}"
+            end = f"0x{int(match.group(2), 16):x}"
+            delta = f"0x{int(match.group(3), 16):x}"
+            hit = match.group(4)
+            label = f"{hit}+{delta}@[{start},{end})"
+            short_prefix = " current_ro_short="
+            short_index = line.find(short_prefix, match.end())
+            if short_index >= 0:
+                short = line[short_index + len(short_prefix) :].strip()
+                if short:
+                    label = f"{label} short={short}"
+            objects.add(label)
     return objects
 
 

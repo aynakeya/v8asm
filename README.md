@@ -110,8 +110,11 @@ startup blob.
 The default matrix can use cached support files under
 `tests/decomp_rounds/bin_cache/` for V8 builds that are expensive to recreate.
 Currently this includes the Node-aligned V8 `10.2.154.26`, `11.3.244.8`, and
-`12.4.254.21` `v8asm` builds, plus the Electron-flavored `13.4.114.21` build,
-together with their `snapshot_blob.bin` and `icudtl.dat`.
+`12.4.254.21` and `13.6.233.10` `v8asm` builds, plus the Electron-flavored
+`13.4.114.21` build, together with their `snapshot_blob.bin` and `icudtl.dat`.
+The default list avoids stale local `out/` paths so
+`VERSION_MATRIX_REQUIRE_BINS=1` can be used as a real gate; add experimental
+builds explicitly with `VERSION_MATRIX_V8ASM_BINS` when probing another branch.
 
 The script now behaves like a small CI gate by default:
 

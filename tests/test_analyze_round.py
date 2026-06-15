@@ -131,7 +131,7 @@ function sample() {
             "!0x332de880d479: segmentfault while discovering object, skipped "
             "(ro_page=0 object_chunk_offset=0xd478 tagged_chunk_offset=0xd479 "
             "area_offset=0xd468) current_ro_object=[0xd468,0xd480) delta=0x10 "
-            "hit=inside\n"
+            "hit=inside current_ro_short=0x1234 <String[7]: #collect>\n"
             "!0x332de880d479: segmentfault while discovering object, skipped "
             "(ro_page=0 object_chunk_offset=0xd478 tagged_chunk_offset=0xd479 "
             "area_offset=0xd460) current_ro_object=[0xd460,0xd468) delta=0x18 "
@@ -146,7 +146,7 @@ function sample() {
             current_ro_objects_by_chunk_offset(text),
             {
                 "0xd478": {
-                    "inside+0x10@[0xd468,0xd480)",
+                    "inside+0x10@[0xd468,0xd480) short=0x1234 <String[7]: #collect>",
                     "after+0x18@[0xd460,0xd468)",
                 },
                 "0xa700": {"inside+0x10@[0xa6f0,0xa708)"},

@@ -498,6 +498,8 @@ index 00000000000..e910ce9f5a8
 +                         current_offset, current_end, delta,
 +                         delta == 0 ? "start" : "inside");
 +                os << buf;
++                os << " current_ro_short=";
++                v8::internal::ShortPrint(current, os);
 +                return;
 +            }
 +            cursor = next;

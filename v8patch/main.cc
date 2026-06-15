@@ -218,6 +218,8 @@ private:
                          current_offset, current_end, delta,
                          delta == 0 ? "start" : "inside");
                 os << buf;
+                os << " current_ro_short=";
+                v8::internal::ShortPrint(current, os);
                 return;
             }
             cursor = next;
