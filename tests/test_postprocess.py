@@ -1261,6 +1261,44 @@ class SimplifyLinesTests(unittest.TestCase):
             ['r3 = (context_slot[2].call(undefined, "x", ...r0) + ":")'],
         )
 
+    def test_recovers_two_case_switch_assignment_as_conditional_value(self) -> None:
+        lines = [
+            "ACCU = undefined",
+            "r4 = undefined",
+            "ACCU = 1",
+            "ACCU = (arg2 === ACCU)",
+            "r13 = arg2",
+            "if (!(truthy(ACCU))) {",
+            "  ACCU = 2",
+            "  ACCU = (r13 === ACCU)",
+            "  if (!(truthy(ACCU))) {",
+            "    // goto offset_332",
+            "  }",
+            "  else {",
+            '    ACCU = "two"',
+            '    r4 = "two"',
+            "  }",
+            "}",
+            "else {",
+            '  ACCU = "one"',
+            '  r4 = "one"',
+            "  // goto offset_335",
+            "}",
+            'ACCU = "other"',
+            'r4 = "other"',
+            "r13 = String(r4)",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(
+            simplified,
+            [
+                'r4 = ((arg2 === 1) ? "one" : ((arg2 === 2) ? "two" : "other"))',
+                "r13 = String(r4)",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

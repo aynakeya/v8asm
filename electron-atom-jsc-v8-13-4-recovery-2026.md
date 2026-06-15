@@ -192,7 +192,7 @@ Validation run:
 
 ```text
 python3 -m unittest discover -s tests -p 'test_*.py'
-Ran 109 tests in 0.019s
+Ran 111 tests in 0.020s
 OK
 ```
 

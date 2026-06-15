@@ -87,11 +87,11 @@ nvm Node versions, run:
 This writes `tests/decomp_rounds/version_matrix/summary.md`. The matrix uses
 one case by default, verifies self-generated `v8asm` cache strictly, and checks
 bytenode cache against each `v8asm`. It requires `--force-incompatible` when
-the Node V8 numeric version and pointer-compression layout both match, probes
-numeric mismatches when pointer compression is compatible, and skips direct
-forced loads when the pointer-compression build layout differs. The default Node set is
-18.20.8, 20.20.2, 22.17.0, and 24.7.0 when those versions are installed
-through nvm.
+the Node V8 numeric version and pointer-compression layout both match, and skips
+direct forced loads for numeric or pointer-layout mismatches by default. Set
+`VERSION_MATRIX_FORCE_MISMATCH=1` only for an explicit research probe. The
+default Node set is 18.20.8, 20.20.2, 22.17.0, and 24.7.0 when those versions
+are installed through nvm.
 
 The round runner follows the same snapshot convention as the matrix: if the
 selected `V8ASM_BIN` has a sibling `snapshot_blob.bin`, commands are launched as

@@ -148,6 +148,8 @@ tests/decomp_rounds/run_version_matrix.sh
 - `level 4` 新增/增强：
   - `for...of` 恢复（支持嵌套场景）
   - `switch` 两分支模式恢复（`if (x===1) return ...; if (x===2) return ...; return ...`）
+  - 赋值型两分支 switch 恢复成条件值，避免 `label`/`r4` 这类变量被
+    线性 alias 清理误删成空 `if/else`
   - `+=` 归并（含 `+1`）
   - bound method call 恢复可进入简单二元表达式，例如
     `return (r3 + r4.call(r1))` -> `return (r3 + r1.sum())`

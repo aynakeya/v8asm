@@ -33,6 +33,8 @@ def _is_simple_expr(expr: str) -> bool:
 def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[str]:
     reg_values: Dict[str, str] = {}
     accu_value: Optional[str] = None
+    post_goto_uncertain = False
+    post_goto_protected_regs: set[str] = set()
     simplified: List[str] = []
 
     def replace_tokens(text: str) -> str:
@@ -69,11 +71,18 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
 
         if (
             stripped.startswith(("if ", "while ", "goto ", "loop goto ", "return ", "throw "))
+            or stripped.startswith(("// goto ", "// loop goto "))
             or stripped == "}"
             or stripped == "else {"
         ):
             if stripped.startswith(("goto ", "loop goto ")):
                 simplified.append(f"{prefix}// {stripped}")
+                post_goto_uncertain = True
+                post_goto_protected_regs.clear()
+            elif stripped.startswith(("// goto ", "// loop goto ")):
+                simplified.append(line)
+                post_goto_uncertain = True
+                post_goto_protected_regs.clear()
             else:
                 simplified.append(line)
             reset_flow_state()
@@ -90,6 +99,16 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
             reg, expr = stripped.split("=", 1)
             reg = reg.strip()
             expr = expr.strip()
+            expr_before_replace = expr
+            uses_post_goto_reg = bool(
+                post_goto_protected_regs
+                and re.search(
+                    r"\b("
+                    + "|".join(re.escape(item) for item in post_goto_protected_regs)
+                    + r")\b",
+                    expr_before_replace,
+                )
+            )
             unstable_accu_alias = False
             if expr == "ACCU" and accu_value is not None:
                 if "ACCU" not in accu_value:
@@ -103,7 +122,15 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
 
             simplified.append(f"{prefix}{reg} = {expr}")
             invalidate_aliases_depending_on(reg)
-            if unstable_accu_alias:
+            if uses_post_goto_reg:
+                post_goto_protected_regs -= set(re.findall(r"\br\d+\b", expr_before_replace))
+                if not post_goto_protected_regs:
+                    post_goto_uncertain = False
+            if post_goto_uncertain and not uses_post_goto_reg:
+                post_goto_protected_regs.add(reg)
+                post_goto_uncertain = False
+                reg_values.pop(reg, None)
+            elif unstable_accu_alias or uses_post_goto_reg:
                 reg_values.pop(reg, None)
             elif _is_simple_expr(expr):
                 reg_values[reg] = expr

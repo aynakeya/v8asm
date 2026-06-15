@@ -508,6 +508,23 @@ the pipeline applies switch recovery first and only then compacts immediate
 ACCU comparisons. A follow-up cleanup also collapses `ACCU = value; throw ACCU`
 into `throw value`, which is common in async reject-mode branches.
 
+The assignment-shaped switch in `09_all_features` exposed the same kind of
+ordering bug from the other side. V8 emits `label = "one" | "two" | "other"`
+as a pair of comparisons with `goto` comments around the default assignment.
+Treating that as linear code made the base simplifier cache the default
+`"other"` value, and a later dead-store pass reduced the output to empty
+`if/else` blocks plus uses of an effectively uninitialized `r4`. Level 4 now
+recovers this shape as one conditional value:
+
+```js
+r4 = ((arg2 === 1) ? "one" : ((arg2 === 2) ? "two" : "other"))
+```
+
+`simplify_lines()` also treats raw or already-commented `goto` lines as an
+alias barrier for the first register assignment after the jump. That keeps the
+default branch from being inlined as if every path reached it, while still
+allowing unrelated later temporaries such as `r6 = r5(3)` to simplify normally.
+
 The last async residue was not a normal expression at all. V8 places the async
 reject handler after the resolve return, and the handler receives its thrown
 value in the accumulator:

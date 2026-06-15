@@ -108,17 +108,14 @@ def _match_two_case_assignment_switch(
         return None
 
     indent = _extract_indent(lines[start])
-    body_indent = indent + "  "
+    condition = (
+        f"(({subject1} === {m_case1.group(1).strip()}) ? "
+        f"{m_value1.group(1).strip()} : "
+        f"(({subject1} === {m_case2.group(1).strip()}) ? "
+        f"{m_value2.group(1).strip()} : {m_default.group(1).strip()}))"
+    )
     rendered = [
-        f"{indent}if ({subject1} === {m_case1.group(1).strip()}) {{",
-        f"{body_indent}{dst0[0]} = {m_value1.group(1).strip()}",
-        f"{indent}}}",
-        f"{indent}else if ({subject1} === {m_case2.group(1).strip()}) {{",
-        f"{body_indent}{dst0[0]} = {m_value2.group(1).strip()}",
-        f"{indent}}}",
-        f"{indent}else {{",
-        f"{body_indent}{dst0[0]} = {m_default.group(1).strip()}",
-        f"{indent}}}",
+        f"{indent}{dst0[0]} = {condition}",
     ]
     return rendered, cursor + 17
 
