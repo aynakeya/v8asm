@@ -97,6 +97,9 @@ disassembly and emits a low-address-suffix / `object_chunk_offset` table. Newer
 guarded `<undefined: segmentfault...>` placeholders. That keeps bytenode
 `undefined_fallbacks` tied to concrete read-only heap offsets even when the full
 heap address base changes between runs.
+`Bytenode Placeholder Offset Summary` then groups the self-cache name hints by
+that offset, making repeated failures such as `0xde48` visible as one RO-heap
+investigation target instead of several unrelated placeholder strings.
 
 The follow-up 13.6 build also annotates top-level object-print failures with the
 current V8 read-only heap object range:

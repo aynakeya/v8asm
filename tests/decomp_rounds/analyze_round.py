@@ -60,6 +60,13 @@ class PlaceholderNameHint(TypedDict):
     self_value: str
 
 
+class PlaceholderOffsetSummary(TypedDict):
+    object_chunk_offset: str
+    self_values: list[str]
+    cases: list[str]
+    current_ro_objects: list[str]
+
+
 def classify_decompile_status(text: str) -> str:
     if "// input jsc not found:" in text:
         return "input_missing"
@@ -135,6 +142,20 @@ def unresolved_current_ro_objects(text: str) -> set[str]:
         delta = f"0x{int(match.group(3), 16):x}"
         hit = match.group(4)
         objects.add(f"{hit}+{delta}@[{start},{end})")
+    return objects
+
+
+def current_ro_objects_by_chunk_offset(text: str) -> dict[str, set[str]]:
+    objects: dict[str, set[str]] = {}
+    for line in text.splitlines():
+        offsets = sorted(unresolved_object_chunk_offsets(line))
+        if not offsets:
+            continue
+        current_ro_objects = sorted(unresolved_current_ro_objects(line))
+        if not current_ro_objects:
+            continue
+        for offset in offsets:
+            objects.setdefault(offset, set()).update(current_ro_objects)
     return objects
 
 
@@ -216,6 +237,34 @@ def infer_placeholder_name_hints(case_dir: Path, case: str) -> list[PlaceholderN
         )
 
     return hints
+
+
+def summarize_placeholder_offsets(
+    hints: list[PlaceholderNameHint],
+    current_ro_by_offset: dict[str, set[str]],
+) -> list[PlaceholderOffsetSummary]:
+    grouped: dict[str, dict[str, set[str]]] = {}
+    for hint in hints:
+        for offset in hint["object_chunk_offsets"]:
+            entry = grouped.setdefault(
+                offset,
+                {"self_values": set(), "cases": set(), "current_ro_objects": set()},
+            )
+            entry["self_values"].add(hint["self_value"])
+            entry["cases"].add(hint["case"])
+            entry["current_ro_objects"].update(current_ro_by_offset.get(offset, set()))
+
+    return [
+        {
+            "object_chunk_offset": offset,
+            "self_values": sorted(values["self_values"]),
+            "cases": sorted(values["cases"]),
+            "current_ro_objects": sorted(values["current_ro_objects"]),
+        }
+        for offset, values in sorted(
+            grouped.items(), key=lambda item: int(item[0], 16)
+        )
+    ]
 
 
 def parse_header_diagnostics(text: str) -> dict[str, str]:
@@ -301,6 +350,7 @@ def main() -> int:
     failure_count = 0
     unresolved_rows: list[tuple[str, str, list[str], list[str], list[str]]] = []
     placeholder_hints: list[PlaceholderNameHint] = []
+    current_ro_by_offset: dict[str, set[str]] = {}
     for case_dir in case_dirs:
         case = case_dir.name
         placeholder_hints.extend(infer_placeholder_name_hints(case_dir, case))
@@ -326,6 +376,12 @@ def main() -> int:
             suffixes = list(unresolved["unresolved_suffixes"])
             object_chunk_offsets = list(unresolved["object_chunk_offsets"])
             current_ro_objects = list(unresolved["current_ro_objects"])
+            disasm_path = case_dir / f"{case}.{mode}.disasm.txt"
+            if disasm_path.exists():
+                for offset, objects in current_ro_objects_by_chunk_offset(
+                    disasm_path.read_text(encoding="utf-8", errors="ignore")
+                ).items():
+                    current_ro_by_offset.setdefault(offset, set()).update(objects)
             if suffixes:
                 unresolved_rows.append(
                     (case, mode, suffixes, object_chunk_offsets, current_ro_objects)
@@ -376,6 +432,28 @@ def main() -> int:
                 f"`{hint['placeholder']}` | `{hint['self_value']}` |"
             )
 
+        placeholder_summaries = summarize_placeholder_offsets(
+            placeholder_hints, current_ro_by_offset
+        )
+        if placeholder_summaries:
+            print("")
+            print("## Bytenode Placeholder Offset Summary")
+            print("")
+            print("| object_chunk_offset | self_cache_values | cases | current_ro_objects |")
+            print("|---:|---|---|---|")
+            for summary in placeholder_summaries:
+                values = ",".join(summary["self_values"])
+                cases = ",".join(summary["cases"])
+                current = (
+                    ",".join(summary["current_ro_objects"])
+                    if summary["current_ro_objects"]
+                    else "n/a"
+                )
+                print(
+                    f"| `{summary['object_chunk_offset']}` | `{values}` | "
+                    f"`{cases}` | `{current}` |"
+                )
+
     print("")
     print("## Quick Inspection Targets")
     print("- Prefer cases with highest `accu_lines` and `reg_refs` for next cleanups.")
@@ -395,6 +473,11 @@ def main() -> int:
         "placeholders with the same case's self-cache constant pool. Treat it "
         "as a root-cause aid for snapshot/RO-heap recovery, not as a Python "
         "name substitution source."
+    )
+    print(
+        "- `Bytenode Placeholder Offset Summary` groups those hints by "
+        "`object_chunk_offset`, which is the most stable locator for V8-side "
+        "read-only heap investigation."
     )
     if failure_count:
         print("")

@@ -72,6 +72,8 @@ codex resume 019c42ba-60e2-7cb0-905b-0edd833425d3
   `<undefined: segmentfault...>` 和同 case self-cache 的常量池按函数/index
   对照，给出 `toUpperCase`、`JSON`、`parse` 这类候选对象名；这些是定位
   Node snapshot/RO heap 的证据，不要直接作为 Python 层替换规则。
+  `Bytenode Placeholder Offset Summary` 再按 `object_chunk_offset` 聚合这些
+  候选，后续跨 case 查 V8 RO heap 时优先用这个表。
 
 流水线执行：
 

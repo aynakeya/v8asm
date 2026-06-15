@@ -13,10 +13,12 @@ if str(ROUND_DIR) not in sys.path:
 
 from analyze_round import (
     classify_decompile_status,
+    current_ro_objects_by_chunk_offset,
     infer_placeholder_name_hints,
     parse_header_diagnostics,
     parse_constant_pool_entries,
     score_text,
+    summarize_placeholder_offsets,
     unresolved_current_ro_objects,
     unresolved_object_addresses,
     unresolved_object_chunk_offsets,
@@ -124,6 +126,33 @@ function sample() {
             {"inside+0x10@[0xd468,0xd480)"},
         )
 
+    def test_groups_current_ro_objects_by_chunk_offset(self) -> None:
+        text = (
+            "!0x332de880d479: segmentfault while discovering object, skipped "
+            "(ro_page=0 object_chunk_offset=0xd478 tagged_chunk_offset=0xd479 "
+            "area_offset=0xd468) current_ro_object=[0xd468,0xd480) delta=0x10 "
+            "hit=inside\n"
+            "!0x332de880d479: segmentfault while discovering object, skipped "
+            "(ro_page=0 object_chunk_offset=0xd478 tagged_chunk_offset=0xd479 "
+            "area_offset=0xd460) current_ro_object=[0xd460,0xd468) delta=0x18 "
+            "hit=after\n"
+            "!0x332de880a701: segmentfault while discovering object, skipped "
+            "(ro_page=0 object_chunk_offset=0xa700 tagged_chunk_offset=0xa701 "
+            "area_offset=0xa6f0) current_ro_object=[0xa6f0,0xa708) delta=0x10 "
+            "hit=inside\n"
+        )
+
+        self.assertEqual(
+            current_ro_objects_by_chunk_offset(text),
+            {
+                "0xd478": {
+                    "inside+0x10@[0xd468,0xd480)",
+                    "after+0x18@[0xd460,0xd468)",
+                },
+                "0xa700": {"inside+0x10@[0xa6f0,0xa708)"},
+            },
+        )
+
     def test_parses_function_scoped_constant_pool_entries(self) -> None:
         entries = parse_constant_pool_entries(
             """
@@ -217,6 +246,58 @@ function allFeatures() {
         self.assertEqual(hints[0]["constant_index"], 10)
         self.assertEqual(hints[0]["object_chunk_offsets"], ["0xee78"])
         self.assertEqual(hints[0]["self_value"], '"JSON"')
+
+    def test_summarizes_placeholder_offsets(self) -> None:
+        summary = summarize_placeholder_offsets(
+            [
+                {
+                    "case": "05_object_calls",
+                    "function_name": "greet",
+                    "constant_index": 2,
+                    "object_chunk_offsets": ["0xde48"],
+                    "placeholder": "<undefined: segmentfault; object_chunk_offset=0xde48>",
+                    "self_value": '"toUpperCase"',
+                },
+                {
+                    "case": "09_all_features",
+                    "function_name": "allFeatures",
+                    "constant_index": 6,
+                    "object_chunk_offsets": ["0xde48"],
+                    "placeholder": "<undefined: segmentfault; object_chunk_offset=0xde48>",
+                    "self_value": '"toUpperCase"',
+                },
+                {
+                    "case": "20_rest_spread_calls",
+                    "function_name": "run",
+                    "constant_index": 2,
+                    "object_chunk_offsets": ["0xd478"],
+                    "placeholder": "<undefined: segmentfault; object_chunk_offset=0xd478>",
+                    "self_value": '"collect"',
+                },
+            ],
+            {
+                "0xde48": {"inside+0x10@[0xde38,0xde50)"},
+                "0xd478": {"inside+0x10@[0xd468,0xd480)"},
+            },
+        )
+
+        self.assertEqual(
+            summary,
+            [
+                {
+                    "object_chunk_offset": "0xd478",
+                    "self_values": ['"collect"'],
+                    "cases": ["20_rest_spread_calls"],
+                    "current_ro_objects": ["inside+0x10@[0xd468,0xd480)"],
+                },
+                {
+                    "object_chunk_offset": "0xde48",
+                    "self_values": ['"toUpperCase"'],
+                    "cases": ["05_object_calls", "09_all_features"],
+                    "current_ro_objects": ["inside+0x10@[0xde38,0xde50)"],
+                },
+            ],
+        )
 
 
 if __name__ == "__main__":

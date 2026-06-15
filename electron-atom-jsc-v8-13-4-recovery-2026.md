@@ -436,12 +436,13 @@ the full process address. For top-level print/discovery crashes, it also prints
 Node object pointer resolves into the middle of a current V8 RO object, which
 keeps the investigation focused on snapshot/build alignment.
 
-`tests/decomp_rounds/analyze_round.py` now adds a second table,
-`Bytenode Placeholder Name Hints`, by comparing the bytenode constant-pool
-placeholder at `(function name, constant-pool index)` with the same case's
-self-cache constant-pool value. This is still diagnostic evidence for
-snapshot/RO-heap recovery, not a Python replacement rule, but it removes most
-of the manual guessing:
+`tests/decomp_rounds/analyze_round.py` now adds `Bytenode Placeholder Name
+Hints`, by comparing the bytenode constant-pool placeholder at `(function name,
+constant-pool index)` with the same case's self-cache constant-pool value. It
+also emits `Bytenode Placeholder Offset Summary`, which groups those hints by
+`object_chunk_offset`. This is still diagnostic evidence for snapshot/RO-heap
+recovery, not a Python replacement rule, but it removes most of the manual
+guessing:
 
 | suffix | object chunk offset | cases | self-cache value hint |
 |---|---:|---|---|

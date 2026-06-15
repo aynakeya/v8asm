@@ -95,6 +95,21 @@
 | 20_rest_spread_calls | run | 6 | `0xeed0` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xeed0 tagged_chunk_offset=0xeed1>` | `":"` |
 | 20_rest_spread_calls | run | 7 | `0xf0e0` | `<undefined: segmentfault, might outside scope; object_chunk_offset=0xf0e0 tagged_chunk_offset=0xf0e1>` | `"Math"` |
 
+## Bytenode Placeholder Offset Summary
+
+| object_chunk_offset | self_cache_values | cases | current_ro_objects |
+|---:|---|---|---|
+| `0xa700` | `"right"` | `20_rest_spread_calls` | `inside+0x10@[0xa6f0,0xa708)` |
+| `0xd320` | `"values"` | `13_destructuring_spread` | `inside+0x10@[0xd310,0xd328)` |
+| `0xd478` | `"collect"` | `20_rest_spread_calls` | `inside+0x10@[0xd468,0xd480)` |
+| `0xde48` | `"toUpperCase"` | `05_object_calls,09_all_features,16_regex_template` | `n/a` |
+| `0xe088` | `"parse"` | `07_try_catch,09_all_features` | `n/a` |
+| `0xee78` | `"JSON"` | `07_try_catch,09_all_features` | `inside+0x10@[0xee68,0xee80)` |
+| `0xeed0` | `":"` | `20_rest_spread_calls` | `inside+0x10@[0xeec0,0xeed8)` |
+| `0xf0e0` | `"Math"` | `20_rest_spread_calls` | `inside+0x10@[0xf0d0,0xf0e8)` |
+| `0x108e0` | `"count","seen"` | `11_object_mutation` | `inside+0x10@[0x108d0,0x108e8)` |
+| `0x10918` | `"address","profile"` | `14_optional_chaining` | `n/a` |
+
 ## Quick Inspection Targets
 - Prefer cases with highest `accu_lines` and `reg_refs` for next cleanups.
 - Any non-zero `raw_goto` indicates structurer fallback/regression.
@@ -102,3 +117,4 @@
 - Non-zero `undefined_fallbacks` with `ro_snapshot=mismatch` points at V8/embedder snapshot object recovery, not Python translation.
 - Non-zero `unresolved_objects` counts unique object-print failures in the disasm, before Python decompilation; `object_chunk_offsets` and `current_ro_objects` are printed by newer v8asm builds.
 - `Bytenode Placeholder Name Hints` compares bytenode constant-pool placeholders with the same case's self-cache constant pool. Treat it as a root-cause aid for snapshot/RO-heap recovery, not as a Python name substitution source.
+- `Bytenode Placeholder Offset Summary` groups those hints by `object_chunk_offset`, which is the most stable locator for V8-side read-only heap investigation.

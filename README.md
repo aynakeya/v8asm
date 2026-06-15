@@ -60,11 +60,14 @@ which is useful for separating missing print guards from real snapshot layout
 mismatches. The summary also compares bytenode placeholder constants with the
 same case's self-cache constants and prints `Bytenode Placeholder Name Hints`;
 use those hints to identify likely RO-heap object names while debugging
-snapshot recovery, not as a Python-side substitution source. Cached-data header
-mismatches, including `ro_snapshot`, are recorded so missing bytenode
-object/property names can be tied back to V8/Node snapshot recovery instead of
-being mistaken for Python translator loss. The report records the exact
-`v8asm`, Node, Node V8, and bytenode versions used for that run.
+snapshot recovery, not as a Python-side substitution source. The companion
+`Bytenode Placeholder Offset Summary` groups those hints by
+`object_chunk_offset`, which is the stable key to use when comparing failed
+objects across cases and runs. Cached-data header mismatches, including
+`ro_snapshot`, are recorded so missing bytenode object/property names can be
+tied back to V8/Node snapshot recovery instead of being mistaken for Python
+translator loss. The report records the exact `v8asm`, Node, Node V8, and
+bytenode versions used for that run.
 
 By default, bytenode mode uses Node `24.7.0` through nvm. Override the binary or
 Node version explicitly when validating another target:

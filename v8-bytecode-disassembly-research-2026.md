@@ -275,7 +275,10 @@ case's self-generated `v8asm` constant at the same function name and constant
 pool index, so offsets like `0xde48`, `0xee78`, and `0xe088` can be tied to
 `"toUpperCase"`, `"JSON"`, and `"parse"` without baking those names into the
 decompiler output. This keeps the investigation on V8/Node snapshot recovery
-while making the missing RO-heap objects concrete.
+while making the missing RO-heap objects concrete. It also emits
+`Bytenode Placeholder Offset Summary`, grouped by `object_chunk_offset`, so the
+same failed RO-heap location can be compared across cases without relying on a
+process-specific heap base address.
 
 The new cases also found two ACCU propagation bugs:
 
