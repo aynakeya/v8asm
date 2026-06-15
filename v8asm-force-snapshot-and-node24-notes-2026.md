@@ -130,3 +130,12 @@ read-only object boundary. With the new fallback, those rows can show whether
 the unresolved tagged address lands inside a current RO object, outside the
 current RO allocation area, outside RO space, or whether even diagnostics could
 not safely inspect the address.
+
+The field-level fallback was also synced into the `13.4.114.21` Electron patch.
+That matters for `atom.compiled.dist.jsc`: the correct
+`v8_context_snapshot.bin` currently produces no `undefined_fallbacks`, but if a
+future Electron sample regresses into guarded short-print failures the 13.4
+build will now report the same `object_chunk_offset`, `area_offset`, and
+`current_ro_object=[start,end)` evidence instead of only printing a generic
+placeholder. The 13.4 patch was validated with
+`git apply --3way --check` on a clean tag and rebuilt with `autoninja -j10`.

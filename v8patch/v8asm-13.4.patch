@@ -173,10 +173,20 @@ index d3607a4deea..377b07aee42 100644
 
    static std::unique_ptr<SerializationData> SerializeValue(
 diff --git a/src/diagnostics/objects-printer.cc b/src/diagnostics/objects-printer.cc
-index 471e65ee6ec..a7f30a9d13d 100644
+index 471e65ee6ec..1bfc12e447a 100644
 --- a/src/diagnostics/objects-printer.cc
 +++ b/src/diagnostics/objects-printer.cc
-@@ -34,6 +34,11 @@
+@@ -15,6 +15,9 @@
+ #include "src/execution/isolate-utils-inl.h"
+ #include "src/heap/heap-inl.h"  // For InOldSpace.
+ #include "src/heap/heap-layout-inl.h"
++#include "src/heap/memory-chunk.h"
++#include "src/heap/memory-chunk-metadata-inl.h"
++#include "src/heap/read-only-spaces.h"
+ #include "src/heap/heap-write-barrier-inl.h"  // For GetIsolateFromWritableObj.
+ #include "src/heap/marking-inl.h"
+ #include "src/ic/handler-configuration-inl.h"
+@@ -34,6 +37,11 @@
  #include "third_party/fp16/src/include/fp16.h"
  #include "v8-internal.h"
 
@@ -188,7 +198,7 @@ index 471e65ee6ec..a7f30a9d13d 100644
  #if V8_ENABLE_WEBASSEMBLY
  #include "src/debug/debug-wasm-objects-inl.h"
  #include "src/wasm/wasm-code-manager.h"
-@@ -158,7 +163,7 @@ namespace {
+@@ -158,7 +166,7 @@ namespace {
  void PrintHeapObjectHeaderWithoutMap(Tagged<HeapObject> object,
                                       std::ostream& os, const char* id) {
    PtrComprCageBase cage_base = GetPtrComprCageBase();
@@ -197,13 +207,87 @@ index 471e65ee6ec..a7f30a9d13d 100644
    if (id != nullptr) {
      os << id;
    } else {
-@@ -3361,15 +3366,30 @@ void HeapObject::Print(Tagged<Object> obj, std::ostream& os) {
+@@ -3361,15 +3369,106 @@ void HeapObject::Print(Tagged<Object> obj, std::ostream& os) {
    v8::internal::Print(obj, os);
  }
 
 +static sigjmp_buf g_jump_buffer;
++static sigjmp_buf g_diagnostics_jump_buffer;
++static volatile sig_atomic_t g_in_short_print_diagnostics = 0;
++
 +void segfault_jumper(int signal_number) {
++    (void)signal_number;
++    if (g_in_short_print_diagnostics) {
++        siglongjmp(g_diagnostics_jump_buffer, 1);
++    }
 +    siglongjmp(g_jump_buffer, 1);
++}
++
++void PrintV8AsmCurrentReadOnlyObjectBoundary(Tagged<HeapObject> object,
++                                             std::ostream& os,
++                                             ReadOnlyPageMetadata* page) {
++  Address object_addr = object.address();
++  if (!page->Contains(object_addr)) {
++    os << " current_ro_object=outside_area";
++    return;
++  }
++
++  std::ios_base::fmtflags flags = os.flags();
++  os << " area_offset=0x" << std::hex
++     << static_cast<size_t>(object_addr - page->area_start());
++  os.flags(flags);
++
++  Address cursor = page->area_start();
++  Address end = page->area_end();
++  while (cursor < end) {
++    Tagged<HeapObject> current = HeapObject::FromAddress(cursor);
++    int object_size = current->Size();
++    int aligned_size = ALIGN_TO_ALLOCATION_ALIGNMENT(object_size);
++    if (aligned_size <= 0) break;
++    Address next = cursor + aligned_size;
++    if (object_addr >= cursor && object_addr < next) {
++      size_t current_offset =
++          static_cast<size_t>(cursor - page->ChunkAddress());
++      size_t current_end =
++          static_cast<size_t>(next - page->ChunkAddress());
++      size_t delta = static_cast<size_t>(object_addr - cursor);
++      flags = os.flags();
++      os << " current_ro_object=[0x" << std::hex << current_offset
++         << ",0x" << current_end << ") delta=0x" << delta
++         << " hit=" << (delta == 0 ? "start" : "inside");
++      os.flags(flags);
++      return;
++    }
++    cursor = next;
++  }
++  os << " current_ro_object=n/a";
++}
++
++void PrintV8AsmShortPrintAddressDiagnostics(Tagged<HeapObject> object,
++                                            std::ostream& os) {
++  std::ios_base::fmtflags flags = os.flags();
++  os << "; object_chunk_offset=0x" << std::hex
++     << MemoryChunk::AddressToOffset(object.address())
++     << " tagged_chunk_offset=0x"
++     << MemoryChunk::AddressToOffset(object.ptr());
++  os.flags(flags);
++
++  g_in_short_print_diagnostics = 1;
++  if (sigsetjmp(g_diagnostics_jump_buffer, 1) != 0) {
++    g_in_short_print_diagnostics = 0;
++    os << " current_ro_object=diagnostics_failed";
++    return;
++  }
++
++  MemoryChunkMetadata* metadata = MemoryChunkMetadata::FromHeapObject(object);
++  if (!metadata->Chunk()->InReadOnlySpace()) {
++    g_in_short_print_diagnostics = 0;
++    os << " current_ro_object=not_in_current_ro";
++    return;
++  }
++  PrintV8AsmCurrentReadOnlyObjectBoundary(
++      object, os, static_cast<ReadOnlyPageMetadata*>(metadata));
++  g_in_short_print_diagnostics = 0;
 +}
 +
  void HeapObject::HeapObjectShortPrint(std::ostream& os) {
@@ -213,7 +297,9 @@ index 471e65ee6ec..a7f30a9d13d 100644
 +  void (*old_handler)(int);
 +  old_handler = signal(SIGSEGV, segfault_jumper);
 +  if (sigsetjmp(g_jump_buffer, 1) != 0) {
-+    os << "<undefined: segmentfault, might outside scope>";
++    os << "<undefined: segmentfault, might outside scope";
++    PrintV8AsmShortPrintAddressDiagnostics(*this, os);
++    os << ">";
 +    signal(SIGSEGV, old_handler);
 +    return;
 +  }
@@ -228,7 +314,7 @@ index 471e65ee6ec..a7f30a9d13d 100644
      return;
    }
    if (IsJSObject(*this, cage_base)) {
-@@ -3377,6 +3397,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -3377,6 +3476,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
      StringStream accumulator(&allocator);
      Cast<JSObject>(*this)->JSObjectShortPrint(&accumulator);
      os << accumulator.ToCString().get();
@@ -236,7 +322,7 @@ index 471e65ee6ec..a7f30a9d13d 100644
      return;
    }
 
-@@ -3388,6 +3409,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -3388,6 +3488,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
    if (InstanceTypeChecker::IsTrustedObject(instance_type) &&
        !OutsideSandboxOrInReadonlySpace(*this)) {
      os << "<Invalid TrustedObject (outside trusted space)>\n";
@@ -244,7 +330,7 @@ index 471e65ee6ec..a7f30a9d13d 100644
      return;
    }
 
-@@ -3743,6 +3765,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+@@ -3743,6 +3844,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
        os << "<Other heap object (" << map()->instance_type() << ")>";
        break;
    }

@@ -283,7 +283,7 @@ local `tests/decomp_rounds/bin_cache/` cache before switching versions again.
 | patch | V8 tag used | synced Electron fixes | build/test status |
 | --- | --- | --- | --- |
 | `v8patch/v8asm.patch` | `13.6.233.10` | `--snapshot_blob`, cached-data sanity bypass, forced snapshot suffix/baseline mismatch attempt, direct forced-load payload guard and cross-major warning | patch applies on clean `13.6.233.10`; 13.6 is not a usable Atom path for the 13.4 Electron startup snapshot |
-| `v8patch/v8asm-13.4.patch` | `13.4.114.21` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup external-reference mismatch opt-in | `autoninja -j10 -C out/v8asm.13.4.x64.release v8asm`; plain build forced-disassembles `atom.compiled.dist.jsc` with `v8_context_snapshot.bin`; level-4 decompiler passed |
+| `v8patch/v8asm-13.4.patch` | `13.4.114.21` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, startup external-reference mismatch opt-in, field-level RO short-print boundary diagnostics | `git apply --3way --check` passed on clean `13.4.114.21`; `autoninja -j10 -C out/v8asm.13.4.x64.release v8asm`; plain build forced-disassembles `atom.compiled.dist.jsc` with `v8_context_snapshot.bin`; level-4 decompiler passed with `raw_goto=0`, `unknown_comments=0`, `undefined_fallbacks=0` |
 | `v8patch/v8asm-12.9.patch` | `12.9.202.28` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch | `git apply --check` passed on clean `12.9.202.28` |
 | `v8patch/v8asm-12.4.patch` | `12.4.254.21` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch, direct forced-load payload guard and cross-major warning | `git apply --check` passed on clean `12.4.254.21`; cached Node22 build still passes forced disasm/decompiler |
 | `v8patch/v8asm-11.9.patch` | `11.9.169.7` | `--snapshot_blob`, cached-data sanity bypass, forced same-baseline snapshot suffix mismatch | `git apply --check` passed on clean `11.9.169.7` |
@@ -659,6 +659,18 @@ branches and fell back to raw `if (...) goto offset_...` output. Adding those
 constant conditional jumps to the condition map structures the Electron license
 window branch and the remaining async guard, bringing the Atom forced-decompile
 score to `raw_goto=0` without adding print guards or suppressing output.
+
+2026-06-15 follow-up: `v8patch/v8asm-13.4.patch` now carries the same
+field-level `HeapObjectShortPrint` read-only-heap boundary diagnostics as the
+13.6 research patch. The patch was checked against a clean `13.4.114.21`
+worktree with `git apply --3way --check`, and the active official checkout was
+rebuilt with `autoninja -j10 -C out/v8asm.13.4.x64.release v8asm`. Rechecking
+`atom.compiled.dist.jsc` with the correct
+`--snapshot_blob v8context/v8_context_snapshot.bin` still exits cleanly:
+`version_hash=0x2135fe8d`, `read_only_snapshot_checksum=0x4e6b3214`,
+`functions=809`, `raw_goto=0`, `unknown_comments=0`, and
+`undefined_fallbacks=0`. The only stderr is the expected forced Electron
+snapshot suffix/header drift described below.
 
 ## Remaining gap
 

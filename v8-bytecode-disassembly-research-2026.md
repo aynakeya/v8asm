@@ -990,6 +990,13 @@ inside the fallback. That keeps the diagnostic focused on V8 read-only heap
 layout mismatch instead of hiding bytenode placeholders with Python-side name
 substitution.
 
+That field-level diagnostic is now present in both the 13.6 research patch and
+the verified 13.4 Electron patch. The 13.4 patch was checked with
+`git apply --3way --check` against a clean `13.4.114.21` tag and rebuilt with
+`autoninja -j10`; `atom.compiled.dist.jsc` plus
+`v8context/v8_context_snapshot.bin` still decompiles with `raw_goto=0`,
+`unknown_comments=0`, and `undefined_fallbacks=0`.
+
 When switching V8 versions, follow the official V8 checkout flow. Do not just
 move a worktree or swap source directories. Checkout the target revision in the
 `fetch v8` checkout, then synchronize dependencies:
