@@ -343,7 +343,7 @@ new file mode 100644
 index 00000000000..8a8c1d3aef7
 --- /dev/null
 +++ b/src/disassembler/main.cc
-@@ -0,0 +1,873 @@
+@@ -0,0 +1,872 @@
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <fstream>
@@ -1142,12 +1142,11 @@ index 00000000000..8a8c1d3aef7
 +    if (snapshot_version_mismatch) {
 +      setenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH", "1", 0);
 +    }
-+    if (force_incompatible) {
-+      setenv("V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH", "1", 0);
-+    }
++    setenv("V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH", "1", 0);
 +    v8::V8::InitializeExternalStartupDataFromFile(
 +        startup_options.snapshot_blob);
 +  } else {
++    setenv("V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH", "1", 0);
 +    v8::V8::InitializeExternalStartupData(argv[0]);
 +  }
 +  std::unique_ptr<v8::Platform> platform = v8::platform::NewDefaultPlatform();

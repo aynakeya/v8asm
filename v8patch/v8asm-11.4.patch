@@ -1,11 +1,11 @@
 diff --git a/BUILD.gn b/BUILD.gn
-index 9a2b2cdd94f..ea46bd473f9 100644
+index 5cda664fdde..b6a0f1bb2d5 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -7789,6 +7789,26 @@ v8_executable("v8_hello_world") {
-   }
+@@ -6933,6 +6933,26 @@ v8_executable("v8_hello_world") {
+   ]
  }
-
+ 
 +v8_executable("v8asm") {
 +  sources = [ "src/disassembler/main.cc" ]
 +
@@ -28,20 +28,20 @@ index 9a2b2cdd94f..ea46bd473f9 100644
 +
  v8_executable("v8_sample_process") {
    sources = [ "samples/process.cc" ]
-
+ 
 diff --git a/src/d8/d8.cc b/src/d8/d8.cc
-index 38810cacee6..dc21db7cb86 100644
+index e639d1839d9..a535fdfdce0 100644
 --- a/src/d8/d8.cc
 +++ b/src/d8/d8.cc
-@@ -930,6 +930,7 @@ void D8WasmAsyncResolvePromiseCallback(
-
+@@ -847,6 +847,7 @@ void D8WasmAsyncResolvePromiseCallback(
+ 
  }  // namespace
-
+ 
 +
  // Executes a string within the current v8 context.
  bool Shell::ExecuteString(Isolate* isolate, Local<String> source,
-                           Local<String> name,
-@@ -3903,6 +3904,10 @@ Local<ObjectTemplate> Shell::CreateGlobalTemplate(Isolate* isolate) {
+                           Local<String> name, PrintResult print_result,
+@@ -3364,6 +3365,10 @@ Local<ObjectTemplate> Shell::CreateGlobalTemplate(Isolate* isolate) {
    global_template->Set(isolate, "performance",
                         Shell::CreatePerformanceTemplate(isolate));
    global_template->Set(isolate, "Worker", Shell::CreateWorkerTemplate(isolate));
@@ -49,11 +49,11 @@ index 38810cacee6..dc21db7cb86 100644
 +    v8::String::NewFromUtf8(isolate, "loadjsc", v8::NewStringType::kNormal)
 +        .ToLocalChecked(),
 +    v8::FunctionTemplate::New(isolate, v8::Shell::LoadJSC));
-
+ 
    // Prevent fuzzers from creating side effects.
    if (!i::v8_flags.fuzzing) {
-@@ -6873,3 +6878,105 @@ int main(int argc, char* argv[]) { return v8::Shell::Main(argc, argv); }
-
+@@ -6100,3 +6105,105 @@ int main(int argc, char* argv[]) { return v8::Shell::Main(argc, argv); }
+ 
  #undef CHECK
  #undef DCHECK
 +
@@ -90,7 +90,7 @@ index 38810cacee6..dc21db7cb86 100644
 +  for (int val = 0; val < consts->length(); val++) {
 +    auto obj = consts->get(val);
 +    if (v8::internal::IsSharedFunctionInfo(obj)) {
-+      auto shared = v8::internal::Cast<v8::internal::SharedFunctionInfo>(obj);
++      auto shared = v8::internal::SharedFunctionInfo::cast(obj);
 +
 +      for (int val1 = 0; val1 < depth; ++val1) v8::internal::PrintF("  ");
 +      v8::internal::PrintF("--> Found SFI in constant pool at index %d: ", val);
@@ -134,9 +134,9 @@ index 38810cacee6..dc21db7cb86 100644
 +    auto source = isolate->factory()
 +                      ->NewStringFromUtf8(base::CStrVector("source"))
 +                      .ToHandleChecked();
-+    v8::internal::ScriptDetails script_details;
 +    v8::internal::MaybeDirectHandle<v8::internal::SharedFunctionInfo> maybe_fun =
-+        v8::internal::CodeSerializer::Deserialize(isolate, &cached_data, source, script_details);
++        v8::internal::CodeSerializer::Deserialize(
++            isolate, &cached_data, source, v8::ScriptOriginOptions());
 +
 +    v8::internal::DirectHandle<v8::internal::SharedFunctionInfo> fun;
 +    if (!maybe_fun.ToHandle(&fun)) {
@@ -158,197 +158,29 @@ index 38810cacee6..dc21db7cb86 100644
 +    delete[] filedata;
 +  }
 +}
-\ No newline at end of file
 diff --git a/src/d8/d8.h b/src/d8/d8.h
-index 6fb139446e3..da5f525e63f 100644
+index d214c0c17e4..3b079802ef3 100644
 --- a/src/d8/d8.h
 +++ b/src/d8/d8.h
-@@ -560,6 +560,8 @@ class Shell : public i::AllStatic {
+@@ -515,6 +515,8 @@ class Shell : public i::AllStatic {
+   static bool EmptyMessageQueues(Isolate* isolate);
    static bool CompleteMessageLoop(Isolate* isolate);
-   static bool FinishExecuting(Isolate* isolate, const Global<Context>& context);
-
+ 
 +  static void LoadJSC(const v8::FunctionCallbackInfo<v8::Value>& args);
 +
    static bool HandleUnhandledPromiseRejections(Isolate* isolate);
-
-   static std::unique_ptr<SerializationData> SerializeValue(
-diff --git a/src/diagnostics/objects-printer.cc b/src/diagnostics/objects-printer.cc
-index d3e5ec68657..5567eaec886 100644
---- a/src/diagnostics/objects-printer.cc
-+++ b/src/diagnostics/objects-printer.cc
-@@ -16,6 +16,9 @@
- #include "src/execution/isolate-utils-inl.h"
- #include "src/heap/heap-inl.h"  // For InOldSpace.
- #include "src/heap/heap-layout-inl.h"
-+#include "src/heap/memory-chunk.h"
-+#include "src/heap/memory-chunk-metadata-inl.h"
-+#include "src/heap/read-only-spaces.h"
- #include "src/heap/heap-write-barrier-inl.h"  // For GetIsolateFromWritableObj.
- #include "src/heap/marking-inl.h"
- #include "src/ic/handler-configuration-inl.h"
-@@ -34,6 +37,11 @@
- #include "src/utils/ostreams.h"
- #include "third_party/fp16/src/include/fp16.h"
-
-+
-+#include <csignal>
-+#include <csetjmp>
-+#include <unistd.h>
-+
- #if V8_ENABLE_WEBASSEMBLY
- #include "src/debug/debug-wasm-objects-inl.h"
- #include "src/wasm/wasm-code-manager.h"
-@@ -157,7 +165,7 @@ namespace {
- void PrintHeapObjectHeaderWithoutMap(Tagged<HeapObject> object,
-                                      std::ostream& os, const char* id) {
-   PtrComprCageBase cage_base = GetPtrComprCageBase();
--  os << reinterpret_cast<void*>(object.ptr()) << ": [";
-+  os << AsHex::Address(object.ptr()) << ": [";
-   if (id != nullptr) {
-     os << id;
-   } else {
-@@ -3368,15 +3376,106 @@ void HeapObject::Print(Tagged<Object> obj, std::ostream& os) {
-   v8::internal::Print(obj, os);
- }
-
-+static sigjmp_buf g_jump_buffer;
-+static sigjmp_buf g_diagnostics_jump_buffer;
-+static volatile sig_atomic_t g_in_short_print_diagnostics = 0;
-+
-+void segfault_jumper(int signal_number) {
-+    (void)signal_number;
-+    if (g_in_short_print_diagnostics) {
-+        siglongjmp(g_diagnostics_jump_buffer, 1);
-+    }
-+    siglongjmp(g_jump_buffer, 1);
-+}
-+
-+void PrintV8AsmCurrentReadOnlyObjectBoundary(Tagged<HeapObject> object,
-+                                             std::ostream& os,
-+                                             ReadOnlyPageMetadata* page) {
-+  Address object_addr = object.address();
-+  if (!page->Contains(object_addr)) {
-+    os << " current_ro_object=outside_area";
-+    return;
-+  }
-+
-+  std::ios_base::fmtflags flags = os.flags();
-+  os << " area_offset=0x" << std::hex
-+     << static_cast<size_t>(object_addr - page->area_start());
-+  os.flags(flags);
-+
-+  Address cursor = page->area_start();
-+  Address end = page->area_end();
-+  while (cursor < end) {
-+    Tagged<HeapObject> current = HeapObject::FromAddress(cursor);
-+    int object_size = current->Size();
-+    int aligned_size = ALIGN_TO_ALLOCATION_ALIGNMENT(object_size);
-+    if (aligned_size <= 0) break;
-+    Address next = cursor + aligned_size;
-+    if (object_addr >= cursor && object_addr < next) {
-+      size_t current_offset =
-+          static_cast<size_t>(cursor - page->ChunkAddress());
-+      size_t current_end =
-+          static_cast<size_t>(next - page->ChunkAddress());
-+      size_t delta = static_cast<size_t>(object_addr - cursor);
-+      flags = os.flags();
-+      os << " current_ro_object=[0x" << std::hex << current_offset
-+         << ",0x" << current_end << ") delta=0x" << delta
-+         << " hit=" << (delta == 0 ? "start" : "inside");
-+      os.flags(flags);
-+      return;
-+    }
-+    cursor = next;
-+  }
-+  os << " current_ro_object=n/a";
-+}
-+
-+void PrintV8AsmShortPrintAddressDiagnostics(Tagged<HeapObject> object,
-+                                            std::ostream& os) {
-+  std::ios_base::fmtflags flags = os.flags();
-+  os << "; object_chunk_offset=0x" << std::hex
-+     << MemoryChunk::AddressToOffset(object.address())
-+     << " tagged_chunk_offset=0x"
-+     << MemoryChunk::AddressToOffset(object.ptr());
-+  os.flags(flags);
-+
-+  g_in_short_print_diagnostics = 1;
-+  if (sigsetjmp(g_diagnostics_jump_buffer, 1) != 0) {
-+    g_in_short_print_diagnostics = 0;
-+    os << " current_ro_object=diagnostics_failed";
-+    return;
-+  }
-+
-+  MemoryChunkMetadata* metadata = MemoryChunkMetadata::FromHeapObject(object);
-+  if (!metadata->Chunk()->InReadOnlySpace()) {
-+    g_in_short_print_diagnostics = 0;
-+    os << " current_ro_object=not_in_current_ro";
-+    return;
-+  }
-+  PrintV8AsmCurrentReadOnlyObjectBoundary(
-+      object, os, static_cast<ReadOnlyPageMetadata*>(metadata));
-+  g_in_short_print_diagnostics = 0;
-+}
-+
- void HeapObject::HeapObjectShortPrint(std::ostream& os) {
-   PtrComprCageBase cage_base = GetPtrComprCageBase();
-   os << AsHex::Address(this->ptr()) << " ";
-
-+  void (*old_handler)(int);
-+  old_handler = signal(SIGSEGV, segfault_jumper);
-+  if (sigsetjmp(g_jump_buffer, 1) != 0) {
-+    os << "<undefined: segmentfault, might outside scope";
-+    PrintV8AsmShortPrintAddressDiagnostics(*this, os);
-+    os << ">";
-+    signal(SIGSEGV, old_handler);
-+    return;
-+  }
-+
-+
-   if (IsString(*this, cage_base)) {
-     HeapStringAllocator allocator;
-     StringStream accumulator(&allocator);
-     Cast<String>(*this)->StringShortPrint(&accumulator);
-     os << accumulator.ToCString().get();
-+    signal(SIGSEGV, old_handler);
-     return;
-   }
-   if (IsJSObject(*this, cage_base)) {
-@@ -3384,6 +3483,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
-     StringStream accumulator(&allocator);
-     Cast<JSObject>(*this)->JSObjectShortPrint(&accumulator);
-     os << accumulator.ToCString().get();
-+    signal(SIGSEGV, old_handler);
-     return;
-   }
-
-@@ -3395,6 +3495,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
-   if (InstanceTypeChecker::IsTrustedObject(instance_type) &&
-       !OutsideSandboxOrInReadonlySpace(*this)) {
-     os << "<Invalid TrustedObject (outside trusted space)>\n";
-+    signal(SIGSEGV, old_handler);
-     return;
-   }
-
-@@ -3750,6 +3851,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
-       os << "<Other heap object (" << map()->instance_type() << ")>";
-       break;
-   }
-+  signal(SIGSEGV, old_handler);
- }
-
- void HeapNumber::HeapNumberShortPrint(std::ostream& os) {
+ 
+   static void PostForegroundTask(Isolate* isolate, std::unique_ptr<Task> task);
 diff --git a/src/disassembler/main.cc b/src/disassembler/main.cc
 new file mode 100644
-index 00000000000..e910ce9f5a8
+index 00000000000..b42fb5f3ec3
 --- /dev/null
 +++ b/src/disassembler/main.cc
-@@ -0,0 +1,958 @@
+@@ -0,0 +1,897 @@
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <fstream>
 +#include <string.h>
-+#include <vector>
 +
 +#include "include/libplatform/libplatform.h"
 +#include "include/v8-context.h"
@@ -358,10 +190,12 @@ index 00000000000..e910ce9f5a8
 +#include "include/v8-primitive.h"
 +#include "include/v8-script.h"
 +
-+#include "src/heap/read-only-spaces.h"
++#include "src/objects/code-inl.h"
++#include "src/objects/fixed-array-inl.h"
 +#include "src/objects/managed-inl.h"
 +#include "src/objects/literal-objects-inl.h"
 +#include "src/objects/objects-inl.h"
++#include "src/objects/shared-function-info-inl.h"
 +#include "src/flags/flags.h"
 +#include "src/snapshot/code-serializer.h"
 +#include "src/snapshot/snapshot.h"
@@ -371,6 +205,7 @@ index 00000000000..e910ce9f5a8
 +#include <csignal>
 +#include <csetjmp>
 +#include <set>
++#include <vector>
 +#include <unistd.h>
 +
 +
@@ -380,7 +215,7 @@ index 00000000000..e910ce9f5a8
 +                              bool best_effort = false)
 +        : isolate_(isolate), best_effort_(best_effort) {}
 +
-+    void Disassemble(v8::internal::Tagged<v8::internal::Object> start_obj) {
++    void Disassemble(v8::internal::Object start_obj) {
 +        // printf("before traversal\n");
 +        if (best_effort_) {
 +          void (*old_handler)(int);
@@ -394,9 +229,9 @@ index 00000000000..e910ce9f5a8
 +        PrintDiscoveredObjects();
 +    }
 +private:
-+    void DiscoverReachableObjects(v8::internal::Tagged<v8::internal::Object> obj) {
-+        if (v8::internal::IsHeapObject(obj)) {
-+            auto heap_obj = v8::internal::Cast<v8::internal::HeapObject>(obj);
++    void DiscoverReachableObjects(v8::internal::Object obj) {
++        if (obj.IsHeapObject()) {
++            auto heap_obj = v8::internal::HeapObject::cast(obj);
 +            if (!best_effort_) {
 +                Traverse(heap_obj);
 +                return;
@@ -415,7 +250,7 @@ index 00000000000..e910ce9f5a8
 +        }
 +    }
 +
-+    void Traverse(v8::internal::Tagged<v8::internal::HeapObject> obj) {
++    void Traverse(v8::internal::HeapObject obj) {
 +        // if compiled by node, sometimes the object will point to an address outside current bytecode scope,
 +        // which is normally located in snapshot_blob.bin (?).
 +        // if this happen, we are not able to read the data of the object, neither the type of the object.
@@ -423,7 +258,7 @@ index 00000000000..e910ce9f5a8
 +        {
 +          {
 +            // might works, place here just in case
-+            v8::internal::Tagged<v8::internal::Map> map_handle = obj->map();
++            v8::internal::Map map_handle = obj.map();
 +            if (map_handle.ptr() == v8::internal::kNullAddress) {
 +              // printf("wtf is going on\n");
 +              return;
@@ -441,7 +276,7 @@ index 00000000000..e910ce9f5a8
 +          {
 +            // works
 +            // some object might have forwarding address.
-+            v8::internal::MapWord map_word = obj->map_word(v8::kRelaxedLoad);
++            v8::internal::MapWord map_word = obj.map_word(v8::kRelaxedLoad);
 +            if (map_word.IsForwardingAddress()) {
 +                // printf("kRelaxedLoad\n");
 +                return;
@@ -459,118 +294,35 @@ index 00000000000..e910ce9f5a8
 +            return;
 +        }
 +
-+        if (v8::internal::IsBytecodeArray(obj)) {
-+            auto bytecode = v8::internal::Cast<v8::internal::BytecodeArray>(obj);
-+            auto consts = bytecode->constant_pool();
++        if (obj.IsBytecodeArray()) {
++            auto bytecode = v8::internal::BytecodeArray::cast(obj);
++            auto consts = bytecode.constant_pool();
 +            DiscoverReachableObjects(consts);
-+            for (int i = 0; i < consts->length(); i++) {
-+              DiscoverReachableObjects(consts->get(i));
++            for (int i = 0; i < consts.length(); i++) {
++              DiscoverReachableObjects(consts.get(i));
 +            }
-+        } else if (v8::internal::IsSharedFunctionInfo(obj)) {
-+            auto sfi = v8::internal::Cast<v8::internal::SharedFunctionInfo>(obj);
-+            if (sfi->HasBytecodeArray()) {
-+                DiscoverReachableObjects(sfi->GetBytecodeArray(isolate_));
++        } else if (obj.IsSharedFunctionInfo()) {
++            auto sfi = v8::internal::SharedFunctionInfo::cast(obj);
++            if (sfi.HasBytecodeArray()) {
++                DiscoverReachableObjects(sfi.GetBytecodeArray(isolate_));
 +            }
-+        } else if (v8::internal::IsFixedArray(obj)) {
-+            auto fixed_array = v8::internal::Cast<v8::internal::FixedArray>(obj);
-+            for (int i = 0; i < fixed_array->length(); ++i) {
-+                DiscoverReachableObjects(fixed_array->get(i));
++        } else if (obj.IsFixedArray()) {
++            auto fixed_array = v8::internal::FixedArray::cast(obj);
++            for (int i = 0; i < fixed_array.length(); ++i) {
++                DiscoverReachableObjects(fixed_array.get(i));
 +            }
-+        } else if (v8::internal::IsArrayBoilerplateDescription(obj)) {
-+            auto abd = v8::internal::Cast<v8::internal::ArrayBoilerplateDescription>(obj);
-+            DiscoverReachableObjects(abd->constant_elements());
-+        } else if (v8::internal::IsObjectBoilerplateDescription(obj)) {
-+            auto obd = v8::internal::Cast<v8::internal::ObjectBoilerplateDescription>(obj);
-+            for (int i = 0; i < obd->length(); i++) {
-+                DiscoverReachableObjects(obd->get(i));
++        } else if (obj.IsArrayBoilerplateDescription()) {
++            auto abd = v8::internal::ArrayBoilerplateDescription::cast(obj);
++            DiscoverReachableObjects(abd.constant_elements());
++        } else if (obj.IsObjectBoilerplateDescription()) {
++            auto obd = v8::internal::ObjectBoilerplateDescription::cast(obj);
++            for (int i = 0; i < obd.length(); i++) {
++                DiscoverReachableObjects(obd.get(i));
 +            }
 +        }
 +    }
 +    static void segfault_jumper(int signal_number) {
 +        siglongjmp(V8ObjectExplorer::jump_buffer_, 1);
-+    }
-+
-+    void PrintReadOnlyAddressDiagnostics(v8::internal::OFStream& os,
-+                                         v8::internal::Address tagged_addr) {
-+        using v8::internal::Address;
-+        using v8::internal::kHeapObjectTag;
-+        if (isolate_ == nullptr || tagged_addr == v8::internal::kNullAddress) {
-+            return;
-+        }
-+        Address object_addr = tagged_addr - kHeapObjectTag;
-+        v8::internal::ReadOnlySpace* read_only_space =
-+            isolate_->heap()->read_only_space();
-+        const auto& pages = read_only_space->pages();
-+        char buf[320];
-+        for (size_t i = 0; i < pages.size(); ++i) {
-+            const v8::internal::ReadOnlyPageMetadata* page = pages[i];
-+            if (!page->Contains(object_addr)) continue;
-+            size_t object_chunk_offset =
-+                static_cast<size_t>(object_addr - page->ChunkAddress());
-+            size_t tagged_chunk_offset =
-+                static_cast<size_t>(tagged_addr - page->ChunkAddress());
-+            size_t area_offset =
-+                static_cast<size_t>(object_addr - page->area_start());
-+            snprintf(buf, sizeof(buf),
-+                     " (ro_page=%zu object_chunk_offset=0x%zx "
-+                     "tagged_chunk_offset=0x%zx area_offset=0x%zx "
-+                     "page=[0x%llx,0x%llx))",
-+                     i, object_chunk_offset, tagged_chunk_offset, area_offset,
-+                     static_cast<unsigned long long>(page->area_start()),
-+                     static_cast<unsigned long long>(page->area_end()));
-+            os << buf;
-+            PrintCurrentReadOnlyObjectBoundary(os, read_only_space, page,
-+                                               object_addr);
-+            return;
-+        }
-+        snprintf(buf, sizeof(buf),
-+                 " (not in current read-only space; tagged_low16=0x%04llx "
-+                 "object_low16=0x%04llx)",
-+                 static_cast<unsigned long long>(tagged_addr & 0xffff),
-+                 static_cast<unsigned long long>(object_addr & 0xffff));
-+        os << buf;
-+    }
-+
-+    void PrintCurrentReadOnlyObjectBoundary(
-+        v8::internal::OFStream& os,
-+        const v8::internal::ReadOnlySpace* read_only_space,
-+        const v8::internal::ReadOnlyPageMetadata* page,
-+        v8::internal::Address object_addr) {
-+        using v8::internal::Address;
-+        Address cursor = page->area_start();
-+        Address end = page->area_end();
-+        while (cursor < end) {
-+            if (cursor == read_only_space->top() &&
-+                cursor != read_only_space->limit()) {
-+                cursor = read_only_space->limit();
-+                continue;
-+            }
-+            v8::internal::Tagged<v8::internal::HeapObject> current =
-+                v8::internal::HeapObject::FromAddress(cursor);
-+            int object_size = current->Size();
-+            int aligned_size = ALIGN_TO_ALLOCATION_ALIGNMENT(object_size);
-+            if (aligned_size <= 0) break;
-+            Address next = cursor + aligned_size;
-+            if (object_addr >= cursor && object_addr < next) {
-+                size_t current_offset =
-+                    static_cast<size_t>(cursor - page->ChunkAddress());
-+                size_t current_end =
-+                    static_cast<size_t>(next - page->ChunkAddress());
-+                size_t delta = static_cast<size_t>(object_addr - cursor);
-+                char buf[192];
-+                snprintf(buf, sizeof(buf),
-+                         " current_ro_object=[0x%zx,0x%zx) "
-+                         "delta=0x%zx hit=%s",
-+                         current_offset, current_end, delta,
-+                         delta == 0 ? "start" : "inside");
-+                os << buf;
-+                os << " current_ro_short=";
-+                v8::internal::ShortPrint(current, os);
-+                return;
-+            }
-+            cursor = next;
-+        }
-+        os << " current_ro_object=n/a";
 +    }
 +
 +    void PrintDiscoveredObjects() {
@@ -585,18 +337,15 @@ index 00000000000..e910ce9f5a8
 +            auto obj = pair.second;
 +            if (!best_effort_) {
 +              currently_printing_obj_addr_ = pair.first;
-+              v8::internal::Print(obj, os);
++              obj.Print(os);
 +              currently_printing_obj_addr_ = 0;
 +            } else if (sigsetjmp(jump_buffer_, 1) == 0) {
 +              currently_printing_obj_addr_ = pair.first;
-+              v8::internal::Print(obj, os);
++              obj.Print(os);
 +              currently_printing_obj_addr_ = 0;
 +            } else {
 +              fflush(stdout);
-+              os << std::endl << "!" <<v8::internal::AsHex::Address(currently_printing_obj_addr_) << ": segmentfault, disassemble stop";
-+              PrintReadOnlyAddressDiagnostics(
-+                  os, static_cast<v8::internal::Address>(currently_printing_obj_addr_));
-+              os << std::endl;
++              os << std::endl << "!" <<v8::internal::AsHex::Address(currently_printing_obj_addr_) << ": segmentfault, disassemble stop" << std::endl;
 +              currently_printing_obj_addr_ = 0;
 +            }
 +            fflush(stdout);
@@ -604,9 +353,7 @@ index 00000000000..e910ce9f5a8
 +        if (best_effort_) {
 +            for (const auto& addr : skipped_objects_) {
 +                os << std::endl << "!" << v8::internal::AsHex::Address(addr)
-+                   << ": segmentfault while discovering object, skipped";
-+                PrintReadOnlyAddressDiagnostics(os, addr);
-+                os << std::endl;
++                   << ": segmentfault while discovering object, skipped" << std::endl;
 +            }
 +            signal(SIGSEGV, old_handler);
 +        }
@@ -618,7 +365,7 @@ index 00000000000..e910ce9f5a8
 +    static volatile v8::internal::Address currently_discovering_obj_addr_;
 +    v8::internal::Isolate* isolate_;
 +    bool best_effort_;
-+    std::map<v8::internal::Address, v8::internal::Tagged<v8::internal::HeapObject>> discovered_objects_;
++    std::map<v8::internal::Address, v8::internal::HeapObject> discovered_objects_;
 +    std::set<v8::internal::Address> skipped_objects_;
 +};
 +volatile v8::internal::Address V8ObjectExplorer::currently_printing_obj_addr_ = 0;
@@ -628,41 +375,41 @@ index 00000000000..e910ce9f5a8
 +
 +// todo: do not disassemble duplicated memory address
 +static void disassemble(v8::internal::Isolate* isolate,
-+                                    v8::internal::Tagged<v8::internal::Object> obj) {
++                                    v8::internal::Object obj) {
 +
 +    v8::internal::OFStream os(stdout);
 +    // os << "->" << std::endl;
-+    v8::internal::Print(obj,os);
++    obj.Print(os);
 +
-+    if (v8::internal::IsBytecodeArray(obj)) {
-+      auto bytecode = v8::internal::Cast<v8::internal::BytecodeArray>(obj);
++    if (obj.IsBytecodeArray()) {
++      auto bytecode = v8::internal::BytecodeArray::cast(obj);
 +      // v8::internal::PrintF("0x%012llx: [BytecodeArray]\n", static_cast<unsigned long long>(bytecode.ptr()));
-+      // bytecode->Disassemble(os);
-+      auto consts = bytecode->constant_pool();
-+      for (int i = 0; i < consts->length(); i++) {
-+        auto inner = consts->get(i);
-+        if (v8::internal::IsHeapObject(inner)) {
-+          auto shared = v8::internal::Cast<v8::internal::HeapObject>(inner);
++      // bytecode.Disassemble(os);
++      auto consts = bytecode.constant_pool();
++      for (int i = 0; i < consts.length(); i++) {
++        auto inner = consts.get(i);
++        if (inner.IsHeapObject()) {
++          auto shared = v8::internal::HeapObject::cast(inner);
 +          disassemble(isolate,shared);
 +        }else {
 +          // smi
-+          // v8::internal::Print(inner,os);
++          // inner.Print(os);
 +        }
 +      }
 +    }
 +
-+    if (v8::internal::IsSharedFunctionInfo(obj)) {
-+        auto sfi = v8::internal::Cast<v8::internal::SharedFunctionInfo>(obj);
-+        if (sfi->HasBytecodeArray()) {
-+            disassemble(isolate, sfi->GetBytecodeArray(isolate));
++    if (obj.IsSharedFunctionInfo()) {
++        auto sfi = v8::internal::SharedFunctionInfo::cast(obj);
++        if (sfi.HasBytecodeArray()) {
++            disassemble(isolate, sfi.GetBytecodeArray(isolate));
 +        }
 +    }
 +
-+    if (v8::internal::IsFixedArray(obj)) {
-+        auto fixed_array = v8::internal::Cast<v8::internal::FixedArray>(obj);
-+        for (int i = 0; i < fixed_array->length(); ++i) {
-+            auto objn = fixed_array->get(i);
-+            if (v8::internal::IsHeapObject(objn)) {
++    if (obj.IsFixedArray()) {
++        auto fixed_array = v8::internal::FixedArray::cast(obj);
++        for (int i = 0; i < fixed_array.length(); ++i) {
++            auto objn = fixed_array.get(i);
++            if (objn.IsHeapObject()) {
 +              disassemble(isolate,objn);
 +            }else {
 +            // smi
@@ -670,21 +417,21 @@ index 00000000000..e910ce9f5a8
 +        }
 +    }
 +
-+    if (v8::internal::IsArrayBoilerplateDescription(obj)) {
-+      auto abd = v8::internal::Cast<v8::internal::ArrayBoilerplateDescription>(obj);
-+      disassemble(isolate,abd->constant_elements());
++    if (obj.IsArrayBoilerplateDescription()) {
++      auto abd = v8::internal::ArrayBoilerplateDescription::cast(obj);
++      disassemble(isolate,abd.constant_elements());
 +    }
 +
-+    if (v8::internal::IsObjectBoilerplateDescription(obj)) {
-+      auto obd = v8::internal::Cast<v8::internal::ObjectBoilerplateDescription>(obj);
-+      for (int i = 0; i < obd->capacity(); i++) {
-+        auto inner = obd->get(i);
-+        if (v8::internal::IsHeapObject(inner)) {
-+          auto shared = v8::internal::Cast<v8::internal::HeapObject>(inner);
++    if (obj.IsObjectBoilerplateDescription()) {
++      auto obd = v8::internal::ObjectBoilerplateDescription::cast(obj);
++      for (int i = 0; i < obd.length(); i++) {
++        auto inner = obd.get(i);
++        if (inner.IsHeapObject()) {
++          auto shared = v8::internal::HeapObject::cast(inner);
 +          disassemble(isolate,shared);
 +        }else {
 +          // smi
-+          // v8::internal::Print(inner,os);
++          // inner.Print(os);
 +        }
 +    }}
 +    // os << "<-" << std::endl;
@@ -738,7 +485,7 @@ index 00000000000..e910ce9f5a8
 +      read_u32_le(data, v8::internal::SerializedCodeData::kVersionHashOffset),
 +      read_u32_le(data, v8::internal::SerializedCodeData::kSourceHashOffset),
 +      read_u32_le(data, v8::internal::SerializedCodeData::kFlagHashOffset),
-+      read_u32_le(data, v8::internal::SerializedCodeData::kReadOnlySnapshotChecksumOffset),
++      0,
 +      read_u32_le(data, v8::internal::SerializedCodeData::kPayloadLengthOffset),
 +      read_u32_le(data, v8::internal::SerializedCodeData::kChecksumOffset),
 +  };
@@ -756,7 +503,7 @@ index 00000000000..e910ce9f5a8
 +      v8::internal::SerializedData::kMagicNumber,
 +      v8::internal::Version::Hash(),
 +      v8::internal::FlagList::Hash(),
-+      v8::internal::Snapshot::ExtractReadOnlySnapshotChecksum(isolate->snapshot_blob()),
++      0,
 +  };
 +}
 +
@@ -780,7 +527,6 @@ index 00000000000..e910ce9f5a8
 +  if (header.magic != expected.magic) return false;
 +  if (header.version_hash != expected.version_hash) return false;
 +  if (header.flags_hash != expected.flags_hash) return false;
-+  if (header.ro_snapshot_checksum != expected.ro_snapshot_checksum) return false;
 +  if (!cache_header_payload_is_plausible(header, data_size)) return false;
 +  return true;
 +}
@@ -798,9 +544,7 @@ index 00000000000..e910ce9f5a8
 +  fprintf(out, "  flags_hash: 0x%08x (expected 0x%08x)%s\n",
 +          header.flags_hash, expected.flags_hash,
 +          header.flags_hash == expected.flags_hash ? "" : " mismatch");
-+  fprintf(out, "  read_only_snapshot_checksum: 0x%08x (expected 0x%08x)%s\n",
-+          header.ro_snapshot_checksum, expected.ro_snapshot_checksum,
-+          header.ro_snapshot_checksum == expected.ro_snapshot_checksum ? "" : " mismatch");
++  fprintf(out, "  read_only_snapshot_checksum: n/a in this V8 cached-data header\n");
 +  fprintf(out, "  payload_length: %u (max %zu)%s\n",
 +          header.payload_length,
 +          cache_header_payload_max_size(data_size),
@@ -958,7 +702,7 @@ index 00000000000..e910ce9f5a8
 +                                          static_cast<int>(source_code.size()))
 +                         .ToLocalChecked();
 +
-+  v8::ScriptOrigin origin(v8::String::NewFromUtf8Literal(isolate, "v8utils-asm"));
++  v8::ScriptOrigin origin(isolate, v8::String::NewFromUtf8Literal(isolate, "v8utils-asm"));
 +  v8::Local<v8::Script> script;
 +  if (!v8::Script::Compile(context, src).ToLocal(&script)) {
 +    fprintf(stderr, "Failed to compile source\n");
@@ -1034,11 +778,11 @@ index 00000000000..e910ce9f5a8
 +
 +  v8::internal::AlignedCachedData cached_data(data.data(), static_cast<int>(data.size()));
 +  auto source = i_isolate->factory()->NewStringFromAsciiChecked("source");
-+  v8::internal::ScriptDetails script_details(source);
-+  v8::internal::MaybeDirectHandle<v8::internal::SharedFunctionInfo> maybe_sfi =
-+      v8::internal::CodeSerializer::Deserialize(i_isolate, &cached_data, source, script_details);
++  v8::internal::MaybeHandle<v8::internal::SharedFunctionInfo> maybe_sfi =
++      v8::internal::CodeSerializer::Deserialize(
++          i_isolate, &cached_data, source, v8::ScriptOriginOptions());
 +
-+  v8::internal::DirectHandle<v8::internal::SharedFunctionInfo> sfi_handle;
++  v8::internal::Handle<v8::internal::SharedFunctionInfo> sfi_handle;
 +  if (!maybe_sfi.ToHandle(&sfi_handle)) {
 +    fprintf(stderr, "Failed to deserialize shared function info (maybe incompatible version).\n");
 +    return 1;
@@ -1082,45 +826,33 @@ index 00000000000..e910ce9f5a8
 +
 +struct StartupOptions {
 +  const char* snapshot_blob = nullptr;
-+  bool valid = true;
++  int command_index = 1;
 +};
 +
-+void print_usage(const char* program) {
-+  fprintf(stderr,
-+          "Usage: %s [--snapshot_blob file] "
-+          "<asm|disasm|checkversion|version|build-args> ...\n",
-+          program);
-+}
-+
-+StartupOptions parse_startup_options(int argc, char* argv[],
-+                                     std::vector<char*>* command_argv) {
-+  StartupOptions options;
-+  command_argv->clear();
-+  command_argv->push_back(argv[0]);
-+  for (int i = 1; i < argc; ++i) {
-+    const char* arg = argv[i];
++bool parse_startup_options(int argc, char* argv[], StartupOptions* options) {
++  options->command_index = 1;
++  while (options->command_index < argc) {
++    const char* arg = argv[options->command_index];
 +    if (strcmp(arg, "--snapshot_blob") == 0) {
-+      if (i + 1 >= argc) {
++      if (options->command_index + 1 >= argc) {
 +        fprintf(stderr, "--snapshot_blob requires a file path\n");
-+        options.valid = false;
-+        return options;
++        return false;
 +      }
-+      options.snapshot_blob = argv[i + 1];
-+      ++i;
++      options->snapshot_blob = argv[options->command_index + 1];
++      options->command_index += 2;
 +      continue;
 +    }
++
 +    const char* snapshot_prefix = "--snapshot_blob=";
 +    size_t snapshot_prefix_len = strlen(snapshot_prefix);
 +    if (strncmp(arg, snapshot_prefix, snapshot_prefix_len) == 0) {
-+      options.snapshot_blob = arg + snapshot_prefix_len;
++      options->snapshot_blob = arg + snapshot_prefix_len;
++      options->command_index += 1;
 +      continue;
 +    }
-+    command_argv->push_back(argv[i]);
++    break;
 +  }
-+  if (command_argv->size() < 2) {
-+    options.valid = false;
-+  }
-+  return options;
++  return true;
 +}
 +
 +bool command_requests_force_incompatible(int argc, char* argv[]) {
@@ -1204,23 +936,62 @@ index 00000000000..e910ce9f5a8
 +}
 +
 +int main(int argc, char* argv[]) {
-+  if (argc < 2) {
-+    print_usage(argv[0]);
++  StartupOptions startup_options;
++  if (!parse_startup_options(argc, argv, &startup_options)) {
++    fprintf(stderr,
++            "Usage: %s [--snapshot_blob file] "
++            "<asm|disasm|checkversion|version|build-args> ...\n",
++            argv[0]);
++    return 1;
++  }
++  if (startup_options.command_index >= argc) {
++    fprintf(stderr,
++            "Usage: %s [--snapshot_blob file] "
++            "<asm|disasm|checkversion|version|build-args> ...\n",
++            argv[0]);
 +    return 1;
 +  }
 +
 +  std::vector<char*> command_argv;
-+  StartupOptions startup_options =
-+      parse_startup_options(argc, argv, &command_argv);
-+  if (!startup_options.valid) {
-+    print_usage(argv[0]);
++  command_argv.reserve(argc - startup_options.command_index + 1);
++  command_argv.push_back(argv[0]);
++  for (int i = startup_options.command_index; i < argc; ++i) {
++    command_argv.push_back(argv[i]);
++  }
++  std::vector<char*> filtered_argv;
++  filtered_argv.reserve(command_argv.size());
++  filtered_argv.push_back(command_argv[0]);
++  for (size_t i = 1; i < command_argv.size(); ++i) {
++    const char* arg = command_argv[i];
++    if (strcmp(arg, "--snapshot_blob") == 0) {
++      if (i + 1 >= command_argv.size()) {
++        fprintf(stderr, "--snapshot_blob requires a file path\n");
++        return 1;
++      }
++      startup_options.snapshot_blob = command_argv[i + 1];
++      ++i;
++      continue;
++    }
++    const char* snapshot_prefix = "--snapshot_blob=";
++    size_t snapshot_prefix_len = strlen(snapshot_prefix);
++    if (strncmp(arg, snapshot_prefix, snapshot_prefix_len) == 0) {
++      startup_options.snapshot_blob = arg + snapshot_prefix_len;
++      continue;
++    }
++    filtered_argv.push_back(command_argv[i]);
++  }
++  command_argv.swap(filtered_argv);
++  if (command_argv.size() < 2) {
++    fprintf(stderr,
++            "Usage: %s [--snapshot_blob file] "
++            "<asm|disasm|checkversion|version|build-args> ...\n",
++            argv[0]);
 +    return 1;
 +  }
-+
 +  int command_argc = static_cast<int>(command_argv.size());
-+  const char* cmd = command_argv[1];
-+  bool force_incompatible =
-+      command_requests_force_incompatible(command_argc, command_argv.data());
++  char** command_args = command_argv.data();
++
++  const char* cmd = command_args[1];
 +
 +  v8::V8::SetFlagsFromString("--no-lazy --no-flush-bytecode");
 +  v8::V8::InitializeICUDefaultLocation(argv[0]);
@@ -1233,11 +1004,9 @@ index 00000000000..e910ce9f5a8
 +    if (snapshot_version_mismatch) {
 +      setenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH", "1", 0);
 +    }
-+    setenv("V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH", "1", 0);
 +    v8::V8::InitializeExternalStartupDataFromFile(
 +        startup_options.snapshot_blob);
 +  } else {
-+    setenv("V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH", "1", 0);
 +    v8::V8::InitializeExternalStartupData(argv[0]);
 +  }
 +  std::unique_ptr<v8::Platform> platform = v8::platform::NewDefaultPlatform();
@@ -1264,11 +1033,11 @@ index 00000000000..e910ce9f5a8
 +      ret = 1;
 +      goto finish;
 +    }
-+    ret = do_checkversion(command_argv[2], isolate);
++    ret = do_checkversion(command_args[2], isolate);
 +    goto finish;
 +  }
 +  if (strcmp(cmd, "asm") == 0) {
-+    ret = do_asm(command_argc, command_argv.data(), isolate);
++    ret = do_asm(command_argc, command_args, isolate);
 +    goto finish;
 +  }
 +  if (strcmp(cmd, "disasm") == 0) {
@@ -1277,23 +1046,26 @@ index 00000000000..e910ce9f5a8
 +      ret = 1;
 +      goto finish;
 +    }
-+    force_incompatible = false;
++    bool force_incompatible = false;
 +    for (int i = 3; i < command_argc; ++i) {
-+      if (strcmp(command_argv[i], "--force-incompatible") == 0 ||
-+          strcmp(command_argv[i], "--best-effort") == 0) {
++      if (strcmp(command_args[i], "--force-incompatible") == 0 ||
++          strcmp(command_args[i], "--best-effort") == 0) {
 +        force_incompatible = true;
 +      } else {
-+        fprintf(stderr, "Unknown disasm option: %s\n", command_argv[i]);
++        fprintf(stderr, "Unknown disasm option: %s\n", command_args[i]);
 +        fprintf(stderr, "Usage: %s disasm file.jsc [--force-incompatible]\n", argv[0]);
 +        ret = 1;
 +        goto finish;
 +      }
 +    }
-+    ret = do_disasm(command_argv[2], isolate, force_incompatible);
++    ret = do_disasm(command_args[2], isolate, force_incompatible);
 +    goto finish;
 +  }
 +  fprintf(stderr, "Unknown command: %s\n", cmd);
-+  print_usage(argv[0]);
++  fprintf(stderr,
++          "Usage: %s [--snapshot_blob file] "
++          "<asm|disasm|checkversion|version|build-args> ...\n",
++          argv[0]);
 +  ret = 1;
 +finish:
 +  isolate->Dispose();
@@ -1302,59 +1074,175 @@ index 00000000000..e910ce9f5a8
 +  delete create_params.array_buffer_allocator;
 +  return ret;
 +}
-diff --git a/src/objects/bytecode-array.cc b/src/objects/bytecode-array.cc
-index 36f0a691db3..6a22b43ab1f 100644
---- a/src/objects/bytecode-array.cc
-+++ b/src/objects/bytecode-array.cc
-@@ -158,11 +158,6 @@ void BytecodeArray::Disassemble(Handle<BytecodeArray> handle,
-   }
-
-   os << "Constant pool (size = " << handle->constant_pool()->length() << ")\n";
--#ifdef OBJECT_PRINT
--  if (handle->constant_pool()->length() > 0) {
--    Print(handle->constant_pool(), os);
--  }
--#endif
-
-   os << "Handler Table (size = " << handle->handler_table()->length() << ")\n";
- #ifdef ENABLE_DISASSEMBLER
-@@ -181,6 +176,11 @@ void BytecodeArray::Disassemble(Handle<BytecodeArray> handle,
-     os << Brief(source_position_table) << std::endl;
-   }
- #endif
-+#ifdef OBJECT_PRINT
-+  if (handle->constant_pool()->length() > 0) {
-+    Print(handle->constant_pool(), os);
+diff --git a/src/objects/objects.cc b/src/objects/objects.cc
+index e13773d9af4..cc153d4c66d 100644
+--- a/src/objects/objects.cc
++++ b/src/objects/objects.cc
+@@ -5,6 +5,8 @@
+ #include "src/objects/objects.h"
+ 
+ #include <algorithm>
++#include <csetjmp>
++#include <csignal>
+ #include <cmath>
+ #include <memory>
+ #include <sstream>
+@@ -24,6 +26,8 @@
+ #include "src/builtins/builtins.h"
+ #include "src/codegen/compiler.h"
+ #include "src/common/globals.h"
++#include "src/heap/basic-memory-chunk.h"
++#include "src/heap/read-only-spaces.h"
+ #include "src/common/message-template.h"
+ #include "src/date/date.h"
+ #include "src/debug/debug.h"
+@@ -137,6 +141,84 @@
+ namespace v8 {
+ namespace internal {
+ 
++static sigjmp_buf g_heap_object_short_print_jump_buffer;
++static sigjmp_buf g_heap_object_short_print_diagnostics_jump_buffer;
++static volatile sig_atomic_t g_in_heap_object_short_print_diagnostics = 0;
++
++static void HeapObjectShortPrintSegfaultJumper(int signal_number) {
++  (void)signal_number;
++  if (g_in_heap_object_short_print_diagnostics) {
++    siglongjmp(g_heap_object_short_print_diagnostics_jump_buffer, 1);
 +  }
-+#endif
++  siglongjmp(g_heap_object_short_print_jump_buffer, 1);
++}
++
++static void PrintV8AsmCurrentReadOnlyObjectBoundary(HeapObject object,
++                                                    std::ostream& os,
++                                                    ReadOnlyPage* page) {
++  Address object_addr = object.address();
++  if (object_addr < page->area_start() || object_addr >= page->area_end()) {
++    os << " current_ro_object=outside_area";
++    return;
++  }
++
++  std::ios_base::fmtflags flags = os.flags();
++  os << " area_offset=0x" << std::hex
++     << static_cast<size_t>(object_addr - page->area_start());
++  os.flags(flags);
++
++  Address cursor = page->area_start();
++  Address end = page->area_end();
++  while (cursor < end) {
++    HeapObject current = HeapObject::FromAddress(cursor);
++    int object_size = current.Size();
++    int aligned_size = ALIGN_TO_ALLOCATION_ALIGNMENT(object_size);
++    if (aligned_size <= 0) break;
++    Address next = cursor + aligned_size;
++    if (object_addr >= cursor && object_addr < next) {
++      size_t current_offset =
++          static_cast<size_t>(cursor - page->address());
++      size_t current_end =
++          static_cast<size_t>(next - page->address());
++      size_t delta = static_cast<size_t>(object_addr - cursor);
++      flags = os.flags();
++      os << " current_ro_object=[0x" << std::hex << current_offset
++         << ",0x" << current_end << ") delta=0x" << delta
++         << " hit=" << (delta == 0 ? "start" : "inside");
++      os.flags(flags);
++      return;
++    }
++    cursor = next;
++  }
++  os << " current_ro_object=n/a";
++}
++
++static void PrintV8AsmShortPrintAddressDiagnostics(HeapObject object,
++                                                   std::ostream& os) {
++  BasicMemoryChunk* chunk = BasicMemoryChunk::FromHeapObject(object);
++  std::ios_base::fmtflags flags = os.flags();
++  os << "; object_chunk_offset=0x" << std::hex
++     << chunk->Offset(object.address())
++     << " tagged_chunk_offset=0x" << chunk->Offset(object.ptr());
++  os.flags(flags);
++
++  g_in_heap_object_short_print_diagnostics = 1;
++  if (sigsetjmp(g_heap_object_short_print_diagnostics_jump_buffer, 1) != 0) {
++    g_in_heap_object_short_print_diagnostics = 0;
++    os << " current_ro_object=diagnostics_failed";
++    return;
++  }
++
++  if (!chunk->InReadOnlySpace()) {
++    g_in_heap_object_short_print_diagnostics = 0;
++    os << " current_ro_object=not_in_current_ro";
++    return;
++  }
++  PrintV8AsmCurrentReadOnlyObjectBoundary(
++      object, os, static_cast<ReadOnlyPage*>(chunk));
++  g_in_heap_object_short_print_diagnostics = 0;
++}
++
+ ShouldThrow GetShouldThrow(Isolate* isolate, Maybe<ShouldThrow> should_throw) {
+   if (should_throw.IsJust()) return should_throw.FromJust();
+ 
+@@ -1836,11 +1918,22 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+   PtrComprCageBase cage_base = GetPtrComprCageBase();
+   os << AsHex::Address(this->ptr()) << " ";
+ 
++  void (*old_handler)(int) =
++      signal(SIGSEGV, HeapObjectShortPrintSegfaultJumper);
++  if (sigsetjmp(g_heap_object_short_print_jump_buffer, 1) != 0) {
++    os << "<undefined: segmentfault, might outside scope";
++    PrintV8AsmShortPrintAddressDiagnostics(*this, os);
++    os << ">";
++    signal(SIGSEGV, old_handler);
++    return;
++  }
++
+   if (IsString(cage_base)) {
+     HeapStringAllocator allocator;
+     StringStream accumulator(&allocator);
+     String::cast(*this).StringShortPrint(&accumulator);
+     os << accumulator.ToCString().get();
++    signal(SIGSEGV, old_handler);
+     return;
+   }
+   if (IsJSObject(cage_base)) {
+@@ -1848,6 +1941,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+     StringStream accumulator(&allocator);
+     JSObject::cast(*this).JSObjectShortPrint(&accumulator);
+     os << accumulator.ToCString().get();
++    signal(SIGSEGV, old_handler);
+     return;
+   }
+   switch (map(cage_base).instance_type()) {
+@@ -2153,6 +2247,7 @@ void HeapObject::HeapObjectShortPrint(std::ostream& os) {
+       os << "<Other heap object (" << map().instance_type() << ")>";
+       break;
+   }
++  signal(SIGSEGV, old_handler);
  }
-
- void BytecodeArray::CopyBytecodesTo(Tagged<BytecodeArray> to) {
+ 
+ void Struct::BriefPrintDetails(std::ostream& os) {}
 diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
-index 11ced93c085..dc7b8eb6246 100644
+index 8d7d8c0f369..efce2859d28 100644
 --- a/src/snapshot/code-serializer.cc
 +++ b/src/snapshot/code-serializer.cc
-@@ -763,10 +763,11 @@ SerializedCodeData::SerializedCodeData(const std::vector<uint8_t>* payload,
+@@ -650,9 +650,10 @@ SerializedCodeData::SerializedCodeData(const std::vector<byte>* payload,
+ 
  SerializedCodeSanityCheckResult SerializedCodeData::SanityCheck(
-     uint32_t expected_ro_snapshot_checksum,
      uint32_t expected_source_hash) const {
--  SerializedCodeSanityCheckResult result =
--      SanityCheckWithoutSource(expected_ro_snapshot_checksum);
+-  SerializedCodeSanityCheckResult result = SanityCheckWithoutSource();
 -  if (result != SerializedCodeSanityCheckResult::kSuccess) return result;
 -  return SanityCheckJustSource(expected_source_hash);
 +  return SerializedCodeSanityCheckResult::kSuccess;
-+  // SerializedCodeSanityCheckResult result =
-+  //     SanityCheckWithoutSource(expected_ro_snapshot_checksum);
++  // SerializedCodeSanityCheckResult result = SanityCheckWithoutSource();
 +  // if (result != SerializedCodeSanityCheckResult::kSuccess) return result;
 +  // return SanityCheckJustSource(expected_source_hash);
  }
-
+ 
  SerializedCodeSanityCheckResult SerializedCodeData::SanityCheckJustSource(
-@@ -780,37 +781,37 @@ SerializedCodeSanityCheckResult SerializedCodeData::SanityCheckJustSource(
-
- SerializedCodeSanityCheckResult SerializedCodeData::SanityCheckWithoutSource(
-     uint32_t expected_ro_snapshot_checksum) const {
--  if (size_ < kHeaderSize) {
+@@ -666,32 +667,32 @@ SerializedCodeSanityCheckResult SerializedCodeData::SanityCheckJustSource(
+ 
+ SerializedCodeSanityCheckResult SerializedCodeData::SanityCheckWithoutSource()
+     const {
+-  if (this->size_ < kHeaderSize) {
 -    return SerializedCodeSanityCheckResult::kInvalidHeader;
 -  }
 -  uint32_t magic_number = GetMagicNumber();
@@ -1369,13 +1257,8 @@ index 11ced93c085..dc7b8eb6246 100644
 -  if (flags_hash != FlagList::Hash()) {
 -    return SerializedCodeSanityCheckResult::kFlagsMismatch;
 -  }
--  uint32_t ro_snapshot_checksum =
--      GetHeaderValue(kReadOnlySnapshotChecksumOffset);
--  if (ro_snapshot_checksum != expected_ro_snapshot_checksum) {
--    return SerializedCodeSanityCheckResult::kReadOnlySnapshotChecksumMismatch;
--  }
 -  uint32_t payload_length = GetHeaderValue(kPayloadLengthOffset);
--  uint32_t max_payload_length = size_ - kHeaderSize;
+-  uint32_t max_payload_length = this->size_ - kHeaderSize;
 -  if (payload_length > max_payload_length) {
 -    return SerializedCodeSanityCheckResult::kLengthMismatch;
 -  }
@@ -1385,7 +1268,7 @@ index 11ced93c085..dc7b8eb6246 100644
 -      return SerializedCodeSanityCheckResult::kChecksumMismatch;
 -    }
 -  }
-+  // if (size_ < kHeaderSize) {
++  // if (this->size_ < kHeaderSize) {
 +  //   return SerializedCodeSanityCheckResult::kInvalidHeader;
 +  // }
 +  // uint32_t magic_number = GetMagicNumber();
@@ -1400,13 +1283,8 @@ index 11ced93c085..dc7b8eb6246 100644
 +  // if (flags_hash != FlagList::Hash()) {
 +  //   return SerializedCodeSanityCheckResult::kFlagsMismatch;
 +  // }
-+  // uint32_t ro_snapshot_checksum =
-+  //     GetHeaderValue(kReadOnlySnapshotChecksumOffset);
-+  // if (ro_snapshot_checksum != expected_ro_snapshot_checksum) {
-+  //   return SerializedCodeSanityCheckResult::kReadOnlySnapshotChecksumMismatch;
-+  // }
 +  // uint32_t payload_length = GetHeaderValue(kPayloadLengthOffset);
-+  // uint32_t max_payload_length = size_ - kHeaderSize;
++  // uint32_t max_payload_length = this->size_ - kHeaderSize;
 +  // if (payload_length > max_payload_length) {
 +  //   return SerializedCodeSanityCheckResult::kLengthMismatch;
 +  // }
@@ -1418,46 +1296,46 @@ index 11ced93c085..dc7b8eb6246 100644
 +  // }
    return SerializedCodeSanityCheckResult::kSuccess;
  }
-
+ 
 diff --git a/src/snapshot/deserializer.cc b/src/snapshot/deserializer.cc
-index 114cb45c3a7..19ca8abd216 100644
+index 29596882f87..310a92370c3 100644
 --- a/src/snapshot/deserializer.cc
 +++ b/src/snapshot/deserializer.cc
-@@ -344,7 +344,7 @@ Deserializer<IsolateT>::Deserializer(IsolateT* isolate,
+@@ -213,7 +213,7 @@ Deserializer<IsolateT>::Deserializer(IsolateT* isolate,
  #ifdef DEBUG
    num_api_references_ = GetNumApiReferences(isolate);
  #endif  // DEBUG
 -  CHECK_EQ(magic_number_, SerializedData::kMagicNumber);
 +  // CHECK_EQ(magic_number_, SerializedData::kMagicNumber);
  }
-
+ 
  template <typename IsolateT>
 diff --git a/src/snapshot/snapshot.cc b/src/snapshot/snapshot.cc
-index 4a3f6bdaf88..118a88c6b59 100644
+index 8b439b8ab5d..5cf55c409e9 100644
 --- a/src/snapshot/snapshot.cc
 +++ b/src/snapshot/snapshot.cc
-@@ -26,6 +26,8 @@
+@@ -20,6 +20,8 @@
  #include "src/snapshot/startup-serializer.h"
  #include "src/utils/memcopy.h"
  #include "src/utils/version.h"
 +#include <cstdlib>
 +#include <cstring>
-
+ 
  #ifdef V8_SNAPSHOT_COMPRESSION
  #include "src/snapshot/snapshot-compression.h"
-@@ -130,6 +132,11 @@ class SnapshotImpl : public AllStatic {
+@@ -112,6 +114,11 @@ class SnapshotImpl : public AllStatic {
    }
  };
-
+ 
 +bool V8AsmAllowsSnapshotVersionMismatch() {
 +  const char* value = std::getenv("V8ASM_ALLOW_SNAPSHOT_VERSION_MISMATCH");
 +  return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
 +}
 +
  }  // namespace
-
+ 
  SnapshotData MaybeDecompress(Isolate* isolate,
-@@ -745,6 +752,17 @@ void SnapshotImpl::CheckVersion(const v8::StartupData* data) {
+@@ -725,6 +732,17 @@ void SnapshotImpl::CheckVersion(const v8::StartupData* data) {
      CHECK_LT(kVersionStringOffset + kVersionStringLength,
               static_cast<uint32_t>(data->raw_size));
      Version::GetString(base::Vector<char>(version, kVersionStringLength));
@@ -1475,117 +1353,3 @@ index 4a3f6bdaf88..118a88c6b59 100644
      FATAL(
          "Version mismatch between V8 binary and snapshot.\n"
          "#   V8 binary version: %.*s\n"
-diff --git a/src/snapshot/startup-deserializer.cc b/src/snapshot/startup-deserializer.cc
-index 30c6ca93d5c..7b67a10148f 100644
---- a/src/snapshot/startup-deserializer.cc
-+++ b/src/snapshot/startup-deserializer.cc
-@@ -14,9 +14,22 @@
- #include "src/objects/oddball.h"
- #include "src/roots/roots-inl.h"
- 
-+#include <cstdlib>
-+#include <cstring>
-+
- namespace v8 {
- namespace internal {
- 
-+namespace {
-+
-+bool V8AsmAllowsExternalReferenceMismatch() {
-+  const char* value =
-+      std::getenv("V8ASM_ALLOW_SNAPSHOT_EXTERNAL_REFERENCE_MISMATCH");
-+  return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
-+}
-+
-+}  // namespace
-+
- void StartupDeserializer::DeserializeIntoIsolate() {
-   TRACE_EVENT0("v8", "V8.DeserializeIsolate");
-   RCS_SCOPE(isolate(), RuntimeCallCounterId::kDeserializeIsolate);
-@@ -96,12 +109,60 @@ void StartupDeserializer::DeserializeAndCheckExternalReferenceTable() {
-   // Verify that any external reference entries that were deduplicated in the
-   // serializer are also deduplicated in this isolate.
-   ExternalReferenceTable* table = isolate()->external_reference_table();
-+  bool allow_mismatch = V8AsmAllowsExternalReferenceMismatch();
-+  const uint32_t current_table_size = ExternalReferenceTable::kSize;
-+  const uint32_t snapshot_table_size = SnapshotExternalReferenceTableSize();
-+  const uint32_t current_end =
-+      ExternalReferenceTable::kSizeIsolateIndependent;
-+  uint32_t snapshot_end = current_end;
-+  if (allow_mismatch && snapshot_table_size != current_table_size) {
-+    int64_t table_delta = static_cast<int64_t>(current_table_size) -
-+                          static_cast<int64_t>(snapshot_table_size);
-+    int64_t inferred_end = static_cast<int64_t>(current_end) - table_delta;
-+    if (inferred_end >= 0 && inferred_end < (1LL << 30)) {
-+      snapshot_end = static_cast<uint32_t>(inferred_end);
-+      PrintF(
-+          "v8asm: using snapshot external reference table size %u "
-+          "(current %u), inferred startup sentinel %u (current %u)\n",
-+          snapshot_table_size, current_table_size, snapshot_end, current_end);
-+    }
-+  }
-+  int mismatch_count = 0;
-   while (true) {
-     uint32_t index = source()->GetUint30();
--    if (index == ExternalReferenceTable::kSizeIsolateIndependent) break;
-+    if (index == current_end || (allow_mismatch && index == snapshot_end)) {
-+      break;
-+    }
-     uint32_t encoded_index = source()->GetUint30();
--    CHECK_EQ(table->address(index), table->address(encoded_index));
-+    if (index >= current_end ||
-+        encoded_index >= static_cast<uint32_t>(ExternalReferenceTable::kSize)) {
-+      if (!allow_mismatch) {
-+        CHECK_LT(index, current_end);
-+        CHECK_LT(encoded_index,
-+                 static_cast<uint32_t>(ExternalReferenceTable::kSize));
-+      }
-+      ++mismatch_count;
-+      continue;
-+    }
-+    Address address = table->address(index);
-+    Address encoded_address = table->address(encoded_index);
-+    if (address != encoded_address) {
-+      if (!allow_mismatch) {
-+        CHECK_EQ(address, encoded_address);
-+      }
-+      ++mismatch_count;
-+    }
-   }
-+  if (allow_mismatch && mismatch_count > 0) {
-+    PrintF("v8asm: ignored %d startup external reference alias mismatches\n",
-+           mismatch_count);
-+  }
-+}
-+
-+uint32_t StartupDeserializer::SnapshotExternalReferenceTableSize() const {
-+  const uint32_t magic_base =
-+      SerializedData::kMagicNumber ^ ExternalReferenceTable::kSize;
-+  return snapshot_magic_number_ ^ magic_base;
- }
- 
- void StartupDeserializer::LogNewMapEvents() {
-diff --git a/src/snapshot/startup-deserializer.h b/src/snapshot/startup-deserializer.h
-index 60ad43d5b54..967a845d13b 100644
---- a/src/snapshot/startup-deserializer.h
-+++ b/src/snapshot/startup-deserializer.h
-@@ -18,7 +18,8 @@ class StartupDeserializer final : public Deserializer<Isolate> {
-                                const SnapshotData* startup_data,
-                                bool can_rehash)
-       : Deserializer(isolate, startup_data->Payload(),
--                     startup_data->GetMagicNumber(), false, can_rehash) {}
-+                     startup_data->GetMagicNumber(), false, can_rehash),
-+        snapshot_magic_number_(startup_data->GetMagicNumber()) {}
- 
-   // Deserialize the snapshot into an empty heap.
-   void DeserializeIntoIsolate();
-@@ -27,6 +28,9 @@ class StartupDeserializer final : public Deserializer<Isolate> {
-   void FlushICache();
-   void LogNewMapEvents();
-   void DeserializeAndCheckExternalReferenceTable();
-+  uint32_t SnapshotExternalReferenceTableSize() const;
-+
-+  uint32_t snapshot_magic_number_;
- };
- 
- }  // namespace internal
