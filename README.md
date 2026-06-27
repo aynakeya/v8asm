@@ -264,6 +264,17 @@ VERSION_MATRIX_SNAPSHOT_BLOB=v8context/v8_context_snapshot.bin \
   tests/decomp_rounds/run_version_matrix.sh
 ```
 
+Use the patch coverage audit before switching V8 branches or claiming that the
+cross-version matrix is complete:
+
+```bash
+python3 tests/decomp_rounds/audit_patch_coverage.py
+```
+
+The default mode reports current gaps but exits 0. Use `--strict` only when the
+expected end state is that every listed patch family has both node-style and
+Electron-style cached binaries.
+
 ## v8 patch variants
 
 - `v8patch/v8asm.patch`: current 13.6-oriented patch, verified on

@@ -287,3 +287,25 @@ v8asm.13.4.114.21.node.x64.release ... asm ok | strict_disasm ok | decompile ok 
 warnings: 0
 failures: 0
 ```
+
+## 2026-06-28 Patch Coverage Audit Helper
+
+Added `tests/decomp_rounds/audit_patch_coverage.py` to avoid confusing stale
+GN output directories with compiled v8asm evidence. The script reports, per
+patch family, which cached binaries cover node-style and Electron-style modes,
+which visible V8 out directories still contain a built `v8asm`, and which out
+directories only contain build metadata.
+
+Current non-strict audit output identifies these remaining coverage gaps:
+
+```text
+v8asm-11.3.patch: missing electron cache
+v8asm-11.4.patch: missing node cache
+v8asm-11.9.patch: missing node cache, missing electron cache
+v8asm-12.9.patch: missing node cache, missing electron cache
+```
+
+It also shows that several older V8 out directories such as
+`v8asm.11.9.x64.release`, `v8asm.12.9.x64.release`, and plain
+`v8asm.13.4.x64.release` currently have `args.gn` but no executable `v8asm`,
+so they cannot be used as compile evidence without rebuilding.

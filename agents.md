@@ -131,10 +131,15 @@ bin cache 约束：
 - 做版本矩阵或提交前先跑：
 
   ```bash
+  python3 tests/decomp_rounds/audit_patch_coverage.py
   python3 tests/decomp_rounds/check_bin_cache.py
   python3 tests/decomp_rounds/check_patch_text.py
   python3 tests/decomp_rounds/check_electron_snapshot_round.py
   ```
+
+  `audit_patch_coverage.py` 默认只报告缺口，不作为通过门禁。只有在真正准备
+  声称所有 patch 的 node/electron 双模式都覆盖时，才用 `--strict` 并要求
+  它退出 0。
 
 轻量版本矩阵：
 
