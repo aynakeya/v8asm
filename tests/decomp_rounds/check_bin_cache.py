@@ -30,10 +30,22 @@ def sha256(path: Path) -> str:
 
 
 def snapshot_version(path: Path) -> str:
-    # Newer V8 snapshots keep the version string at offset 16. Older snapshots
-    # may use a different header shape; callers should treat this as a hint.
-    data = path.read_bytes()[16 : 16 + 96]
-    return data.split(b"\0", 1)[0].decode("latin1", "replace")
+    # Keep this in sync with v8patch/main.cc. V8's startup snapshot header
+    # moved across major versions, so a single hard-coded offset can turn a
+    # same-build snapshot into a misleading cross-version hint.
+    blob = path.read_bytes()
+    for offset in (16, 12, 8):
+        data = blob[offset : offset + 64]
+        hint = data.split(b"\0", 1)[0].decode("latin1", "replace")
+        if is_plausible_snapshot_version(hint):
+            return hint
+    return ""
+
+
+def is_plausible_snapshot_version(hint: str) -> bool:
+    if not hint or not hint[0].isdigit() or "." not in hint:
+        return False
+    return all(c.isalnum() or c in ".-+_" for c in hint)
 
 
 def collect_known_snapshots(v8_out: Path, electron_cache: Path) -> dict[str, list[str]]:

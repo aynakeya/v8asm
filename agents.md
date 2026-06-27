@@ -113,7 +113,10 @@ bin cache 约束：
   `fixed_offset` 崩溃是 read-only snapshot 的 `V8_STATIC_ROOTS` 编译开关不
   匹配，不是 cached-data header 问题。需要按实际 snapshot 单独编译
   `v8_enable_static_roots=true` 或 `false` 的 v8asm 做 best-effort probe，
-  不能把这个特殊 binary 混进默认 bin cache。13.2 的 no-static-roots 特殊
+  不能用 monkey patch 绕这个 V8 header/layout 检查。13.2 / Electron 34.3.0
+  的真实 snapshot 当前验证应使用 normal `v8_enable_static_roots=true` cache；
+  no-static-roots cache 是反向探针，在 Electron 34.3.0 上会以
+  `Check failed: false == fixed_offset` 失败。13.2 的 no-static-roots 特殊
   cache 目录使用
   `tests/decomp_rounds/bin_cache/v8asm.13.2.152.41.electron.nostaticroots.x64.release/`；
   Atom 13.4 context snapshot 对应的 static-roots 特殊 cache 目录使用
@@ -122,6 +125,11 @@ bin cache 约束：
   `tests/decomp_rounds/bin_cache/v8asm.13.2.152.41.node.x64.release/`；对应 V8
   out 目录是
   `/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.13.2.152.41.node.x64.release`，
+  build args 为 `v8_enable_pointer_compression=false v8_enable_sandbox=false`。
+- 11.4 Node-style cache 目录使用
+  `tests/decomp_rounds/bin_cache/v8asm.11.4.183.14.node.x64.release/`；对应 V8
+  out 目录是
+  `/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.11.4.183.14.node.x64.release`，
   build args 为 `v8_enable_pointer_compression=false v8_enable_sandbox=false`。
 - 13.4 Node-style cache 目录使用
   `tests/decomp_rounds/bin_cache/v8asm.13.4.114.21.node.x64.release/`；对应 V8

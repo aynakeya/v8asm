@@ -205,8 +205,11 @@ snapshot was serialized with fixed read-only roots. Build a matching
 `v8_enable_static_roots=true` or `false` v8asm variant and treat it as a
 best-effort snapshot-specific probe rather than patching over the cached-data
 header checks.
-For the 13.2 Electron line, keep the normal Electron build for official
-Electron 34.3.0 snapshots, and build the non-static-roots probe separately:
+For official Electron 34.3.0 snapshots (`13.2.152.41-electron.0`), the normal
+13.2 Electron build with `v8_enable_static_roots=true` is the matching path.
+The non-static-roots build is kept only as a best-effort probe for snapshots
+that fail in the opposite direction; it is expected to abort on Electron 34.3.0
+with `Check failed: false == fixed_offset`.
 
 ```bash
 cd /home/aynakeya/workspace/tmp/v8test
@@ -218,6 +221,13 @@ autoninja -j10 -C out/v8asm.13.2.152.41.electron.nostaticroots.x64.release v8asm
 
 The cached special probe, when present, lives at
 `tests/decomp_rounds/bin_cache/v8asm.13.2.152.41.electron.nostaticroots.x64.release/`.
+The focused Electron validation command is:
+
+```bash
+python3 tests/decomp_rounds/check_electron_snapshot_round.py \
+  --v8asm tests/decomp_rounds/bin_cache/v8asm.13.2.152.41.electron.x64.release/v8asm
+```
+
 For the Atom 13.4 context snapshot in `v8context/v8_context_snapshot.bin`, the
 matching best-effort build is the explicit static-roots Electron variant:
 

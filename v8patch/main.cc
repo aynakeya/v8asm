@@ -792,8 +792,32 @@ bool command_requests_force_incompatible(int argc, char* argv[]) {
   return false;
 }
 
-constexpr size_t kV8AsmSnapshotVersionOffset = 16;
 constexpr size_t kV8AsmSnapshotVersionLength = 64;
+constexpr size_t kV8AsmSnapshotVersionOffsets[] = {16, 12, 8};
+
+bool is_plausible_snapshot_version(const char* version) {
+  if (version[0] < '0' || version[0] > '9') {
+    return false;
+  }
+  bool saw_dot = false;
+  for (size_t i = 0; i < kV8AsmSnapshotVersionLength && version[i] != '\0';
+       ++i) {
+    char c = version[i];
+    if (c >= '0' && c <= '9') {
+      continue;
+    }
+    if (c == '.') {
+      saw_dot = true;
+      continue;
+    }
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+        c == '-' || c == '+' || c == '_') {
+      continue;
+    }
+    return false;
+  }
+  return saw_dot;
+}
 
 bool read_snapshot_version(const char* path,
                            char version[kV8AsmSnapshotVersionLength + 1]) {
@@ -805,9 +829,21 @@ bool read_snapshot_version(const char* path,
     return false;
   }
   bool ok = false;
-  if (fseek(file, static_cast<long>(kV8AsmSnapshotVersionOffset), SEEK_SET) == 0) {
-    ok = fread(version, 1, kV8AsmSnapshotVersionLength, file) ==
-         kV8AsmSnapshotVersionLength;
+  char candidate[kV8AsmSnapshotVersionLength + 1];
+  for (size_t offset : kV8AsmSnapshotVersionOffsets) {
+    memset(candidate, 0, sizeof(candidate));
+    if (fseek(file, static_cast<long>(offset), SEEK_SET) != 0) {
+      continue;
+    }
+    if (fread(candidate, 1, kV8AsmSnapshotVersionLength, file) !=
+        kV8AsmSnapshotVersionLength) {
+      continue;
+    }
+    if (is_plausible_snapshot_version(candidate)) {
+      memcpy(version, candidate, kV8AsmSnapshotVersionLength + 1);
+      ok = true;
+      break;
+    }
   }
   if (!ok) {
     fprintf(stderr, "Failed to read snapshot version from '%s'\n", path);
