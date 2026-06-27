@@ -351,7 +351,7 @@ new file mode 100644
 index 00000000000..35318605049
 --- /dev/null
 +++ b/src/disassembler/main.cc
-@@ -0,0 +1,886 @@
+@@ -0,0 +1,891 @@
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <fstream>
@@ -996,6 +996,11 @@ index 00000000000..35318605049
 +  #else
 +  printf("v8_enable_pointer_compression=false\n");
 +  #endif
++  #ifdef V8_STATIC_ROOTS
++  printf("v8_enable_static_roots=true\n");
++  #else
++  printf("v8_enable_static_roots=false\n");
++  #endif
 +}
 +
 +struct StartupOptions {
@@ -1122,6 +1127,15 @@ index 00000000000..35318605049
 +  }
 +
 +  const char* cmd = argv[startup_options.command_index];
++  if (strcmp(cmd, "version") == 0) {
++    printf("%s\n", v8::V8::GetVersion());
++    return 0;
++  }
++  if (strcmp(cmd, "build-args") == 0) {
++    print_compiled_args();
++    return 0;
++  }
++
 +  std::vector<char*> command_argv;
 +  command_argv.reserve(argc - startup_options.command_index + 1);
 +  command_argv.push_back(argv[0]);
@@ -1185,15 +1199,6 @@ index 00000000000..35318605049
 +  v8::Isolate* isolate = v8::Isolate::New(create_params);
 +
 +  int ret = 0;
-+  if (strcmp(cmd, "version") == 0) {
-+    printf("%s\n", v8::V8::GetVersion());
-+    ret = 0;
-+    goto finish;
-+  }
-+  if (strcmp(cmd, "build-args") == 0) {
-+    print_compiled_args();
-+    goto finish;
-+  }
 +  if (strcmp(cmd, "checkversion") == 0) {
 +    if (command_argc < 3) {
 +      fprintf(stderr, "Usage: %s checkversion file.jsc\n", argv[0]);

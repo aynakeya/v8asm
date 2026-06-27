@@ -732,6 +732,11 @@ void print_compiled_args() {
   #else
   printf("v8_enable_pointer_compression=false\n");
   #endif
+  #ifdef V8_STATIC_ROOTS
+  printf("v8_enable_static_roots=true\n");
+  #else
+  printf("v8_enable_static_roots=false\n");
+  #endif
 }
 
 struct StartupOptions {
@@ -873,6 +878,15 @@ int main(int argc, char* argv[]) {
 
   int command_argc = static_cast<int>(command_argv.size());
   const char* cmd = command_argv[1];
+  if (strcmp(cmd, "version") == 0) {
+    printf("%s\n", v8::V8::GetVersion());
+    return 0;
+  }
+  if (strcmp(cmd, "build-args") == 0) {
+    print_compiled_args();
+    return 0;
+  }
+
   bool force_incompatible =
       command_requests_force_incompatible(command_argc, command_argv.data());
 
@@ -904,15 +918,6 @@ int main(int argc, char* argv[]) {
   v8::Isolate* isolate = v8::Isolate::New(create_params);
 
   int ret = 0;
-  if (strcmp(cmd, "version") == 0) {
-    printf("%s\n", v8::V8::GetVersion());
-    ret = 0;
-    goto finish;
-  }
-  if (strcmp(cmd, "build-args") == 0) {
-    print_compiled_args();
-    goto finish;
-  }
   if (strcmp(cmd, "checkversion") == 0) {
     if (command_argc < 3) {
       fprintf(stderr, "Usage: %s checkversion file.jsc\n", argv[0]);

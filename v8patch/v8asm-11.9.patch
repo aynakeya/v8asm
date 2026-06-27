@@ -348,7 +348,7 @@ new file mode 100644
 index 00000000000..3b1eb94f032
 --- /dev/null
 +++ b/src/disassembler/main.cc
-@@ -0,0 +1,896 @@
+@@ -0,0 +1,901 @@
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <fstream>
@@ -993,6 +993,11 @@ index 00000000000..3b1eb94f032
 +  #else
 +  printf("v8_enable_pointer_compression=false\n");
 +  #endif
++  #ifdef V8_STATIC_ROOTS
++  printf("v8_enable_static_roots=true\n");
++  #else
++  printf("v8_enable_static_roots=false\n");
++  #endif
 +}
 +
 +struct StartupOptions {
@@ -1164,6 +1169,15 @@ index 00000000000..3b1eb94f032
 +
 +  const char* cmd = command_args[1];
 +
++  if (strcmp(cmd, "version") == 0) {
++    printf("%s\n", v8::V8::GetVersion());
++    return 0;
++  }
++  if (strcmp(cmd, "build-args") == 0) {
++    print_compiled_args();
++    return 0;
++  }
++
 +  v8::V8::SetFlagsFromString("--no-lazy --no-flush-bytecode");
 +  v8::V8::InitializeICUDefaultLocation(argv[0]);
 +  if (startup_options.snapshot_blob != nullptr) {
@@ -1189,15 +1203,6 @@ index 00000000000..3b1eb94f032
 +  v8::Isolate* isolate = v8::Isolate::New(create_params);
 +
 +  int ret = 0;
-+  if (strcmp(cmd, "version") == 0) {
-+    printf("%s\n", v8::V8::GetVersion());
-+    ret = 0;
-+    goto finish;
-+  }
-+  if (strcmp(cmd, "build-args") == 0) {
-+    print_compiled_args();
-+    goto finish;
-+  }
 +  if (strcmp(cmd, "checkversion") == 0) {
 +    if (command_argc < 3) {
 +      fprintf(stderr, "Usage: %s checkversion file.jsc\n", argv[0]);

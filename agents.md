@@ -98,6 +98,31 @@ tests/decomp_rounds/run_round.sh
 snapshot 时，bytenode 的 `checkversion` 和 forced disasm 都会走
 `--snapshot_blob ... --force-incompatible`，避免只在反汇编阶段加载 snapshot。
 
+bin cache 约束：
+
+- `tests/decomp_rounds/bin_cache/*/snapshot_blob.bin` 必须来自对应 v8asm
+  build output 目录生成的 `snapshot_blob.bin`，不能放 Electron/Node/Chromium
+  release 或应用目录提供的 snapshot。
+- Electron/Node/app snapshot 只能作为外部测试输入，通过
+  `ROUND_SNAPSHOT_BLOB`、`VERSION_MATRIX_SNAPSHOT_BLOB` 或命令行
+  `--snapshot_blob ...` 显式传入。
+- `v8_context_snapshot.bin` 不放进 bin cache。需要测试时放在外部 context
+  目录，并确认它的版本头和目标 v8asm 的 V8 baseline 一致。
+- Electron release 同时可能有 `snapshot_blob.bin` 和
+  `v8_context_snapshot.bin`；验证 Electron/bytenode `.jsc` 时两个都要测。
+  `fixed_offset` 崩溃是 read-only snapshot 的 `V8_STATIC_ROOTS` 编译开关不
+  匹配，不是 cached-data header 问题。需要单独编译
+  `v8_enable_static_roots=false` 的 v8asm 做 best-effort probe，不能把这个
+  特殊 binary 混进默认 bin cache。13.2 的特殊 cache 目录使用
+  `tests/decomp_rounds/bin_cache/v8asm.13.2.152.41.electron.nostaticroots.x64.release/`。
+- 做版本矩阵或提交前先跑：
+
+  ```bash
+  python3 tests/decomp_rounds/check_bin_cache.py
+  python3 tests/decomp_rounds/check_patch_text.py
+  python3 tests/decomp_rounds/check_electron_snapshot_round.py
+  ```
+
 轻量版本矩阵：
 
 ```bash
@@ -171,3 +196,28 @@ tests/decomp_rounds/run_version_matrix.sh
   - bytenode 路径是否出现新的 `disasm failed`
 - 改动优先保持“语义正确 > 可读性美化”。
 - 若结构化失败，应保持有 fallback 输出，避免整个批处理中断。
+
+## V8 Build Rules
+
+- V8 source checkout is `/home/aynakeya/workspace/tmp/v8test/v8`.
+- Before running `gn`, `autoninja`, or V8 helper tools, always set the official
+  local environment with:
+
+  ```bash
+  cd /home/aynakeya/workspace/tmp/v8test
+  source start_env.md
+  cd v8
+  ```
+
+- After switching V8 tags/branches, run the official dependency sync before
+  applying or building patches:
+
+  ```bash
+  gclient sync --with_branch_heads --with_tags
+  ```
+
+- Build V8/v8asm with `autoninja -j10`; do not silently lower or raise the job
+  count. If a different job count is needed, ask first.
+- Do not delete existing `out/` directories, build caches, downloaded Electron
+  releases, or snapshot caches unless explicitly asked. Prefer incremental
+  rebuilds in version-specific output directories.
