@@ -32,12 +32,7 @@ class PatchFamily:
 
 PATCH_FAMILIES = (
     PatchFamily("v8asm-10.2.patch", "10.2", "V8 10.2 / Node 18 line"),
-    PatchFamily(
-        "v8asm-10.8.patch",
-        "10.8",
-        "V8 10.8 / Electron line",
-        require_node=False,
-    ),
+    PatchFamily("v8asm-10.8.patch", "10.8", "V8 10.8 / Electron line"),
     PatchFamily("v8asm-11.3.patch", "11.3", "V8 11.3 / Node 20 line"),
     PatchFamily("v8asm-11.4.patch", "11.4", "V8 11.4 / Electron line"),
     PatchFamily("v8asm-11.9.patch", "11.9", "V8 11.9 research line"),

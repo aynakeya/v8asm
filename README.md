@@ -347,7 +347,11 @@ Electron-style cached binaries.
   constant-pool and handler-table code, so a 10.2 3way apply conflicts in
   `src/objects/code.cc`. The dedicated patch keeps that 10.8 native code and
   carries the same `v8asm`, `--snapshot_blob`, cached-data sanity bypass, and
-  forced snapshot version mismatch recovery surface.
+  forced snapshot version mismatch recovery surface. The cached
+  `v8asm.10.8.node.x64.release` build uses
+  `v8_enable_pointer_compression=false` and `v8_enable_static_roots=false`,
+  and passes explicit self `--snapshot_blob` asm/checkversion/disasm plus
+  level-4 decompile.
 - `v8patch/v8asm-11.3.patch`: V8 11.3 adaptation for Node 20/bytenode
   (`v20.20.2`, V8 `11.3.244.8-node.38`). It uses the older `Object` member
   predicate API, moves the short-print segfault guard to `src/objects/objects.cc`,

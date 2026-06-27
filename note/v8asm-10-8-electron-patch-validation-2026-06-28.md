@@ -54,6 +54,31 @@ The cache directory
 `tests/decomp_rounds/bin_cache/v8asm.10.8.electron.x64.release/` was refreshed
 from the V8 out directory, including the out-dir generated `snapshot_blob.bin`.
 
+The matching 10.8 Node-style build was also compiled from the same clean tag
+and patch, using the existing cache directory:
+
+```bash
+git apply --3way --recount /home/aynakeya/workspace/v8asm/v8patch/v8asm-10.8.patch
+gn gen out/v8asm.10.8.node.x64.release --args='is_debug=false v8_enable_object_print=true v8_enable_disassembler=true v8_enable_pointer_compression=false v8_enable_sandbox=false'
+autoninja -j10 -C out/v8asm.10.8.node.x64.release v8asm
+```
+
+The Node-style binary reports:
+
+```text
+10.8.168.25
+is_debug=false
+v8_enable_object_print=true
+v8_enable_disassembler=true
+v8_enable_pointer_compression=false
+v8_enable_static_roots=false
+```
+
+The cache directory
+`tests/decomp_rounds/bin_cache/v8asm.10.8.node.x64.release/` was populated
+from that V8 out directory, including the generated sibling
+`snapshot_blob.bin`.
+
 ## Verification
 
 10.8 self round with explicit sibling snapshot:
@@ -69,6 +94,15 @@ python3 decompiler/v8decompiler.py /tmp/v8asm-10.8-verify/01_arith.disasm.txt --
 ```
 
 Observed result:
+
+- strict `checkversion` found `10.8.168.25`
+- `disasm.err`: 0 lines
+- `decompile.err`: 0 lines
+- disassembly lines: 89
+- decompiled lines: 61
+
+10.8 Node-style self round with explicit sibling snapshot used the same input
+case and passed:
 
 - strict `checkversion` found `10.8.168.25`
 - `disasm.err`: 0 lines

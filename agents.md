@@ -137,6 +137,12 @@ bin cache 约束：
   `/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.10.8.electron.x64.release`。
   这个版本使用 `v8patch/v8asm-10.8.patch`，不要直接拿 10.2 patch 做
   3way apply。
+- 10.8 Node-style cache 目录使用
+  `tests/decomp_rounds/bin_cache/v8asm.10.8.node.x64.release/`；对应 V8 out
+  目录是
+  `/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.10.8.node.x64.release`，
+  build args 为 `v8_enable_pointer_compression=false
+  v8_enable_static_roots=false`。
 - 13.4 Node-style cache 目录使用
   `tests/decomp_rounds/bin_cache/v8asm.13.4.114.21.node.x64.release/`；对应 V8
   out 目录是
