@@ -257,6 +257,15 @@ VERSION_MATRIX_SNAPSHOT_BLOB=v8context/v8_context_snapshot.bin \
   sanity bypass, direct forced-load payload plausibility guards, forced
   cross-major cached-data warnings, and the forced snapshot version mismatch
   bypass. It is not a usable recovery path for the 13.4 Electron Atom snapshot.
+- `v8patch/v8asm-13.2.patch`: V8 13.2 adaptation, verified on
+  `13.2.152.41` with Electron-style, Electron no-static-roots, and Node-style
+  build args. The cached `v8asm.13.2.152.41.electron.x64.release` build passes
+  the Electron 34.3.0 snapshot round with both Electron package snapshots. The
+  cached `v8asm.13.2.152.41.node.x64.release` build uses
+  `v8_enable_pointer_compression=false` and `v8_enable_sandbox=false`, passes
+  explicit self `--snapshot_blob` asm/checkversion/disasm and level-4
+  decompile. The no-static-roots Electron cache is a best-effort probe for
+  snapshots that fail with `Check failed: true == fixed_offset`.
 - `v8patch/v8asm-13.4.patch`: V8 13.4 adaptation used for the Electron
   `atom.compiled.dist.jsc` recovery notes. It adds `--snapshot_blob`, a
   direct V8 `SerializedCodeData::SanityCheck*` bypass for forced incompatible

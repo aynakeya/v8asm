@@ -115,6 +115,11 @@ bin cache 约束：
   `v8_enable_static_roots=false` 的 v8asm 做 best-effort probe，不能把这个
   特殊 binary 混进默认 bin cache。13.2 的特殊 cache 目录使用
   `tests/decomp_rounds/bin_cache/v8asm.13.2.152.41.electron.nostaticroots.x64.release/`。
+- 13.2 Node-style cache 目录使用
+  `tests/decomp_rounds/bin_cache/v8asm.13.2.152.41.node.x64.release/`；对应 V8
+  out 目录是
+  `/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.13.2.152.41.node.x64.release`，
+  build args 为 `v8_enable_pointer_compression=false v8_enable_sandbox=false`。
 - 做版本矩阵或提交前先跑：
 
   ```bash
