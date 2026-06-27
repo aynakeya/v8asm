@@ -161,3 +161,83 @@ Mistake caught and corrected: I initially launched the level-4 decompiler and
 it and produced a false 0-line result. I repeated the check sequentially and
 confirmed level 1, 2, 3, and 4 decompiler output was present. Do not parallelize
 producer/consumer verification commands.
+
+## 2026-06-28 13.4 Static-Roots Atom Probe
+
+The 13.4 Node-style build compiled earlier in the day reports:
+
+```text
+version: 13.4.114.21
+v8_enable_pointer_compression=false
+v8_enable_static_roots=false
+```
+
+It passes self `asm`/`checkversion`/`disasm`/level-4 decompile with its own
+generated `snapshot_blob.bin`, but it cannot initialize the Atom context
+snapshot from `v8context/v8_context_snapshot.bin`:
+
+```text
+Check failed: false == fixed_offset.
+```
+
+That failure comes from V8's `read-only-deserializer.cc` check:
+
+```text
+CHECK_EQ(V8_STATIC_ROOTS_BOOL, fixed_offset)
+```
+
+So this is a build-flag/snapshot-shape mismatch, not a cached-data header
+problem. I built a separate 13.4 Electron-style static-roots probe on the
+`13.4.114.21` checkout, with the official environment and fixed `autoninja -j10`:
+
+```bash
+cd /home/aynakeya/workspace/tmp/v8test
+source start_env.md
+cd v8
+gn gen out/v8asm.13.4.114.21.electron.staticroots.x64.release --args='is_debug=false v8_enable_object_print=true v8_enable_disassembler=true v8_enable_pointer_compression=true v8_enable_sandbox=true v8_embedder_string="-electron.0" v8_enable_static_roots=true'
+autoninja -j10 -C out/v8asm.13.4.114.21.electron.staticroots.x64.release v8asm
+```
+
+Observed binary metadata:
+
+```text
+version: 13.4.114.21-electron.0
+is_debug=false
+v8_enable_object_print=true
+v8_enable_disassembler=true
+v8_enable_pointer_compression=true
+v8_enable_static_roots=true
+```
+
+Self verification with the build's own generated startup snapshot:
+
+- `asm`: exit 0
+- `checkversion`: exit 0
+- `disasm`: exit 0, 90 disassembly lines, empty stderr
+- level-4 decompile: exit 0, 61 output lines, empty stderr
+
+Atom verification with the user-provided `v8context/v8_context_snapshot.bin`:
+
+- `checkversion atom.compiled.dist.jsc --force-incompatible`: exit 0
+- `disasm atom.compiled.dist.jsc --force-incompatible`: exit 0, 112390 lines
+- level-4 decompile: exit 0, 30056 lines
+- startup stderr contains the expected 13.4 Electron external-reference-table
+  size probe, but no `fixed_offset`, `Fatal error`, or signal text
+
+The decompiled output was copied to:
+
+```text
+atom.compiled.dist.decompiled.13.4-staticroots.l4.js
+```
+
+Best-effort negative check: using `v8context/snapshot_blob.bin` with the same
+static-roots binary passed `checkversion`, but `disasm` aborted with a libc++
+vector bounds assertion after the cached-data header. This was left unpatched,
+because snapshot compatibility beyond the startup/header checks is explicitly
+best effort.
+
+The build artifacts were copied into:
+
+```text
+tests/decomp_rounds/bin_cache/v8asm.13.4.114.21.electron.staticroots.x64.release/
+```

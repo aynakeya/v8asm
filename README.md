@@ -199,11 +199,12 @@ a `13.4.114.21-electron.0` snapshot is valid for the matching 13.4 Electron
 build, not for a `13.2.152.41-electron.0` v8asm. Cross-baseline startup
 snapshots may still abort inside V8 even when forced version checks are
 bypassed.
-`Check failed: true == fixed_offset` in `read-only-deserializer.cc` means the
-v8asm binary was built with `V8_STATIC_ROOTS` enabled but the loaded snapshot
-was serialized without fixed read-only roots. Build a matching
-`v8_enable_static_roots=false` v8asm variant and treat it as a best-effort
-snapshot-specific probe rather than patching over the cached-data header checks.
+`Check failed: <bool> == fixed_offset` in `read-only-deserializer.cc` means the
+v8asm binary's `V8_STATIC_ROOTS_BOOL` does not match whether the loaded
+snapshot was serialized with fixed read-only roots. Build a matching
+`v8_enable_static_roots=true` or `false` v8asm variant and treat it as a
+best-effort snapshot-specific probe rather than patching over the cached-data
+header checks.
 For the 13.2 Electron line, keep the normal Electron build for official
 Electron 34.3.0 snapshots, and build the non-static-roots probe separately:
 
@@ -217,6 +218,19 @@ autoninja -j10 -C out/v8asm.13.2.152.41.electron.nostaticroots.x64.release v8asm
 
 The cached special probe, when present, lives at
 `tests/decomp_rounds/bin_cache/v8asm.13.2.152.41.electron.nostaticroots.x64.release/`.
+For the Atom 13.4 context snapshot in `v8context/v8_context_snapshot.bin`, the
+matching best-effort build is the explicit static-roots Electron variant:
+
+```bash
+cd /home/aynakeya/workspace/tmp/v8test
+source start_env.md
+cd v8
+gn gen out/v8asm.13.4.114.21.electron.staticroots.x64.release --args='is_debug=false v8_enable_object_print=true v8_enable_disassembler=true v8_enable_pointer_compression=true v8_enable_sandbox=true v8_embedder_string="-electron.0" v8_enable_static_roots=true'
+autoninja -j10 -C out/v8asm.13.4.114.21.electron.staticroots.x64.release v8asm
+```
+
+The cached special probe, when present, lives at
+`tests/decomp_rounds/bin_cache/v8asm.13.4.114.21.electron.staticroots.x64.release/`.
 
 When `--snapshot_blob` and `--force-incompatible` are used together, `v8asm`
 opens the forced snapshot recovery switches before V8 startup data is loaded.
@@ -271,7 +285,10 @@ VERSION_MATRIX_SNAPSHOT_BLOB=v8context/v8_context_snapshot.bin \
   direct V8 `SerializedCodeData::SanityCheck*` bypass for forced incompatible
   loads, a forced snapshot version mismatch bypass, a research-only Electron
   startup snapshot external-reference-table bypass, and keeps the other V8
-  deserializer checks intact.
+  deserializer checks intact. The explicit
+  `v8asm.13.4.114.21.electron.staticroots.x64.release` build uses
+  `v8_enable_static_roots=true`; it loads `v8context/v8_context_snapshot.bin`
+  for `atom.compiled.dist.jsc` without the `fixed_offset` failure.
 - `v8patch/v8asm-12.4.patch`: V8 12.4 adaptation. Node 22/bytenode needs a
   separate no-pointer-compression build of this branch. Verified on
   `12.4.254.21` with both the normal and Node22-like build args. The cached

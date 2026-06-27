@@ -111,10 +111,13 @@ bin cache 约束：
 - Electron release 同时可能有 `snapshot_blob.bin` 和
   `v8_context_snapshot.bin`；验证 Electron/bytenode `.jsc` 时两个都要测。
   `fixed_offset` 崩溃是 read-only snapshot 的 `V8_STATIC_ROOTS` 编译开关不
-  匹配，不是 cached-data header 问题。需要单独编译
-  `v8_enable_static_roots=false` 的 v8asm 做 best-effort probe，不能把这个
-  特殊 binary 混进默认 bin cache。13.2 的特殊 cache 目录使用
-  `tests/decomp_rounds/bin_cache/v8asm.13.2.152.41.electron.nostaticroots.x64.release/`。
+  匹配，不是 cached-data header 问题。需要按实际 snapshot 单独编译
+  `v8_enable_static_roots=true` 或 `false` 的 v8asm 做 best-effort probe，
+  不能把这个特殊 binary 混进默认 bin cache。13.2 的 no-static-roots 特殊
+  cache 目录使用
+  `tests/decomp_rounds/bin_cache/v8asm.13.2.152.41.electron.nostaticroots.x64.release/`；
+  Atom 13.4 context snapshot 对应的 static-roots 特殊 cache 目录使用
+  `tests/decomp_rounds/bin_cache/v8asm.13.4.114.21.electron.staticroots.x64.release/`。
 - 13.2 Node-style cache 目录使用
   `tests/decomp_rounds/bin_cache/v8asm.13.2.152.41.node.x64.release/`；对应 V8
   out 目录是
