@@ -286,6 +286,10 @@ VERSION_MATRIX_SNAPSHOT_BLOB=v8context/v8_context_snapshot.bin \
   loads, a forced snapshot version mismatch bypass, a research-only Electron
   startup snapshot external-reference-table bypass, and keeps the other V8
   deserializer checks intact. The explicit
+  `v8asm.13.4.114.21.node.x64.release` build uses
+  `v8_enable_pointer_compression=false` and `v8_enable_static_roots=false`,
+  and passes explicit self `--snapshot_blob` asm/checkversion/disasm plus
+  level-4 decompile. The explicit
   `v8asm.13.4.114.21.electron.staticroots.x64.release` build uses
   `v8_enable_static_roots=true`; it loads `v8context/v8_context_snapshot.bin`
   for `atom.compiled.dist.jsc` without the `fixed_offset` failure.

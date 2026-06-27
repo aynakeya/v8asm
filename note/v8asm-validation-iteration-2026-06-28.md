@@ -241,3 +241,49 @@ The build artifacts were copied into:
 ```text
 tests/decomp_rounds/bin_cache/v8asm.13.4.114.21.electron.staticroots.x64.release/
 ```
+
+## 2026-06-28 13.4 Node-Style Cache Follow-Up
+
+The existing `13.4.114.21` Node-style out directory was verified and copied
+into the default cache so the matrix no longer misses this 13.4 non-Electron
+variant:
+
+```text
+/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.13.4.114.21.node.x64.release
+tests/decomp_rounds/bin_cache/v8asm.13.4.114.21.node.x64.release/
+```
+
+Observed binary metadata:
+
+```text
+version: 13.4.114.21
+is_debug=false
+v8_enable_object_print=true
+v8_enable_disassembler=true
+v8_enable_pointer_compression=false
+v8_enable_static_roots=false
+```
+
+Self verification used the build's own generated `snapshot_blob.bin`:
+
+- `asm`: exit 0
+- `checkversion`: exit 0
+- `disasm`: exit 0, 90 disassembly lines, empty stderr
+- level-4 decompile: exit 0, 61 output lines, empty stderr
+- crash/quality scan: no `Fatal error`, `Check failed`, signal text,
+  `goto offset_`, unknown opcode comments, or `<undefined: segmentfault...>`
+
+After copying the artifacts, `check_bin_cache.py` reported `checked_dirs=16`
+and matched the cache `snapshot_blob.bin` to:
+
+```text
+/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.13.4.114.21.node.x64.release/snapshot_blob.bin
+```
+
+The version matrix automatically picked up the cache and reported:
+
+```text
+v8asm.13.4.114.21.node.x64.release ... asm ok | strict_disasm ok | decompile ok | raw:0 unknown:0 undef:0
+warnings: 0
+failures: 0
+```
