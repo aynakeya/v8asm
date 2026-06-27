@@ -351,7 +351,7 @@ new file mode 100644
 index 00000000000..2b54d2851a6
 --- /dev/null
 +++ b/src/disassembler/main.cc
-@@ -0,0 +1,892 @@
+@@ -0,0 +1,928 @@
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <fstream>

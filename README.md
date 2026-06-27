@@ -323,11 +323,12 @@ Electron-style cached binaries.
   forced-load payload plausibility guards, forced cross-major warnings, forced
   snapshot version mismatch bypass; it does not have the 13.x startup
   external-reference-table validation hook.
-- `v8patch/v8asm-12.9.patch`: V8 12.9 adaptation, verified on `12.9.109`. It
-  preserves the 12.x TrustedObject sandbox guard in `objects-printer.cc` and
-  includes the Electron recovery fixes from 13.4, including forced snapshot
-  version mismatch handling.
-- `v8patch/v8asm-11.9.patch`: V8 11.9 adaptation, verified on `11.9.172`. It
+- `v8patch/v8asm-12.9.patch`: V8 12.9 adaptation, verified on `12.9.202.28`
+  with Node-style and Electron-style cached binaries. It preserves the 12.x
+  TrustedObject sandbox guard in `objects-printer.cc` and includes forced
+  snapshot version mismatch handling.
+- `v8patch/v8asm-11.9.patch`: V8 11.9 adaptation, verified on `11.9.169.7`
+  with Node-style and Electron-style cached binaries. It
   uses the 11.x `CodeSerializer::Deserialize(..., ScriptOriginOptions())` API
   and older object-cast helpers. This branch has the `--snapshot_blob`,
   cached-data sanity bypass, and forced snapshot version mismatch bypass; it does not have the 13.x startup
@@ -340,6 +341,13 @@ Electron-style cached binaries.
   forced snapshot version mismatch bypass. Verified with the cached
   `tests/decomp_rounds/bin_cache/v8asm.10.2.node18.x64.release/v8asm`;
   self-cache and Node18/bytenode forced disasm/decompile both pass.
+- `v8patch/v8asm-10.8.patch`: V8 10.8 Electron adaptation for
+  `10.8.168.25-electron.0`. Do not use the 10.2 patch directly on this tag:
+  10.8 already has the newer `BytecodeArray::Disassemble` handle-based
+  constant-pool and handler-table code, so a 10.2 3way apply conflicts in
+  `src/objects/code.cc`. The dedicated patch keeps that 10.8 native code and
+  carries the same `v8asm`, `--snapshot_blob`, cached-data sanity bypass, and
+  forced snapshot version mismatch recovery surface.
 - `v8patch/v8asm-11.3.patch`: V8 11.3 adaptation for Node 20/bytenode
   (`v20.20.2`, V8 `11.3.244.8-node.38`). It uses the older `Object` member
   predicate API, moves the short-print segfault guard to `src/objects/objects.cc`,

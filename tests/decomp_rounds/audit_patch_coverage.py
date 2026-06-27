@@ -26,10 +26,18 @@ class PatchFamily:
     patch: str
     family: str
     description: str
+    require_node: bool = True
+    require_electron: bool = True
 
 
 PATCH_FAMILIES = (
     PatchFamily("v8asm-10.2.patch", "10.2", "V8 10.2 / Node 18 line"),
+    PatchFamily(
+        "v8asm-10.8.patch",
+        "10.8",
+        "V8 10.8 / Electron line",
+        require_node=False,
+    ),
     PatchFamily("v8asm-11.3.patch", "11.3", "V8 11.3 / Node 20 line"),
     PatchFamily("v8asm-11.4.patch", "11.4", "V8 11.4 / Electron line"),
     PatchFamily("v8asm-11.9.patch", "11.9", "V8 11.9 research line"),
@@ -150,9 +158,9 @@ def main() -> int:
         gaps: list[str] = []
         if not patch_exists:
             gaps.append("missing patch")
-        if not node_caches:
+        if family.require_node and not node_caches:
             gaps.append("missing node cache")
-        if not electron_caches:
+        if family.require_electron and not electron_caches:
             gaps.append("missing electron cache")
         if gaps:
             problems.append(f"{family.patch}: {', '.join(gaps)}")

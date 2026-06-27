@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -71,7 +72,50 @@ def check_patch(path: Path) -> list[str]:
             problems.append(
                 f"external-reference alias diagnostic near line {index} is not on stderr"
             )
+    if path.suffix == ".patch":
+        problems.extend(check_disassembler_hunk_count(path))
     return problems
+
+
+def check_disassembler_hunk_count(path: Path) -> list[str]:
+    raw_lines = path.read_text(errors="replace").splitlines()
+    start = next(
+        (
+            i
+            for i, line in enumerate(raw_lines)
+            if line == "diff --git a/src/disassembler/main.cc b/src/disassembler/main.cc"
+        ),
+        None,
+    )
+    if start is None:
+        return ["missing src/disassembler/main.cc patch"]
+    end = next(
+        (
+            i
+            for i in range(start + 1, len(raw_lines))
+            if raw_lines[i].startswith("diff --git ")
+        ),
+        len(raw_lines),
+    )
+    header = next(
+        (line for line in raw_lines[start:end] if line.startswith("@@ -0,0 +1,")),
+        None,
+    )
+    if header is None:
+        return ["src/disassembler/main.cc patch is not a new-file hunk"]
+    match = re.search(r"\+1,(\d+)", header)
+    declared = int(match.group(1)) if match else -1
+    actual = sum(
+        1
+        for line in raw_lines[start:end]
+        if line.startswith("+") and not line.startswith("+++")
+    )
+    if declared != actual:
+        return [
+            "src/disassembler/main.cc hunk declares "
+            f"{declared} added lines but contains {actual}"
+        ]
+    return []
 
 
 def main() -> int:
