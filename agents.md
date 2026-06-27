@@ -129,12 +129,18 @@ bin cache 约束：
 tests/decomp_rounds/run_version_matrix.sh
 ```
 
-它只用一个 case 检查本机可用的 `v8asm` 二进制和 nvm Node 版本：
+它只用一个 case 检查本机可用的 `v8asm` 二进制和 nvm Node 版本。默认会自动
+枚举 `tests/decomp_rounds/bin_cache/*/v8asm`，并在仓库根目录存在 `./v8asm`
+时一起纳入；不要把临时 out 目录硬编码进默认矩阵，需要临时 probe 时使用
+`VERSION_MATRIX_V8ASM_BINS`：
 
 - `v8asm asm` 自生成 cache 必须能 strict disasm + level-4 decompile。
 - bytenode cache 先记录 `checkversion`；只有 Node V8 数字版本等于
   `v8asm version`，且 Node 与 `v8asm` 的 pointer compression 布局一致时，
   才尝试 `--force-incompatible`。
+- `version` 和 `build-args` 这类 metadata 命令不能通过 wrapper 传
+  `--snapshot_blob`；旧 binary 会在初始化 startup snapshot 时把 warning
+  泄漏到矩阵输出，导致版本/编译参数证据被污染。
 - bytenode 的 `checkversion` 会带 `--force-incompatible`，因此设置
   `VERSION_MATRIX_SNAPSHOT_BLOB=/path/to/blob` 时 header 对比会基于加载后的
   snapshot checksum。

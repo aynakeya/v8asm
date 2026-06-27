@@ -7,15 +7,13 @@ CASE="${VERSION_MATRIX_CASE:-$ROUND_DIR/cases/01_arith.js}"
 OUT_DIR="${VERSION_MATRIX_OUT:-$ROUND_DIR/version_matrix}"
 BYTENODE_PATH="${ROUND_BYTENODE_PATH:-/home/aynakeya/.npm/_npx/ea56e60f3ac75570/node_modules/bytenode}"
 
-DEFAULT_V8ASM_BINS=(
-  "$ROOT_DIR/v8asm"
-  "$ROUND_DIR/bin_cache/v8asm.10.2.node18.x64.release/v8asm"
-  "$ROUND_DIR/bin_cache/v8asm.11.3.node20.x64.release/v8asm"
-  "$ROUND_DIR/bin_cache/v8asm.12.4.node22.x64.release/v8asm"
-  "$ROUND_DIR/bin_cache/v8asm.13.4.electron.x64.release/v8asm"
-  "$ROUND_DIR/bin_cache/v8asm.13.6.node24.x64.release/v8asm"
-  "/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.13.4.x64.release/v8asm"
-)
+DEFAULT_V8ASM_BINS=()
+if [[ -x "$ROOT_DIR/v8asm" ]]; then
+  DEFAULT_V8ASM_BINS+=("$ROOT_DIR/v8asm")
+fi
+while IFS= read -r cached_bin; do
+  DEFAULT_V8ASM_BINS+=("$cached_bin")
+done < <(find "$ROUND_DIR/bin_cache" -mindepth 2 -maxdepth 2 -type f -name v8asm -perm -111 | sort)
 DEFAULT_NODE_VERSIONS=(18.20.8 20.20.2 22.17.0 24.7.0)
 VERSION_MATRIX_STRICT="${VERSION_MATRIX_STRICT:-1}"
 VERSION_MATRIX_REQUIRE_BINS="${VERSION_MATRIX_REQUIRE_BINS:-0}"
@@ -106,6 +104,11 @@ v8asm_should_use_snapshot_blob() {
   local bin="$1"
   local snapshot_blob="$2"
   shift 2
+  case "${1:-}" in
+    version|build-args)
+      return 1
+      ;;
+  esac
   if ! v8asm_binary_supports_snapshot_blob "$bin"; then
     return 1
   fi

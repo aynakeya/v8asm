@@ -9,6 +9,9 @@ Python decompiler across V8/Node/Electron versions.
   research log.
 - `v8asm-force-snapshot-and-node24-notes-2026.md`: snapshot forcing and
   Node/bytenode read-only-heap diagnostics.
+- `v8asm-validation-iteration-2026-06-28.md`: latest validation iteration,
+  default matrix cache enumeration fix, metadata snapshot wrapper fix, and
+  remaining full-build gaps.
 
 Generated local artifacts:
 
