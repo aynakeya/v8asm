@@ -158,6 +158,13 @@ python3 tests/decomp_rounds/fetch_electron_releases.py 34.3.0
 python3 tests/decomp_rounds/check_electron_version_matrix.py
 ```
 
+To see which Electron-style build rows have an official stable Linux x64
+release and which ones are source/self-cache only, run:
+
+```bash
+python3 tests/decomp_rounds/audit_electron_release_coverage.py
+```
+
 Do not use this as cross-version evidence. If the matching Electron release is
 not present locally, fetch/cache that release first or treat the row as
 unverified rather than substituting a nearby V8 branch.

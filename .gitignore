@@ -8,5 +8,6 @@ tests/decomp_rounds/tmp
 tests/decomp_rounds/version_matrix
 tests/decomp_rounds/build_matrix
 tests/decomp_rounds/electron_matrix
+tests/decomp_rounds/electron_release_coverage
 tests/decomp_rounds/bin_cache
 tests/decomp_rounds/cases/*.jsc

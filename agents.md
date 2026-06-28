@@ -180,6 +180,10 @@ bin cache 约束：
   既有 `electron-cache`。这个脚本复用已有 zip/解压目录，不删除缓存；下载后
   仍必须通过 `check_electron_version_matrix.py` 的 exact V8 version 选择逻辑，
   不能手工拿邻近版本代替。
+- 用 `python3 tests/decomp_rounds/audit_electron_release_coverage.py` 区分
+  “官方 stable Electron 有 exact V8 release 但本地未缓存/未验证”和“官方
+  stable release 本身没有 exact V8”。后者不能拿邻近版本替代，只能记录为
+  source/self-cache 覆盖，直到有匹配 Electron 包或应用 snapshot。
 
 轻量版本矩阵：
 
