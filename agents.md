@@ -160,6 +160,14 @@ bin cache 约束：
   `audit_patch_coverage.py` 默认只报告缺口，不作为通过门禁。只有在真正准备
   声称所有 patch 的 node/electron 双模式都覆盖时，才用 `--strict` 并要求
   它退出 0。
+- 如果要证明 patch 可以从源码重新编译，使用
+  `tests/decomp_rounds/build_v8asm_matrix.sh`，不要只看 bin cache。该脚本每行
+  都会 checkout 指定 tag、运行
+  `gclient sync --with_branch_heads --with_tags`、`git apply --3way --recount`，
+  并用 `autoninja -j10` 编译。static-roots 特殊行只作为对应 snapshot 的
+  best-effort probe；遇到 `fixed_offset` 时重新编译匹配
+  `v8_enable_static_roots=true/false` 的 v8asm，不 patch 掉 RO snapshot layout
+  检查。
 
 轻量版本矩阵：
 

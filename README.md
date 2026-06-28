@@ -284,6 +284,20 @@ python3 tests/decomp_rounds/audit_patch_coverage.py
 The default mode reports current gaps but exits 0. Use `--strict` only when the
 expected end state is that every listed patch family has both node-style and
 Electron-style cached binaries.
+When the question is whether the patches still compile from source, use the
+build matrix script instead. It uses the official checkout environment, runs
+`gclient sync --with_branch_heads --with_tags` after each tag checkout, applies
+the matching patch with `--3way --recount`, and builds with `autoninja -j10`:
+
+```bash
+tests/decomp_rounds/build_v8asm_matrix.sh
+tests/decomp_rounds/build_v8asm_matrix.sh 13.2-electron 13.4-electron-staticroots
+```
+
+Static-roots variants in that script are snapshot-specific best-effort builds.
+If a snapshot fails with a `fixed_offset` check, compile the matching
+`v8_enable_static_roots=true` or `false` row and verify it with the target
+snapshot instead of patching over the read-only snapshot layout check.
 
 ## v8 patch variants
 
