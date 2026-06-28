@@ -363,6 +363,13 @@ snapshot instead of patching over the read-only snapshot layout check.
   and older object-cast helpers. This branch has the `--snapshot_blob`,
   cached-data sanity bypass, and forced snapshot version mismatch bypass; it does not have the 13.x startup
   external-reference-table validation hook.
+- `v8patch/v8asm-11.4.patch`: V8 11.4 adaptation, verified on `11.4.183.14`
+  with Node-style and Electron-style cached binaries. The snapshot version
+  reader must accept the older startup snapshot string offset used by this
+  branch. The cached Node-style build uses
+  `v8_enable_pointer_compression=false` and `v8_enable_static_roots=false`;
+  both Node-style and Electron-style rows are covered by the source build
+  matrix.
 - `v8patch/v8asm-10.2.patch`: V8 10.2 adaptation for Node 18/bytenode
   (`v18.20.8`, V8 `10.2.154.26-node.39`). It uses the older cached-data header
   shape without a read-only snapshot checksum, keeps global `--snapshot_blob`,
