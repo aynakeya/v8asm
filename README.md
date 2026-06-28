@@ -149,6 +149,15 @@ binaries, compiles a `.jsc` with that Electron runtime, then tests both
 python3 tests/decomp_rounds/check_electron_version_matrix.py
 ```
 
+If a matching Electron release is not present locally, cache it first from the
+official GitHub release zip. Existing zips and unpacked release directories are
+reused, not deleted:
+
+```bash
+python3 tests/decomp_rounds/fetch_electron_releases.py 34.3.0
+python3 tests/decomp_rounds/check_electron_version_matrix.py
+```
+
 Do not use this as cross-version evidence. If the matching Electron release is
 not present locally, fetch/cache that release first or treat the row as
 unverified rather than substituting a nearby V8 branch.

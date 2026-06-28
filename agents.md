@@ -175,6 +175,11 @@ bin cache 约束：
   `process.versions.v8`，只选择完全匹配的 Electron-flavored cached `v8asm`，
   并对 `snapshot_blob.bin` 和 `v8_context_snapshot.bin` 都做
   checkversion/disasm/decompile。
+- 如果本地缺少目标 Electron release，先用
+  `python3 tests/decomp_rounds/fetch_electron_releases.py <version>` 下载到
+  既有 `electron-cache`。这个脚本复用已有 zip/解压目录，不删除缓存；下载后
+  仍必须通过 `check_electron_version_matrix.py` 的 exact V8 version 选择逻辑，
+  不能手工拿邻近版本代替。
 
 轻量版本矩阵：
 

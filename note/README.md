@@ -18,6 +18,9 @@ Python decompiler across V8/Node/Electron versions.
 - `v8asm-static-roots-full-matrix-2026-06-28.md`: latest full source build
   matrix, static-roots probe, Electron snapshot validation, and verification
   evidence.
+- `v8asm-electron-runtime-cache-coverage-2026-06-28.md`: official Electron
+  release cache expansion, exact V8 runtime matching, and Electron-generated
+  `.jsc` validation coverage.
 
 Generated local artifacts:
 

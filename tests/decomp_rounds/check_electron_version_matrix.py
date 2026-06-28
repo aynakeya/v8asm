@@ -151,16 +151,22 @@ def cached_v8asms(base: Path) -> list[Path]:
 
 
 def select_matching_bins(electron_v8: str, bins: list[Path]) -> list[Path]:
-    exact: list[Path] = []
+    exact: list[tuple[Path, str]] = []
     for bin_path in bins:
         try:
-            version, _ = v8asm_metadata(bin_path)
+            version, build_args = v8asm_metadata(bin_path)
         except RuntimeError:
             continue
         if version == electron_v8 and "electron" in bin_path.parent.name:
-            exact.append(bin_path)
-    preferred = [path for path in exact if "nostaticroots" not in path.parent.name]
-    return preferred or exact
+            exact.append((bin_path, build_args))
+    explicit_static_roots = [
+        item for item in exact if "v8_enable_static_roots=" in item[1]
+    ]
+    if explicit_static_roots:
+        exact = explicit_static_roots
+    paths = [path for path, _ in exact]
+    preferred = [path for path in paths if "nostaticroots" not in path.parent.name]
+    return preferred or paths
 
 
 def main() -> int:
