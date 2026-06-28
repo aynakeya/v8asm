@@ -155,6 +155,7 @@ bin cache 约束：
   python3 tests/decomp_rounds/check_bin_cache.py
   python3 tests/decomp_rounds/check_patch_text.py
   python3 tests/decomp_rounds/check_electron_snapshot_round.py
+  python3 tests/decomp_rounds/check_electron_version_matrix.py
   ```
 
   `audit_patch_coverage.py` 默认只报告缺口，不作为通过门禁。只有在真正准备
@@ -168,6 +169,12 @@ bin cache 约束：
   best-effort probe；遇到 `fixed_offset` 时重新编译匹配
   `v8_enable_static_roots=true/false` 的 v8asm，不 patch 掉 RO snapshot layout
   检查。
+- Electron 生成的 bytenode `.jsc` 不能用邻近版本代替验证。使用
+  `check_electron_version_matrix.py`，它会枚举本机
+  `/home/aynakeya/workspace/tmp/v8test/electron-cache`，读取 Electron 的
+  `process.versions.v8`，只选择完全匹配的 Electron-flavored cached `v8asm`，
+  并对 `snapshot_blob.bin` 和 `v8_context_snapshot.bin` 都做
+  checkversion/disasm/decompile。
 
 轻量版本矩阵：
 

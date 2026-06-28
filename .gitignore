@@ -1,9 +1,12 @@
 __pycache__
 .idea
 v8asm
+icudtl.dat
 snapshot_blob.bin
 tests/decomp_rounds/out
 tests/decomp_rounds/tmp
 tests/decomp_rounds/version_matrix
 tests/decomp_rounds/build_matrix
+tests/decomp_rounds/electron_matrix
 tests/decomp_rounds/bin_cache
+tests/decomp_rounds/cases/*.jsc
