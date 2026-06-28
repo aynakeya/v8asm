@@ -150,6 +150,7 @@ python3 tests/decomp_rounds/audit_patch_coverage.py --strict
 python3 -m unittest discover -s tests -p 'test*.py'
 python3 tests/decomp_rounds/check_electron_snapshot_round.py
 python3 tests/decomp_rounds/check_electron_version_matrix.py
+python3 tests/decomp_rounds/audit_electron_release_coverage.py
 ./tests/decomp_rounds/run_version_matrix.sh
 git diff --check
 git -C /home/aynakeya/workspace/tmp/v8test/v8 status --short --untracked-files=no
@@ -166,17 +167,47 @@ check_electron_snapshot_round.py:
   snapshot_blob: checkversion=0 disasm=0 decompile=0
   v8_context_snapshot: checkversion=0 disasm=0 decompile=0
   electron_snapshot_round_ok=1
-check_electron_version_matrix.py: electron_version_matrix_ok=1
+check_electron_version_matrix.py: 7 cached Electron releases, warnings=0, failures=0
+audit_electron_release_coverage.py: electron_release_coverage_ok=1
 run_version_matrix.sh: warnings=0 failures=0
 git diff --check: no output
 V8 tracked status: no output
 ```
 
-The Electron version matrix currently covers only the local Electron release in
-`electron-cache`, which is Electron 34.3.0 / V8
-`13.2.152.41-electron.0`. Other Electron major-version rows are compiled and
-covered by self-generated cached-data tests, but need matching local Electron
-packages/snapshots for external Electron `.jsc` runtime validation.
+The Electron version matrix currently covers these cached official Linux x64
+releases with both `snapshot_blob.bin` and `v8_context_snapshot.bin`:
+
+```text
+Electron 19.0.4  / V8 10.2.154.4-electron.0
+Electron 22.3.27 / V8 10.8.168.25-electron.0
+Electron 25.0.1  / V8 11.4.183.14-electron.0
+Electron 30.0.1  / V8 12.4.254.12-electron.0
+Electron 34.3.0  / V8 13.2.152.41-electron.0
+Electron 35.7.5  / V8 13.4.114.21-electron.0
+Electron 36.2.1  / V8 13.6.233.8-electron.0
+```
+
+The official metadata still has no stable Linux x64 exact match for:
+
+```text
+11.3.244.8
+11.9.169.7
+12.9.202.28
+```
+
+Those Electron-style rows are compiled and covered by self-generated cached-data
+tests, but external Electron-generated `.jsc` runtime validation remains
+unverified until a matching Electron package or app snapshot is available.
+
+Additional focused rounds after the full rebuild:
+
+```text
+10.8 / Electron 22.3.27: snapshot_blob=ok, v8_context_snapshot=ok
+13.2 / Electron 34.3.0 / static_roots=true: snapshot_blob=ok, v8_context_snapshot=ok
+13.2 / Electron 34.3.0 / static_roots=false: fixed_offset fatal on both snapshots
+13.4 / Electron 35.7.5 / static_roots=true: snapshot_blob=ok, v8_context_snapshot=ok
+13.6 / Electron 36.2.1 / static_roots=true: snapshot_blob=ok, v8_context_snapshot=ok
+```
 
 ## Why 13.4 needed the special external-reference patch
 
