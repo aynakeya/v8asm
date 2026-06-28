@@ -124,10 +124,12 @@ it invalidates the matrix result.
 Audit cached binaries before treating them as a gate:
 
 ```bash
+python3 tests/decomp_rounds/audit_patch_coverage.py --strict
 python3 tests/decomp_rounds/check_bin_cache.py
 python3 tests/decomp_rounds/check_patch_text.py
 python3 tests/decomp_rounds/check_electron_snapshot_round.py
 python3 tests/decomp_rounds/check_electron_version_matrix.py
+python3 tests/decomp_rounds/audit_electron_release_coverage.py
 ```
 
 The default matrix automatically enumerates executable
@@ -325,6 +327,15 @@ the matching patch with `--3way --recount`, and builds with `autoninja -j10`:
 tests/decomp_rounds/build_v8asm_matrix.sh
 tests/decomp_rounds/build_v8asm_matrix.sh 13.2-electron 13.4-electron-staticroots
 ```
+
+The build matrix deliberately uses stable, version-specific `out/` directories
+and copies successful artifacts into `tests/decomp_rounds/bin_cache/`. Reuse
+those directories for rebuilds so existing compiler outputs and generated
+snapshots stay warm. Do not run `gclient sync -D`, remove `out/`, remove
+Electron release caches, or move app/Electron snapshots into `bin_cache` while
+trying to prove a patch. If a new V8/Electron variant is needed, add a named
+matrix row with its own persistent output directory, then record the new rule in
+`README.md`, `agents.md`, and a note under `note/`.
 
 Static-roots variants in that script are snapshot-specific best-effort builds.
 If a snapshot fails with a `fixed_offset` check, compile the matching
