@@ -21,6 +21,10 @@ Python decompiler across V8/Node/Electron versions.
 - `v8asm-electron-runtime-cache-coverage-2026-06-28.md`: official Electron
   release cache expansion, exact V8 runtime matching, and Electron-generated
   `.jsc` validation coverage.
+- `disassembler-standalone-2026-07-15.md`: V8-independent
+  serializer/bytecode parser design, optional startup-snapshot string recovery,
+  version profiles, SFI recovery, and native/Electron/bytenode/Atom validation
+  evidence.
 
 Generated local artifacts:
 

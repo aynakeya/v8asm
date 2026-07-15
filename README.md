@@ -18,8 +18,74 @@ blog (chinese only): [a-quick-guide-to-disassemble-v8-bytecode](https://www.ayna
 
 - checkversion: standalone bytecode version bruteforce
 - v8patch: v8 patches
+- disassembler: standalone Python cached-bytecode disassembler; it does not
+  load or link V8 at runtime
 - decompiler: decompiler (in progress)
 - ghidra/v8-bytecode: experimental Ghidra SLEIGH processor module for V8 Ignition bytecode
+
+## check V8 version
+
+`checkversion` reads the uint32 version hash from a `.jsc` header and searches
+the V8 version space with worker processes. It defaults to at most four workers
+because the search is CPU-bound; increase it explicitly when appropriate:
+
+```bash
+python3 -m checkversion input.jsc
+python3 -m checkversion --hash 0x2b2c7714 -j 10
+python3 -m checkversion --calculate 13.6.233.10
+```
+
+Use `--major-range`, `--minor-range`, `--build-range`, and `--patch-range` to
+narrow the search. Ranges use `START:END` with an exclusive end. See
+`checkversion/readme.md` for examples.
+
+## standalone disassembler
+
+`disassembler` parses the V8 code-cache header and serializer stream directly.
+Runtime use requires only Python 3 and the checked-in per-version JSON profiles:
+
+```bash
+python3 -m disassembler input.jsc > /tmp/input.disasm.txt
+python3 decompiler/v8decompiler.py /tmp/input.disasm.txt --level 4 --runtime
+```
+
+The cache header normally selects the exact V8 profile. For a custom build with
+an unknown version hash, select a known matching bytecode layout explicitly:
+
+```bash
+python3 -m disassembler input.jsc --version 13.4.114.21
+```
+
+Profiles cover V8 10.2, 10.8, 11.3, 11.4, 11.9, 12.4, 12.9, 13.2, 13.4,
+and 13.6 tags used by the test matrix. Opcode mappings, serializer tags,
+BytecodeArray/SFI/ScopeInfo layouts, runtime IDs, intrinsics, roots, and jump
+semantics are stored under `disassembler/profiles/`. Regenerate them from an
+official V8 checkout without changing its current branch:
+
+```bash
+python3 -m disassembler.generate_profiles \
+  --v8-repo /home/aynakeya/workspace/tmp/v8test/v8 \
+  --output-dir disassembler/profiles
+```
+
+Snapshot-only read-only objects cannot always be named from a `.jsc` file
+alone. Pass the matching startup snapshot to resolve sequential one-byte and
+two-byte strings directly from its read-only heap image:
+
+```bash
+python3 -m disassembler atom.compiled.dist.jsc \
+  --version 13.4.114.21 \
+  --snapshot-blob v8context/v8_context_snapshot.bin \
+  > /tmp/atom.disasm.txt
+```
+
+The reader validates the V8 version, snapshot magic, and read-only checksum.
+It supports the page-image formats used by V8 11.9 through 13.6, including
+static-roots and relocatable snapshots. Without `--snapshot-blob`, unresolved
+objects remain explicit `<read_only_<space>,<offset>>` values instead of being
+omitted or guessed. See
+`note/disassembler-standalone-2026-07-15.md` for architecture and
+validation results.
 
 ## decompiler quick usage
 

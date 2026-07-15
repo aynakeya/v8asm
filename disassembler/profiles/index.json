@@ -1,0 +1,44 @@
+{
+  "format": 1,
+  "operand_encoding": {
+    "fixed_sizes": {
+      "Flag16": 2,
+      "Flag8": 1,
+      "IntrinsicId": 1,
+      "NativeContextIndex": 1,
+      "RuntimeId": 2
+    },
+    "scalable_signed": [
+      "Imm",
+      "Reg",
+      "RegInOut",
+      "RegList",
+      "RegOut",
+      "RegOutList",
+      "RegOutPair",
+      "RegOutTriple",
+      "RegPair"
+    ],
+    "scalable_unsigned": [
+      "Idx",
+      "RegCount",
+      "UImm"
+    ]
+  },
+  "versions": [
+    "10.2.154.4",
+    "10.2.154.26",
+    "10.8.168.25",
+    "11.3.244.8",
+    "11.4.183.14",
+    "11.9.169.7",
+    "12.4.254.12",
+    "12.4.254.21",
+    "12.9.202.28",
+    "13.2.152.41",
+    "13.4.114.14",
+    "13.4.114.21",
+    "13.6.233.8",
+    "13.6.233.10"
+  ]
+}
