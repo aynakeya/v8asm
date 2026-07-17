@@ -6,6 +6,16 @@ import sys
 from .disassembler import disassemble_file
 
 
+def _offset(value: str) -> int:
+    try:
+        parsed = int(value, 0)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected an integer offset") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("offset must be non-negative")
+    return parsed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="disassembler",
@@ -21,6 +31,14 @@ def main() -> int:
         "--snapshot-blob",
         help="resolve read-only strings from a matching V8 startup snapshot",
     )
+    parser.add_argument(
+        "--payload-offset",
+        type=_offset,
+        help=(
+            "bypass the cached-data header and parse a raw serializer payload "
+            "at this file offset; requires --version"
+        ),
+    )
     args = parser.parse_args()
     try:
         sys.stdout.write(
@@ -29,6 +47,7 @@ def main() -> int:
                 args.version,
                 args.runtime_variant,
                 args.snapshot_blob,
+                args.payload_offset,
             )
         )
     except (OSError, ValueError) as exc:

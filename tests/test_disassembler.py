@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
+from disassembler.cache import parse_header
 from disassembler.disassembler import (
     decode_instructions,
     disassemble_bytes,
@@ -275,6 +281,88 @@ class OfflineDisassemblerTests(unittest.TestCase):
                 actual = disassemble_file(ROOT / "samples" / f"{name}.jsc")
                 expected = (ROOT / "samples" / f"{name}.jsc.txt").read_text()
                 self.assertEqual(bytecode_blobs(actual), bytecode_blobs(expected))
+
+    def test_reads_captured_input_as_normal_cached_data(self) -> None:
+        source = ROOT / "samples" / "main.d8.jsc"
+        expected = disassemble_file(source)
+        with tempfile.TemporaryDirectory() as directory:
+            captured = Path(directory) / "0000.input.jsc"
+            captured.write_bytes(source.read_bytes())
+            actual = disassemble_file(captured)
+        self.assertEqual(bytecode_blobs(actual), bytecode_blobs(expected))
+        self.assertEqual(metadata_signature(actual), metadata_signature(expected))
+
+    def test_node_capture_hook_writes_input_and_normalized_cache(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is unavailable")
+        hook = ROOT / "disassembler" / "capture_cached_data.cjs"
+        source = (
+            'const vm=require("node:vm");'
+            'const source="globalThis.answer=21*2";'
+            "const seed=new vm.Script(source);"
+            "const cache=seed.createCachedData();"
+            "const loaded=new vm.Script(source,{"
+            'filename:"capture-test.js",cachedData:cache});'
+            "if(loaded.cachedDataRejected)process.exitCode=2;"
+            "console.log(process.pid);"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            environment = os.environ.copy()
+            environment.pop("NODE_OPTIONS", None)
+            environment["V8_CACHE_DUMP_DIR"] = directory
+            result = subprocess.run(
+                [node, "--require", str(hook), "-e", source],
+                check=True,
+                env=environment,
+                text=True,
+                stdout=subprocess.PIPE,
+            )
+            output = Path(directory) / result.stdout.strip()
+            input_path = output / "0000.input.jsc"
+            normalized_path = output / "0000.normalized.jsc"
+            payload_path = output / "0000.payload.bin"
+            metadata = json.loads((output / "0000.json").read_text())
+            self.assertGreater(input_path.stat().st_size, 0)
+            self.assertGreater(normalized_path.stat().st_size, 0)
+            self.assertGreater(payload_path.stat().st_size, 0)
+            self.assertFalse(metadata["cached_data_rejected"])
+            self.assertRegex(metadata["v8_version"], r"^\d+\.\d+\.\d+")
+            self.assertEqual(metadata["input_size"], input_path.stat().st_size)
+            self.assertEqual(
+                metadata["normalized_size"], normalized_path.stat().st_size
+            )
+            self.assertEqual(metadata["payload_size"], payload_path.stat().st_size)
+            normalized = normalized_path.read_bytes()
+            payload_offset = metadata["payload_offset"]
+            self.assertEqual(payload_path.read_bytes(), normalized[payload_offset:])
+            self.assertEqual(metadata["filename"], "capture-test.js")
+
+    def test_parses_raw_serializer_payload_at_explicit_offset(self) -> None:
+        cache = (ROOT / "samples" / "main.d8.jsc").read_bytes()
+        profiles = load_profiles()
+        header, profile = parse_header(cache, profiles)
+        payload = cache[
+            header.header_size : header.header_size + header.payload_length
+        ]
+        prefix = b"private wrapper"
+        actual = disassemble_bytes(
+            prefix + payload,
+            version=profile.version,
+            runtime_variant=profile.runtime_variant_by_flags_hash.get(
+                header.flags_hash
+            ),
+            payload_offset=len(prefix),
+        )
+        expected = disassemble_bytes(cache)
+        self.assertIn(
+            f"# raw_serializer_payload offset={len(prefix)} tagged_size=", actual
+        )
+        self.assertEqual(bytecode_blobs(actual), bytecode_blobs(expected))
+        self.assertEqual(metadata_signature(actual), metadata_signature(expected))
+
+        with self.assertRaisesRegex(ValueError, "requires an explicit V8 version"):
+            disassemble_bytes(payload, payload_offset=0)
 
     def test_matches_self_cache_version_matrix(self) -> None:
         recognized = 0

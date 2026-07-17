@@ -792,10 +792,19 @@ def _render(
     runtime_variant: str | None,
     snapshot: ReadOnlySnapshot | None,
 ) -> str:
+    if header.raw_payload:
+        source = (
+            f"# raw_serializer_payload offset={header.header_size} "
+            f"tagged_size={tagged_size}"
+        )
+    else:
+        source = (
+            f"# magic=0x{header.magic:08x} "
+            f"version_hash=0x{header.version_hash:08x} tagged_size={tagged_size}"
+        )
     lines = [
         f"# disassembler V8 {profile.version}",
-        f"# magic=0x{header.magic:08x} "
-        f"version_hash=0x{header.version_hash:08x} tagged_size={tagged_size}",
+        source,
         f"# bytecode_arrays={len(arrays)}",
     ]
     runtime_names = profile.runtime_names_for(header.flags_hash, runtime_variant)
@@ -869,10 +878,32 @@ def disassemble_bytes(
     version: str | None = None,
     runtime_variant: str | None = None,
     snapshot_blob: bytes | None = None,
+    payload_offset: int | None = None,
 ) -> str:
     profiles = load_profiles()
-    header, profile = parse_header(data, profiles, version)
-    payload = data[header.header_size : header.header_size + header.payload_length]
+    if payload_offset is None:
+        header, profile = parse_header(data, profiles, version)
+        payload = data[header.header_size : header.header_size + header.payload_length]
+    else:
+        if version is None:
+            raise ValueError("raw serializer payload requires an explicit V8 version")
+        if not 0 <= payload_offset <= len(data):
+            raise ValueError(
+                f"payload offset {payload_offset} exceeds file size {len(data)}"
+            )
+        profile = profiles.by_version(version)
+        payload = data[payload_offset:]
+        header = CacheHeader(
+            magic=0,
+            version_hash=profile.version_hash,
+            source_hash=0,
+            flags_hash=0,
+            ro_snapshot_checksum=None,
+            payload_length=len(payload),
+            checksum=0,
+            header_size=payload_offset,
+            raw_payload=True,
+        )
     failures: list[str] = []
     for tagged_size in (4, 8):
         try:
@@ -889,7 +920,7 @@ def disassemble_bytes(
                 snapshot = ReadOnlySnapshot.parse(
                     snapshot_blob, profile, tagged_size
                 )
-                if snapshot.magic != header.magic:
+                if not header.raw_payload and snapshot.magic != header.magic:
                     raise ValueError(
                         f"snapshot magic 0x{snapshot.magic:08x} does not match "
                         f"cached data 0x{header.magic:08x}"
@@ -913,7 +944,8 @@ def disassemble_bytes(
                 snapshot,
             )
         failures.append(f"tagged_size={tagged_size}: no BytecodeArray candidates")
-    raise ValueError("unable to parse V8 cached data: " + "; ".join(failures))
+    source = "raw V8 serializer payload" if header.raw_payload else "V8 cached data"
+    raise ValueError(f"unable to parse {source}: " + "; ".join(failures))
 
 
 def disassemble_file(
@@ -921,10 +953,15 @@ def disassemble_file(
     version: str | None = None,
     runtime_variant: str | None = None,
     snapshot_blob: str | Path | None = None,
+    payload_offset: int | None = None,
 ) -> str:
     snapshot_data = (
         Path(snapshot_blob).read_bytes() if snapshot_blob is not None else None
     )
     return disassemble_bytes(
-        Path(path).read_bytes(), version, runtime_variant, snapshot_data
+        Path(path).read_bytes(),
+        version,
+        runtime_variant,
+        snapshot_data,
+        payload_offset,
     )

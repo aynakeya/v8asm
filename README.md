@@ -87,6 +87,12 @@ omitted or guessed. See
 `note/disassembler-standalone-2026-07-15.md` for architecture and
 validation results.
 
+For an Electron application that transforms `.jsc` files before V8 sees them,
+preload `disassembler/capture_cached_data.cjs` to save the exact input and a
+runtime-normalized cache. The disassembler also accepts a known raw serializer
+payload through `--payload-offset`. See `disassembler/README.md` for the
+capture workflow, Windows commands, output files, and limitations.
+
 ## decompiler quick usage
 
 ```bash

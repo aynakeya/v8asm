@@ -16,6 +16,7 @@ class CacheHeader:
     payload_length: int
     checksum: int
     header_size: int
+    raw_payload: bool = False
 
 
 def parse_header(
@@ -36,7 +37,10 @@ def parse_header(
         header_size = 24
     available = len(data) - header_size
     if payload_length > available:
-        raise ValueError(f"payload length {payload_length} exceeds available {available} bytes")
+        raise ValueError(
+            f"payload length {payload_length} exceeds available {available} bytes; "
+            "the selected V8 header layout does not match this buffer"
+        )
     return (
         CacheHeader(
             magic=magic,
