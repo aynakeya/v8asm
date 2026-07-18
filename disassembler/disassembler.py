@@ -154,6 +154,13 @@ def _fixed_array_values(
     obj = _target_object(reference, objects)
     if obj is None:
         return ()
+    return _fixed_array_object_values(obj, tagged_size)
+
+
+def _fixed_array_object_values(
+    obj: SerializedObject,
+    tagged_size: int,
+) -> tuple[int | Reference, ...]:
     image, present = obj.image()
     length = _read_smi(image, present, tagged_size, tagged_size)
     if length is None or length < 0 or 2 * tagged_size + length * tagged_size > obj.size:
@@ -419,7 +426,14 @@ def _root_address(index: int) -> int:
     return 0xE00000000000 + index * 0x10
 
 
-def _decode_string(obj: SerializedObject, tagged_size: int) -> str | None:
+def _decode_string(
+    obj: SerializedObject,
+    profile: Profile,
+    tagged_size: int,
+) -> str | None:
+    map_type = _map_type(obj, profile)
+    if map_type is None or not map_type.endswith("stringmap"):
+        return None
     image, present = obj.image()
     header_size = tagged_size + 8
     if header_size > obj.size or not all(present[tagged_size:header_size]):
@@ -431,7 +445,7 @@ def _decode_string(obj: SerializedObject, tagged_size: int) -> str | None:
     candidates: list[tuple[int, str]] = []
     for width, encoding in ((1, "latin-1"), (2, "utf-16-le")):
         end = header_size + length * width
-        allocated_size = (end + 7) & ~7
+        allocated_size = (end + tagged_size - 1) & ~(tagged_size - 1)
         if allocated_size != obj.size or end > obj.size or not all(present[header_size:end]):
             continue
         if any(image[end:obj.size]):
@@ -466,13 +480,22 @@ def _profile_string(
 
 
 def _map_type(obj: SerializedObject, profile: Profile) -> str | None:
+    name = _map_name(obj, profile)
+    return name.replace("_", "").lower() if name is not None else None
+
+
+def _map_name(obj: SerializedObject, profile: Profile) -> str | None:
     reference = obj.map_reference
     if reference is None or reference.kind != "root" or not reference.values:
         return None
     index = reference.values[0]
     if index >= len(profile.root_names):
         return None
-    return profile.root_names[index].replace("_", "").lower()
+    return profile.root_names[index]
+
+
+def _is_fixed_array(obj: SerializedObject, profile: Profile) -> bool:
+    return _map_type(obj, profile) in {"fixedarraymap", "fixedcowarraymap"}
 
 
 def _reference_string(
@@ -486,7 +509,7 @@ def _reference_string(
         return None
     target = _target_object(reference, objects)
     if target is not None:
-        return _decode_string(target, tagged_size)
+        return _decode_string(target, profile, tagged_size)
     return _profile_string(reference, profile, snapshot)
 
 
@@ -607,15 +630,26 @@ def _format_reference(
     target = _target_object(reference, objects)
     if target is not None:
         address = _object_address(target.index)
-        string = _decode_string(target, tagged_size)
+        string = _decode_string(target, profile, tagged_size)
         function = functions.get(target.index) if functions is not None else None
+        map_type = _map_type(target, profile)
         if string is not None:
             description = f"<String[{len(string)}]>"
         elif function is not None:
             suffix = f" {function.name_value}" if function.name_value else ""
             description = f"<SharedFunctionInfo{suffix}>"
+        elif map_type == "arrayboilerplatedescriptionmap":
+            description = "<ArrayBoilerplateDescription>"
+        elif _is_fixed_array(target, profile):
+            length = len(_fixed_array_object_values(target, tagged_size))
+            description = f"<FixedArray[{length}]>"
         else:
-            description = f"<object_{target.index}>"
+            map_name = _map_name(target, profile)
+            description = (
+                f"<{map_name.removesuffix('Map')}>"
+                if map_name is not None
+                else f"<object_{target.index}>"
+            )
         return f"0x{address:012x} {description}"
     profile_string = _profile_string(reference, profile, snapshot)
     if profile_string is not None:
@@ -637,12 +671,127 @@ def _format_reference(
     return f"0x{address:012x} <{description}>"
 
 
+def _render_reachable_objects(
+    roots: list[Reference],
+    objects: list[SerializedObject],
+    profile: Profile,
+    tagged_size: int,
+    rendered_strings: set[tuple[str, int]],
+    rendered_objects: set[int],
+    functions: dict[int, FunctionInfo],
+    snapshot: ReadOnlySnapshot | None,
+) -> list[str]:
+    lines: list[str] = []
+
+    def render_string(reference: Reference, value: str) -> None:
+        target = _target_object(reference, objects)
+        if target is not None:
+            key = ("object", target.index)
+            address = _object_address(target.index)
+        elif reference.kind == "root":
+            key = ("profile", _root_address(reference.values[0]))
+            address = key[1]
+        elif reference.kind == "read_only" and len(reference.values) == 2:
+            key = ("profile", _root_address(0x20000 + reference.values[1]))
+            address = key[1]
+        else:
+            return
+        if key in rendered_strings:
+            return
+        rendered_strings.add(key)
+        lines.append(
+            f"0x{address:012x}: [String]: "
+            f"{json.dumps(value, ensure_ascii=True)}"
+        )
+
+    def visit(reference: Reference) -> None:
+        target = _target_object(reference, objects)
+        if target is None:
+            value = _profile_string(reference, profile, snapshot)
+            if value is not None:
+                render_string(reference, value)
+            return
+
+        value = _decode_string(target, profile, tagged_size)
+        if value is not None:
+            render_string(reference, value)
+            return
+        if target.index in rendered_objects:
+            return
+
+        map_type = _map_type(target, profile)
+        if map_type == "arrayboilerplatedescriptionmap":
+            rendered_objects.add(target.index)
+            image, present = target.image()
+            elements_kind = _read_smi(image, present, tagged_size, tagged_size)
+            elements_kind_text = (
+                str(elements_kind) if elements_kind is not None else "<unknown>"
+            )
+            constant_elements = target.references.get(2 * tagged_size)
+            lines.extend(
+                [
+                    f"0x{_object_address(target.index):012x}: "
+                    "[ArrayBoilerplateDescription]",
+                    f" - elements kind: {elements_kind_text}",
+                    " - constant elements: "
+                    + (
+                        _format_reference(
+                            constant_elements,
+                            profile,
+                            objects,
+                            tagged_size,
+                            snapshot,
+                            functions,
+                        )
+                        if constant_elements is not None
+                        else "<unknown>"
+                    ),
+                ]
+            )
+            if constant_elements is not None:
+                visit(constant_elements)
+            return
+
+        if not _is_fixed_array(target, profile):
+            return
+        rendered_objects.add(target.index)
+        values = _fixed_array_object_values(target, tagged_size)
+        lines.extend(
+            [
+                f"0x{_object_address(target.index):012x}: [FixedArray]",
+                f" - length: {len(values)}",
+            ]
+        )
+        references: list[Reference] = []
+        for index, element in enumerate(values):
+            if isinstance(element, Reference):
+                rendered = _format_reference(
+                    element,
+                    profile,
+                    objects,
+                    tagged_size,
+                    snapshot,
+                    functions,
+                )
+                references.append(element)
+            else:
+                rendered = str(element)
+            lines.append(f"{index:12d}: {rendered}")
+        for element in references:
+            visit(element)
+
+    for root in roots:
+        visit(root)
+    return lines
+
+
 def _render_constant_pool(
     array: BytecodeArray,
     objects: list[SerializedObject],
     profile: Profile,
     tagged_size: int,
     rendered_strings: set[tuple[str, int]],
+    rendered_objects: set[int],
     functions: dict[int, FunctionInfo],
     snapshot: ReadOnlySnapshot | None,
 ) -> list[str]:
@@ -653,49 +802,28 @@ def _render_constant_pool(
         f"0x{pool_address:012x}: [TrustedFixedArray]",
         f" - length: {len(array.constant_pool)}",
     ]
-    string_indexes: list[int] = []
-    profile_strings: list[tuple[int, str]] = []
+    references: list[Reference] = []
     for index, value in enumerate(array.constant_pool):
         if isinstance(value, Reference):
+            references.append(value)
             rendered = _format_reference(
                 value, profile, objects, tagged_size, snapshot, functions
             )
-            if value.object_index is not None:
-                target = objects[value.object_index]
-                if _decode_string(target, tagged_size) is not None:
-                    string_indexes.append(target.index)
-            else:
-                profile_string = _profile_string(value, profile, snapshot)
-                if profile_string is not None:
-                    address = (
-                        _root_address(value.values[0])
-                        if value.kind == "root"
-                        else _root_address(0x20000 + value.values[1])
-                    )
-                    profile_strings.append((address, profile_string))
         else:
             rendered = str(value)
         lines.append(f"{index:12d}: {rendered}")
-    for object_index in string_indexes:
-        key = ("object", object_index)
-        if key in rendered_strings:
-            continue
-        value = _decode_string(objects[object_index], tagged_size)
-        if value is None:
-            continue
-        rendered_strings.add(key)
-        lines.append(
-            f"0x{_object_address(object_index):012x}: [String]: "
-            f"{json.dumps(value, ensure_ascii=True)}"
+    lines.extend(
+        _render_reachable_objects(
+            references,
+            objects,
+            profile,
+            tagged_size,
+            rendered_strings,
+            rendered_objects,
+            functions,
+            snapshot,
         )
-    for address, value in profile_strings:
-        key = ("profile", address)
-        if key in rendered_strings:
-            continue
-        rendered_strings.add(key)
-        lines.append(
-            f"0x{address:012x}: [String]: {json.dumps(value, ensure_ascii=True)}"
-        )
+    )
     return lines
 
 
@@ -809,6 +937,7 @@ def _render(
     ]
     runtime_names = profile.runtime_names_for(header.flags_hash, runtime_variant)
     rendered_strings: set[tuple[str, int]] = set()
+    rendered_objects: set[int] = set()
     functions = _function_infos(objects, arrays, profile, tagged_size, snapshot)
     for array in arrays:
         lines.extend(
@@ -855,6 +984,7 @@ def _render(
                 profile,
                 tagged_size,
                 rendered_strings,
+                rendered_objects,
                 functions,
                 snapshot,
             )

@@ -22,19 +22,29 @@ function report(error) {
 }
 
 function extractPayload(cache) {
-  const pointerSize = process.arch === "ia32" || process.arch === "arm" ? 4 : 8;
   const layouts = [
-    { lengthOffset: 20, unalignedHeaderSize: 28 },
     { lengthOffset: 16, unalignedHeaderSize: 24 },
+    { lengthOffset: 20, unalignedHeaderSize: 28 },
   ];
-  const candidates = layouts.flatMap(({ lengthOffset, unalignedHeaderSize }) => {
-    const headerSize =
-      Math.ceil(unalignedHeaderSize / pointerSize) * pointerSize;
-    if (cache.length < headerSize || cache.length < lengthOffset + 4) return [];
-    const payloadSize = cache.readUInt32LE(lengthOffset);
-    if (payloadSize !== cache.length - headerSize) return [];
-    return [{ headerSize, payloadSize }];
-  });
+  const candidates = layouts.flatMap(
+    ({ lengthOffset, unalignedHeaderSize }) => {
+      if (
+        cache.length < unalignedHeaderSize ||
+        cache.length < lengthOffset + 4
+      ) {
+        return [];
+      }
+      const payloadSize = cache.readUInt32LE(lengthOffset);
+      const headerSize = cache.length - payloadSize;
+      if (headerSize < unalignedHeaderSize || headerSize % 4 !== 0) return [];
+      if (
+        cache.subarray(unalignedHeaderSize, headerSize).some((value) => value)
+      ) {
+        return [];
+      }
+      return [{ headerSize, payloadSize }];
+    }
+  );
   if (candidates.length !== 1) return null;
   const [{ headerSize, payloadSize }] = candidates;
   return {
