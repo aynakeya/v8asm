@@ -6,6 +6,18 @@ The Python module accepts a complete V8 `ScriptCompiler::CachedData` buffer:
 python3 -m disassembler input.jsc > /tmp/input.disasm.txt
 ```
 
+Use structured JSON when feeding the result to the Python decompiler:
+
+```bash
+python3 -m disassembler input.jsc --format json > /tmp/input.disasm.json
+python3 -m decompiler /tmp/input.disasm.json --level 4
+```
+
+The JSON document is a versioned, address-indexed object graph. Its addresses
+are deterministic offline identities, not process heap pointers. See
+`SCHEMA.md` for field and compatibility rules. Text remains the default for
+backwards compatibility.
+
 Use `--version` when a custom runtime has an unknown version hash but its V8
 source layout matches a checked-in profile. Use the startup snapshot whose
 read-only checksum matches the cache:

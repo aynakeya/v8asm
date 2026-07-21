@@ -1,5 +1,5 @@
 from typing import List
-from objects import *
+from .objects import *
 import re
 
 HEADER_RE = re.compile(r"^(0x[0-9a-f]+): \[([A-Za-z0-9_]+)\]")

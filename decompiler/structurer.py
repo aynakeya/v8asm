@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Set, Tuple
 
-from cfg import (
+from .cfg import (
     BasicBlock,
     LoopRegion,
     build_basic_blocks,
@@ -11,9 +11,9 @@ from cfg import (
     is_loop_jump,
     is_unconditional_jump,
 )
-from statements import IfStatement, LoopStatement, SimpleStatement, Statement
-from translator import InstructionTranslator
-from utils import parse_jump_target, strip_trailing_goto
+from .statements import IfStatement, LoopStatement, SimpleStatement, Statement
+from .translator import InstructionTranslator
+from .utils import parse_jump_target, strip_trailing_goto
 
 
 class Structurer:

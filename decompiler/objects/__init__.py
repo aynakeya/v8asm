@@ -1,15 +1,15 @@
 from typing import List
 
-from objects.base import V8HeapObject, V8Address, V8Smi
-from objects.boilerplate import (
+from .base import V8HeapObject, V8Address, V8Smi
+from .boilerplate import (
     V8ArrayBoilerplateDescription,
     V8ObjectBoilerplateDescription,
     V8ScopeInfo,
 )
-from objects.bytecode import V8BytecodeArray,CodeLine
-from objects.fixed_array import V8TrustedFixedArray, V8FixedArray
-from objects.string import V8String
-from objects.sfi import V8SharedFunctionInfo
+from .bytecode import V8BytecodeArray,CodeLine
+from .fixed_array import V8TrustedFixedArray, V8FixedArray
+from .string import V8String
+from .sfi import V8SharedFunctionInfo
 
 
 def parse_object(address:int, i_type:str, lines:List[str]) -> V8HeapObject:

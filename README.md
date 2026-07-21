@@ -6,13 +6,14 @@ blog (chinese only): [a-quick-guide-to-disassemble-v8-bytecode](https://www.ayna
 
 ## Todo
 
-- [x] disassembler
-- [x] version brute force
+- [x] standalone Python disassembler
+- [x] versioned structured JSON object graph
+- [x] source-generated V8 version profiles and version search
+- [x] closure nesting and basic ScopeInfo context-name recovery
 - [ ] checksum rewrite: allow modify bytecode
 - [ ] rewrite header
-- [ ] decompiler
-- [ ] make it works for electron :(
-- [ ] some bug about 
+- [ ] continue high-level decompiler data-flow and expression recovery
+- [ ] broaden Electron/private-build object-layout coverage
 
 ## project struct
 
@@ -45,9 +46,16 @@ narrow the search. Ranges use `START:END` with an exclusive end. See
 Runtime use requires only Python 3 and the checked-in per-version JSON profiles:
 
 ```bash
-python3 -m disassembler input.jsc > /tmp/input.disasm.txt
-python3 decompiler/v8decompiler.py /tmp/input.disasm.txt --level 4 --runtime
+python3 -m disassembler input.jsc --format json > /tmp/input.disasm.json
+python3 -m decompiler /tmp/input.disasm.json --level 4 --runtime
 ```
+
+JSON is the primary disassembler/decompiler interface. It preserves typed
+instructions, constant-pool references, SFI/ScopeInfo links, handler entries,
+and object relationships without reparsing display text. Object keys look like
+addresses but are deterministic offline identities, not live V8 heap pointers.
+See `disassembler/SCHEMA.md` for the versioned schema. Omit `--format json` to
+produce the backwards-compatible text listing.
 
 The cache header normally selects the exact V8 profile. For a custom build with
 an unknown version hash, select a known matching bytecode layout explicitly:
@@ -58,9 +66,9 @@ python3 -m disassembler input.jsc --version 13.4.114.21
 
 Profiles cover V8 10.2, 10.8, 11.3, 11.4, 11.9, 12.4, 12.9, 13.2, 13.4,
 and 13.6 tags used by the test matrix. Opcode mappings, serializer tags,
-BytecodeArray/SFI/ScopeInfo layouts, runtime IDs, intrinsics, roots, and jump
-semantics are stored under `disassembler/profiles/`. Regenerate them from an
-official V8 checkout without changing its current branch:
+BytecodeArray/SFI/ScopeInfo and literal-object layouts, runtime IDs, intrinsics,
+roots, and jump semantics are stored under `disassembler/profiles/`. Regenerate
+them from an official V8 checkout without changing its current branch:
 
 ```bash
 python3 -m disassembler.generate_profiles \
@@ -96,11 +104,15 @@ capture workflow, Windows commands, output files, and limitations.
 ## decompiler quick usage
 
 ```bash
-python3 decompiler/v8decompiler.py samples/main.d8.jsc.txt --level 1
-python3 decompiler/v8decompiler.py samples/main.d8.jsc.txt --level 2
-python3 decompiler/v8decompiler.py samples/main.d8.jsc.txt --level 3
-python3 decompiler/v8decompiler.py samples/main.d8.jsc.txt --level 4 --runtime
+python3 -m decompiler samples/main.d8.jsc.txt --level 1
+python3 -m decompiler samples/main.d8.jsc.txt --level 2
+python3 -m decompiler samples/main.d8.jsc.txt --level 3
+python3 -m decompiler samples/main.d8.jsc.txt --level 4 --runtime
 ```
+
+Both schema-v1 JSON and legacy text dumps are accepted. The old
+`python3 decompiler/v8decompiler.py ...` entry point remains as a compatibility
+wrapper.
 
 ### decompile levels
 
@@ -109,8 +121,8 @@ python3 decompiler/v8decompiler.py samples/main.d8.jsc.txt --level 4 --runtime
 - level 3: level 2 + conservative simplification (register propagation, safer readability).
 - level 4: level 3 + high-level pattern recovery (e.g. iterator state
   machine -> `for...of`, `+=` folding, string-concat return folding, bound
-  method calls, dead temporary register cleanup, local context-slot closure
-  name recovery).
+  method calls, dead temporary register cleanup, unique function naming,
+  lexical closure nesting, and ScopeInfo-based context variable recovery).
 
 ### regression rounds
 

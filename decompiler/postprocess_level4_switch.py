@@ -4,7 +4,7 @@ from collections import Counter
 import re
 from typing import Dict, List, Optional, Tuple
 
-from postprocess_level4_common import _extract_indent
+from .postprocess_level4_common import _extract_indent
 
 
 def _recover_constant_dispatch_assignments(lines: List[str]) -> List[str]:

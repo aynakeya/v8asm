@@ -274,7 +274,51 @@ def parse_shared_function_info_layout(source: str) -> dict[str, list[int]]:
         raise ValueError("SharedFunctionInfo tagged fields not found") from exc
 
 
-def parse_scope_info_layout(source: str, globals_source: str) -> dict[str, object]:
+def parse_object_boilerplate_layout(source: str) -> dict[str, object]:
+    legacy = re.search(
+        r"class ObjectBoilerplateDescription\s*:\s*public FixedArray", source
+    )
+    if legacy:
+        return {
+            "capacity_slot": 1,
+            "backing_store_size_slot": None,
+            "flags_slot": 2,
+            "elements_slot": 3,
+            "backing_store_size_in_tail": True,
+        }
+    modern = re.search(
+        r"class ObjectBoilerplateDescription\s*"
+        r":\s*public TaggedArrayBase<",
+        source,
+    )
+    if modern:
+        return {
+            "capacity_slot": 1,
+            "backing_store_size_slot": 2,
+            "flags_slot": 3,
+            "elements_slot": 4,
+            "backing_store_size_in_tail": False,
+        }
+    raise ValueError("ObjectBoilerplateDescription layout not found")
+
+
+def _context_header_lengths(source: str) -> tuple[int, int]:
+    field_match = re.search(
+        r"enum Field\s*\{(.*?)\bEXTENSION_INDEX\b", source, re.DOTALL
+    )
+    if not field_match:
+        raise ValueError("Context field layout not found")
+    prefix = re.sub(
+        r"/\*.*?\*/|//[^\n]*", "", field_match.group(1), flags=re.DOTALL
+    )
+    fields = re.findall(r"\b[A-Z][A-Z0-9_]*\s*(?:=[^,]+)?\s*,", prefix)
+    minimum = len(fields)
+    return minimum, minimum + 1
+
+
+def parse_scope_info_layout(
+    source: str, globals_source: str, contexts_source: str
+) -> dict[str, object]:
     flags_match = re.search(
         r"bitfield struct ScopeFlags extends uint(?:31|32)\s*\{(.*?)\n\}",
         source,
@@ -315,12 +359,16 @@ def parse_scope_info_layout(source: str, globals_source: str) -> dict[str, objec
     module_count = class_body.find("module_variable_count")
     local_names = class_body.find("context_local_names[")
     required_flags = (
+        "has_context_extension_slot",
         "has_saved_class_variable",
         "function_variable",
         "has_inferred_function_name",
     )
     if any(name not in shifts for name in required_flags):
         raise ValueError("required ScopeFlags fields not found")
+    min_context_slots, min_context_extended_slots = _context_header_lengths(
+        contexts_source
+    )
     return {
         "flags_encoding": (
             "smi" if "flags: SmiTagged<ScopeFlags>" in class_body else "uint32"
@@ -333,6 +381,10 @@ def parse_scope_info_layout(source: str, globals_source: str) -> dict[str, objec
         "max_inlined_local_names": int(max_names_match.group(1)),
         "scope_type_shift": shifts["scope_type"],
         "scope_type_mask": 0xF,
+        "scope_type_names": scope_types,
+        "context_extension_slot_bit": shifts["has_context_extension_slot"],
+        "min_context_slots": min_context_slots,
+        "min_context_extended_slots": min_context_extended_slots,
         "saved_class_variable_bit": shifts["has_saved_class_variable"],
         "function_variable_shift": shifts["function_variable"],
         "function_variable_mask": 0x3,
@@ -481,8 +533,12 @@ def build_profile(repo: Path, version: str) -> dict[str, object]:
     static_roots_source = git_show_optional(repo, version, "src/roots/static-roots.h")
     globals_source = git_show(repo, version, "src/common/globals.h")
     scope_info_source = git_show(repo, version, "src/objects/scope-info.tq")
+    contexts_source = git_show(repo, version, "src/objects/contexts.h")
     shared_function_info_source = git_show(
         repo, version, "src/objects/shared-function-info.tq"
+    )
+    literal_objects_source = git_show(
+        repo, version, "src/objects/literal-objects.h"
     )
     bytecode_array_source = git_show_optional(repo, version, "src/objects/bytecode-array.tq")
     if bytecode_array_source is None:
@@ -515,8 +571,11 @@ def build_profile(repo: Path, version: str) -> dict[str, object]:
         "shared_function_info_layout": parse_shared_function_info_layout(
             shared_function_info_source
         ),
+        "object_boilerplate_layout": parse_object_boilerplate_layout(
+            literal_objects_source
+        ),
         "scope_info_layout": parse_scope_info_layout(
-            scope_info_source, globals_source
+            scope_info_source, globals_source, contexts_source
         ),
         "runtime_default_variant": default_runtime_variant,
         "runtime_variants": {

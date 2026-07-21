@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import List
 
-from postprocess_level4_common import _extract_indent
+from .postprocess_level4_common import _extract_indent
 
 
 def recover_undefined_default_assignments(lines: List[str]) -> List[str]:

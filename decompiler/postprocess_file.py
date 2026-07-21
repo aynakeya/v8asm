@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from typing import Dict, List
 
-from postprocess_level4_strings import _compact_register_concat_returns
+from .postprocess_level4_strings import _compact_register_concat_returns
 
 
 IDENT = r"[A-Za-z_$][A-Za-z0-9_$]*"

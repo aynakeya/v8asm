@@ -1732,6 +1732,13 @@
     "CreateIterResultObject",
     "CreateAsyncFromSyncIterator"
   ],
+  "object_boilerplate_layout": {
+    "backing_store_size_in_tail": false,
+    "backing_store_size_slot": 2,
+    "capacity_slot": 1,
+    "elements_slot": 4,
+    "flags_slot": 3
+  },
   "read_only_strings": {
     "10424": ".",
     "10456": "0",
@@ -4863,15 +4870,30 @@
     ]
   },
   "scope_info_layout": {
+    "context_extension_slot_bit": 26,
     "flags_encoding": "uint32",
     "function_variable_mask": 3,
     "function_variable_shift": 12,
     "inferred_function_name_bit": 14,
     "max_inlined_local_names": 75,
+    "min_context_extended_slots": 3,
+    "min_context_slots": 2,
     "module_count_before_locals": true,
     "module_scope_value": 5,
     "saved_class_variable_bit": 10,
     "scope_type_mask": 15,
+    "scope_type_names": [
+      "SCRIPT_SCOPE",
+      "REPL_MODE_SCOPE",
+      "CLASS_SCOPE",
+      "EVAL_SCOPE",
+      "FUNCTION_SCOPE",
+      "MODULE_SCOPE",
+      "CATCH_SCOPE",
+      "BLOCK_SCOPE",
+      "WITH_SCOPE",
+      "SHADOW_REALM_SCOPE"
+    ],
     "scope_type_shift": 0,
     "variable_part_slot": 6
   },

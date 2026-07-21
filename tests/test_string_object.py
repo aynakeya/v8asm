@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DECOMPILER = ROOT / "decompiler"
-if str(DECOMPILER) not in sys.path:
-    sys.path.insert(0, str(DECOMPILER))
-
-from objects.string import V8String
+from decompiler.objects.string import V8String
 
 
 class V8StringTests(unittest.TestCase):

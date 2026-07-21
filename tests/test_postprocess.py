@@ -1,17 +1,12 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DECOMPILER = ROOT / "decompiler"
-if str(DECOMPILER) not in sys.path:
-    sys.path.insert(0, str(DECOMPILER))
-
-from postprocess import _compact_compound_assignments, simplify_lines
-from parser import parse_objects
+from decompiler.postprocess import _compact_compound_assignments, simplify_lines
+from decompiler.parser import parse_objects
 
 
 class SimplifyLinesTests(unittest.TestCase):

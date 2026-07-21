@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 
-from instruction import Instruction
-from utils import parse_jump_target
+from .instruction import Instruction
+from .utils import parse_jump_target
 
 
 UNCONDITIONAL_JUMPS = {"Jump", "JumpConstant"}

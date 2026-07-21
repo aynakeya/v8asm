@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import List
+from typing import List, Optional
 
-from objects.bytecode import CodeLine
+from .objects.bytecode import CodeLine
 
 OPERAND_SCALE_SUFFIXES = (".Wide", ".ExtraWide")
 
@@ -56,6 +56,7 @@ class Instruction:
     mnemonic: str
     args: List[str]
     raw_line: str
+    jump_target: Optional[int] = None
 
     def __post_init__(self) -> None:
         for suffix in OPERAND_SCALE_SUFFIXES:
@@ -68,6 +69,11 @@ class Instruction:
         return cls(
             offset=line.offset,
             mnemonic=line.mnemonic,
-            args=_split_operands(line.operands),
+            args=(
+                list(line.arguments)
+                if line.arguments is not None
+                else _split_operands(line.operands)
+            ),
             raw_line=line.raw,
+            jump_target=line.jump_target,
         )

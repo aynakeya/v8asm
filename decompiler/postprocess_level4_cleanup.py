@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List
 
-from postprocess_level4_common import _extract_indent, _find_block_end
+from .postprocess_level4_common import _extract_indent, _find_block_end
 
 
 def _is_pure_expr_level4(expr: str) -> bool:
@@ -184,7 +184,12 @@ def _drop_duplicate_expr_before_assignment(lines: List[str]) -> List[str]:
                 i += 1
                 continue
 
-            m_assign = re.match(r"^r\d+\s*=\s*(.+)$", next_line)
+            m_assign = re.match(
+                r"^[A-Za-z_$][A-Za-z0-9_$]*"
+                r"(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]+\])*"
+                r"\s*=(?!=)\s*(.+)$",
+                next_line,
+            )
             if (
                 expr
                 and m_assign

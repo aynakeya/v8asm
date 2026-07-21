@@ -1,16 +1,28 @@
 from typing import Optional
 import re
 
-from objects.base import *
+from .base import *
 
 
 class CodeLine:
-    def __init__(self, offset: int, bytestr: str, mnemonic: str, operands: str, raw: str):
+    def __init__(
+        self,
+        offset: int,
+        bytestr: str,
+        mnemonic: str,
+        operands: str,
+        raw: str,
+        *,
+        arguments: Optional[list[str]] = None,
+        jump_target: Optional[int] = None,
+    ):
         self.offset = offset          # 指令偏移（如 0）
         self.bytestr = bytestr        # 原始字节串（如 "0b 04"）
         self.mnemonic = mnemonic      # 助记符（如 "Ldar"）
         self.operands = operands      # 操作数（如 "a1"）
         self.raw = raw                # 原始整行文本
+        self.arguments = arguments
+        self.jump_target = jump_target
 
     @classmethod
     def from_text(cls, line: str) -> "CodeLine":
@@ -78,6 +90,8 @@ class V8BytecodeArray(V8HeapObject):
         self.source_position_table_size: Optional[int] = None
         self.instructions: List[CodeLine] = []
         self.handler_entries: List[HandlerEntry] = []
+        self.constant_pool_address: Optional[int] = None
+        self.file_offset: Optional[int] = None
 
     def parse(self):
         in_handler_table = False

@@ -116,22 +116,22 @@ function a0_0x5560(arg0, arg1) {
 - 不匹配的普通函数不会被误判为 decoder。
 - 测试不能依赖固定函数名、object ID 或数组索引。
 
-### P1：跟踪闭包 context slot 来源
+### P1：补全闭包 context slot 来源
 
-`ensureDefined("name")`、`script_context[N]` 和
-`context_slot(context, N, M)` 当前不能提供可靠的跨函数定义链。
+当前结构化对象图已经通过 `CreateClosure`、SFI 和 ScopeInfo 建立基本父子函数
+关系，并能在 10.2、11.3、12.4、13.6 的复杂 fixture 中把捕获变量恢复为名称。
+尚未完成的是定义位置、shadowing 和多层动态 context 的精确建模。
 
 需要完成：
 
-- 建模 parent context 创建过程和嵌套函数的 context depth。
 - 将已知 slot 关联到定义函数和赋值 bytecode offset。
 - 在函数边界输出捕获变量。
-- 对 script context 和 function context 使用统一表示，同时保留 depth 和 slot。
+- 正确区分同一函数中的多个 block/catch context，并处理 slot shadowing。
+- 对显式 depth 大于零的 context load/store 建立逐层 ScopeInfo 对应关系。
 - 来源不唯一时输出明确的 unknown 标记。
 
 验收条件：
 
-- context chain 静态可知时，可以从嵌套函数读取追踪到定义位置。
 - `ensureDefined` 能输出已知的来源函数和 bytecode offset。
 - 测试覆盖 slot shadowing 和多层 context depth。
 

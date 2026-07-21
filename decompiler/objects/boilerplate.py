@@ -3,8 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from objects.base import V8Address, V8HeapObject, V8Smi
-from objects.fixed_array import V8FixedArray
+from .base import V8Address, V8HeapObject, V8Smi
+from .fixed_array import V8FixedArray
 
 
 def _parse_inline_value(payload: str) -> Any:
@@ -76,7 +76,9 @@ class V8ScopeInfo(V8HeapObject):
         super().__init__(address, i_type, lines)
         self.scope_type: Optional[str] = None
         self.context_local_count: Optional[int] = None
+        self.context_header_length: Optional[int] = None
         self.context_slots: list[Any] = []
+        self.context_slot_names: dict[int, Any] = {}
 
     def parse(self):
         in_context_slots = False

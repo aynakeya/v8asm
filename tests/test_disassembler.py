@@ -15,20 +15,20 @@ from disassembler.disassembler import (
     decode_instructions,
     disassemble_bytes,
     disassemble_file,
+    parse_disassembly_file,
 )
 from disassembler.profiles import load_profiles
 from disassembler.serializer import ObjectStreamParser
 from disassembler.snapshot import ReadOnlySnapshot
+from disassembler.structured import disassembly_to_dict
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DECOMPILER = ROOT / "decompiler"
-if str(DECOMPILER) not in sys.path:
-    sys.path.insert(0, str(DECOMPILER))
-
-from context import DecompilerContext
-from objects import V8Address, V8ArrayBoilerplateDescription, V8FixedArray
-from parser import parse_objects
+from decompiler import decompile_objects
+from decompiler.context import DecompilerContext
+from decompiler.objects import V8Address, V8ArrayBoilerplateDescription, V8FixedArray
+from decompiler.parser import parse_objects
+from decompiler.structured import load_structured_objects
 
 
 BYTECODE_ARRAY_RE = re.compile(r"^\s*0x[0-9a-f]+:\s+\[BytecodeArray\]", re.I)
@@ -165,6 +165,69 @@ def array_boilerplate_signatures(
 
 
 class OfflineDisassemblerTests(unittest.TestCase):
+    def test_structured_output_preserves_addressed_object_graph(self) -> None:
+        parsed = parse_disassembly_file(ROOT / "samples" / "main.d8.jsc")
+        document = disassembly_to_dict(parsed)
+
+        self.assertEqual(document["schema"], "v8asm.disassembly")
+        self.assertEqual(document["schema_version"], 1)
+        self.assertEqual(document["metadata"]["v8_version"], parsed.profile.version)
+        self.assertEqual(
+            document["metadata"]["address_kind"],
+            "synthetic_serializer_object",
+        )
+        self.assertEqual(
+            document["metadata"]["header"]["payload_length"],
+            parsed.header.payload_length,
+        )
+
+        objects = document["objects"]
+        self.assertTrue(objects)
+        self.assertEqual(set(document["object_order"]), set(objects))
+        for address, record in objects.items():
+            self.assertRegex(address, r"^0x[0-9a-f]{12}$")
+            self.assertEqual(record["address"], address)
+
+        bytecodes = [
+            record for record in objects.values() if record["type"] == "BytecodeArray"
+        ]
+        self.assertEqual(len(bytecodes), 4)
+        add = next(
+            record
+            for record in bytecodes
+            if any(
+                obj.get("type") == "SharedFunctionInfo"
+                and obj.get("name_value") == "add"
+                and obj.get("bytecode_address") == record["address"]
+                for obj in objects.values()
+            )
+        )
+        self.assertIn(add["constant_pool_address"], objects)
+        self.assertTrue(add["instructions"])
+        instruction = add["instructions"][0]
+        self.assertIsInstance(instruction["operands"], list)
+        self.assertIsInstance(instruction["arguments"], list)
+        self.assertIn("raw_bytes", instruction)
+
+    def test_disassembler_cli_emits_json(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "disassembler",
+                str(ROOT / "samples" / "main.d8.jsc"),
+                "--format",
+                "json",
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+        )
+        document = json.loads(result.stdout)
+        self.assertEqual(document["schema"], "v8asm.disassembly")
+        self.assertEqual(document["metadata"]["bytecode_array_count"], 4)
+
     def test_resolves_static_read_only_snapshot_strings(self) -> None:
         profile = load_profiles().by_version("13.4.114.21")
         one_byte_map = next(
@@ -514,6 +577,26 @@ class OfflineDisassemblerTests(unittest.TestCase):
                     for bytecode in bytecodes
                 ]
                 self.assertIn("calc", names)
+
+                parsed = parse_disassembly_file(path)
+                structured_objects = load_structured_objects(
+                    disassembly_to_dict(parsed)
+                )
+                structured_context = DecompilerContext(structured_objects)
+                structured_bytecodes = [
+                    obj
+                    for obj in structured_objects
+                    if obj.i_type == "BytecodeArray"
+                ]
+                structured_names = [
+                    structured_context.get_function_name(
+                        structured_context.get_function_for_bytecode(bytecode)
+                    )
+                    for bytecode in structured_bytecodes
+                ]
+                self.assertEqual(structured_names, names)
+                decompiled = decompile_objects(structured_objects, level=1)
+                self.assertIn("function calc(", decompiled)
                 recognized += 1
         self.assertEqual(recognized, 26)
 

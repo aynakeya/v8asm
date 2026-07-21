@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
-from .disassembler import disassemble_file
+from .disassembler import disassemble_file, parse_disassembly_file
+from .structured import disassembly_to_dict
 
 
 def _offset(value: str) -> int:
@@ -22,6 +24,12 @@ def main() -> int:
         description="Disassemble V8 cached bytecode without loading V8",
     )
     parser.add_argument("input")
+    parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="output format (default: text)",
+    )
     parser.add_argument("--version", help="override V8 version-hash detection")
     parser.add_argument(
         "--runtime-variant",
@@ -41,15 +49,28 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
-        sys.stdout.write(
-            disassemble_file(
-                args.input,
-                args.version,
-                args.runtime_variant,
-                args.snapshot_blob,
-                args.payload_offset,
+        if args.format == "json":
+            document = disassembly_to_dict(
+                parse_disassembly_file(
+                    args.input,
+                    args.version,
+                    args.runtime_variant,
+                    args.snapshot_blob,
+                    args.payload_offset,
+                )
             )
-        )
+            json.dump(document, sys.stdout, ensure_ascii=True, indent=2)
+            sys.stdout.write("\n")
+        else:
+            sys.stdout.write(
+                disassemble_file(
+                    args.input,
+                    args.version,
+                    args.runtime_variant,
+                    args.snapshot_blob,
+                    args.payload_offset,
+                )
+            )
     except (OSError, ValueError) as exc:
         parser.exit(1, f"disassembler: {exc}\n")
     return 0

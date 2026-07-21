@@ -3,13 +3,15 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from instruction import Instruction
+from .instruction import Instruction
 
 JUMP_TARGET_RE = re.compile(r"@ (\d+)\)")
 
 
 def parse_jump_target(instr: Instruction) -> Optional[int]:
     """Extract the numeric jump target from an instruction, if present."""
+    if instr.jump_target is not None:
+        return instr.jump_target
     for token in instr.args:
         match = JUMP_TARGET_RE.search(token)
         if match:

@@ -1,19 +1,171 @@
 from __future__ import annotations
 
+import json
+import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DECOMPILER = ROOT / "decompiler"
-if str(DECOMPILER) not in sys.path:
-    sys.path.insert(0, str(DECOMPILER))
-
-from v8decompiler import decompile_file
+from decompiler import decompile_file, decompile_objects
+from disassembler.disassembler import parse_disassembly_file
+from disassembler.structured import disassembly_to_dict
+from decompiler.context import DecompilerContext
+from decompiler.objects import V8Address, V8BytecodeArray, V8SharedFunctionInfo
+from decompiler.structured import load_structured_objects
 
 
 class DecompilerFileTests(unittest.TestCase):
+    def test_module_cli_reads_structured_json(self) -> None:
+        document = disassembly_to_dict(
+            parse_disassembly_file(ROOT / "samples" / "main.d8.jsc")
+        )
+        path = ROOT / "tests" / "tmp_cli_disassembly.json"
+        try:
+            path.write_text(json.dumps(document), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "decompiler",
+                    str(path),
+                    "--level",
+                    "1",
+                ],
+                cwd=ROOT,
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+            )
+        finally:
+            path.unlink(missing_ok=True)
+
+        self.assertIn("function add(arg0, arg1)", result.stdout)
+
+    def test_complex_fixture_recovers_object_literals_and_closures(self) -> None:
+        versions = (
+            "10.2.154.26",
+            "11.3.244.8",
+            "12.4.254.21",
+            "13.6.233.10",
+        )
+        for version in versions:
+            with self.subTest(version=version):
+                parsed = parse_disassembly_file(
+                    ROOT
+                    / "tests"
+                    / "fixtures"
+                    / f"complex-closures-{version}.jsc"
+                )
+                document = disassembly_to_dict(parsed)
+                output = decompile_objects(
+                    load_structured_objects(document), level=4
+                )
+
+                self.assertEqual(document["metadata"]["v8_version"], version)
+                self.assertIn(
+                    "[{ enabled: true, value: 3 }, "
+                    "{ enabled: false, value: 8 }, { enabled: true }]",
+                    output,
+                )
+                self.assertIn("function createCounter(arg0 = 0)", output)
+                self.assertIn("\n  function increment(arg0 = 1)", output)
+                self.assertIn("\n  function read()", output)
+                self.assertNotIn("\nfunction increment(", output)
+                self.assertNotIn("\nfunction read()", output)
+                self.assertIn("ACCU = value", output)
+                self.assertNotIn("context_slot[2]", output)
+                self.assertIn("counter = createCounter(2)", output)
+                self.assertIn("output = mapValues(", output)
+                self.assertEqual(output.count("createCounter(2)"), 1)
+                self.assertEqual(output.count("counter.read()"), 1)
+                self.assertIn("r2.current = counter.read()", output)
+                self.assertEqual(
+                    output.count(
+                        "mapValues([{ enabled: true, value: 3 }, "
+                    ),
+                    1,
+                )
+                self.assertIn("let counter, output;", output)
+                self.assertNotIn("function anonymous_1()", output)
+                self.assertIn("r2.increment = increment", output)
+                self.assertIn("r2.read = read", output)
+                self.assertNotIn("create_closure(increment)", output)
+                self.assertNotIn("create_closure(read)", output)
+
+                names = re.findall(
+                    r"^\s*function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(",
+                    output,
+                    flags=re.MULTILINE,
+                )
+                self.assertEqual(len(names), len(set(names)))
+                for name in (
+                    "createCounter",
+                    "mapValues",
+                    "increment",
+                    "read",
+                ):
+                    self.assertIn(name, output)
+
+    def test_structured_closure_recovers_nesting_and_context_name(self) -> None:
+        document = disassembly_to_dict(
+            parse_disassembly_file(
+                ROOT / "tests" / "fixtures" / "closure-13.6.233.10.jsc"
+            )
+        )
+        path = ROOT / "tests" / "tmp_closure_disassembly.json"
+        try:
+            path.write_text(json.dumps(document), encoding="utf-8")
+            output = decompile_file(path, level=1)
+        finally:
+            path.unlink(missing_ok=True)
+
+        self.assertIn("function makeAdder(base) {", output)
+        self.assertIn("\n  function add(arg0) {", output)
+        self.assertNotIn("\nfunction add(arg0) {", output)
+        self.assertIn("ACCU = base", output)
+        self.assertIn("base = ACCU", output)
+        self.assertNotIn("context_slot[2]", output)
+
+    def test_anonymous_function_names_are_unique(self) -> None:
+        first_bytecode = V8BytecodeArray(0x1000, "BytecodeArray", [])
+        second_bytecode = V8BytecodeArray(0x2000, "BytecodeArray", [])
+        first = V8SharedFunctionInfo(0x3000, "SharedFunctionInfo", [])
+        second = V8SharedFunctionInfo(0x4000, "SharedFunctionInfo", [])
+        first.name_value = ""
+        second.name_value = ""
+        first.trusted_function_data = V8Address(first_bytecode.address)
+        second.trusted_function_data = V8Address(second_bytecode.address)
+
+        context = DecompilerContext(
+            [first_bytecode, second_bytecode, first, second]
+        )
+
+        self.assertEqual(context.get_function_name(first), "anonymous_1")
+        self.assertEqual(context.get_function_name(second), "anonymous_2")
+
+    def test_structured_json_bypasses_text_object_parser(self) -> None:
+        document = disassembly_to_dict(
+            parse_disassembly_file(ROOT / "samples" / "main.d8.jsc")
+        )
+        path = ROOT / "tests" / "tmp_disassembly.json"
+        try:
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with mock.patch(
+                "decompiler.core.parse_objects",
+                side_effect=AssertionError("text parser must not be used for JSON"),
+            ):
+                output = decompile_file(path, level=1)
+        finally:
+            path.unlink(missing_ok=True)
+
+        self.assertIn("function add(arg0, arg1)", output)
+        self.assertIn("function listSum(arg0)", output)
+        self.assertIn('"console"', output)
+
     def test_non_utf8_disassembly_input_is_decoded_lossily(self) -> None:
         dump = (
             b"0x1000: [BytecodeArray]\n"
@@ -149,8 +301,8 @@ class DecompilerFileTests(unittest.TestCase):
         self.assertNotIn("goto offset_", output)
         self.assertIn("if (truthy(context_slot[1])) {", output)
         self.assertIn("else {", output)
-        self.assertIn("script_context[2] = true", output)
-        self.assertIn("script_context[2] = false", output)
+        self.assertIn("context_slot[2] = true", output)
+        self.assertIn("context_slot[2] = false", output)
 
     def test_constant_jump_chain_preserves_fallthrough_cases(self) -> None:
         dump = (
@@ -193,9 +345,9 @@ class DecompilerFileTests(unittest.TestCase):
         finally:
             path.unlink(missing_ok=True)
 
-        self.assertIn("script_context[36] = Const[2]", output)
-        self.assertIn("script_context[36] = Const[3]", output)
-        self.assertIn("script_context[36] = Const[4]", output)
+        self.assertIn("context_slot[36] = Const[2]", output)
+        self.assertIn("context_slot[36] = Const[3]", output)
+        self.assertIn("context_slot[36] = Const[4]", output)
 
 
 if __name__ == "__main__":

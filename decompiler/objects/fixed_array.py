@@ -1,5 +1,5 @@
 from typing import Optional, Any
-from objects.base import V8HeapObject, V8Address, V8Smi
+from .base import V8HeapObject, V8Address, V8Smi
 
 
 class V8FixedArray(V8HeapObject):

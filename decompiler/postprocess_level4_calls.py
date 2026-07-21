@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional
 
-from postprocess_level4_common import _extract_indent
+from .postprocess_level4_common import _extract_indent
 
 
 def _member_receiver(member: str) -> Optional[str]:
@@ -143,12 +143,17 @@ def _rewrite_bound_method_calls(lines: List[str]) -> List[str]:
         stripped = line.strip()
         indent = _extract_indent(line)
 
-        m_assign = re.match(r"^(ACCU|r\d+)\s*=\s*(.+)$", stripped)
+        m_assign = re.match(
+            r"^([A-Za-z_$][A-Za-z0-9_$]*"
+            r"(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]+\])*)"
+            r"\s*=(?!=)\s*(.+)$",
+            stripped,
+        )
         if m_assign:
             lhs, expr = m_assign.groups()
             expr = _rewrite_call_expr(expr.strip(), reg_members)
             out.append(f"{indent}{lhs} = {expr}")
-            if lhs.startswith("r"):
+            if re.fullmatch(r"r\d+", lhs):
                 if _is_member_expr(expr):
                     reg_members[lhs] = expr
                 else:

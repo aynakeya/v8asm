@@ -1,49 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 from pathlib import Path
 
 from .cache import CacheHeader, parse_header
+from .model import BytecodeArray, FunctionInfo, Instruction, ParsedDisassembly
 from .profiles import Opcode, Profile, ProfileSet, load_profiles
 from .serializer import ObjectStreamParser, ParseError, Reference, SerializedObject
 from .snapshot import ReadOnlySnapshot
-
-
-@dataclass(frozen=True)
-class Instruction:
-    offset: int
-    raw: bytes
-    name: str
-    operands: tuple[tuple[str, int], ...]
-    scale: int
-    jump_mode: str | None
-
-
-@dataclass(frozen=True)
-class BytecodeArray:
-    object_index: int
-    file_offset: int
-    object_offset: int
-    bytecode_offset: int
-    data: bytes
-    instructions: tuple[Instruction, ...]
-    parameter_count: int
-    register_count: int
-    frame_size: int
-    constant_pool: tuple[int | Reference, ...]
-    handler_table_size: int
-    handler_entries: tuple[tuple[int, int, int, int, int], ...]
-    source_position_table_size: int
-
-
-@dataclass(frozen=True)
-class FunctionInfo:
-    sfi_object_index: int
-    array_object_index: int
-    name_reference: Reference | None
-    name_value: str | None
-
 
 def _operand_size(kind: str, scale: int, profiles: ProfileSet) -> int:
     if kind in profiles.scalable_signed or kind in profiles.scalable_unsigned:
@@ -376,9 +340,9 @@ def _register_name(operand: int, profile: Profile) -> str:
     return f"r{index}"
 
 
-def _format_operands(
+def _operand_arguments(
     instruction: Instruction, profile: Profile, runtime_names: tuple[str, ...]
-) -> str:
+) -> tuple[str, ...]:
     values: list[str] = []
     index = 0
     while index < len(instruction.operands):
@@ -415,7 +379,13 @@ def _format_operands(
         elif kind != "RegCount":
             values.append(str(value))
         index += 1
-    return ", ".join(values)
+    return tuple(values)
+
+
+def _format_operands(
+    instruction: Instruction, profile: Profile, runtime_names: tuple[str, ...]
+) -> str:
+    return ", ".join(_operand_arguments(instruction, profile, runtime_names))
 
 
 def _object_address(index: int) -> int:
@@ -599,10 +569,12 @@ def _function_infos(
 
         name_reference = None
         name_value = None
+        scope_info_object_index = None
         for slot in layout.name_or_scope_info_slots:
             reference = obj.references.get(slot * tagged_size)
             target = _target_object(reference, objects)
             if target is not None and _map_type(target, profile) == "scopeinfomap":
+                scope_info_object_index = target.index
                 name_reference, name_value = _scope_function_name(
                     target, profile, objects, tagged_size, snapshot
                 )
@@ -614,7 +586,11 @@ def _function_infos(
                 name_reference, name_value = reference, value
                 break
         infos[obj.index] = FunctionInfo(
-            obj.index, array.object_index, name_reference, name_value
+            obj.index,
+            array.object_index,
+            scope_info_object_index,
+            name_reference,
+            name_value,
         )
     return infos
 
@@ -1003,13 +979,13 @@ def _render(
     return "\n".join(lines) + "\n"
 
 
-def disassemble_bytes(
+def parse_disassembly_bytes(
     data: bytes,
     version: str | None = None,
     runtime_variant: str | None = None,
     snapshot_blob: bytes | None = None,
     payload_offset: int | None = None,
-) -> str:
+) -> ParsedDisassembly:
     profiles = load_profiles()
     if payload_offset is None:
         header, profile = parse_header(data, profiles, version)
@@ -1064,18 +1040,67 @@ def disassemble_bytes(
                         "does not match cached data "
                         f"0x{header.ro_snapshot_checksum:08x}"
                     )
-            return _render(
-                header,
-                profile,
-                tagged_size,
-                objects,
-                arrays,
-                runtime_variant,
-                snapshot,
+            object_tuple = tuple(objects)
+            array_tuple = tuple(arrays)
+            return ParsedDisassembly(
+                header=header,
+                profile=profile,
+                tagged_size=tagged_size,
+                objects=object_tuple,
+                arrays=array_tuple,
+                functions=_function_infos(
+                    objects, arrays, profile, tagged_size, snapshot
+                ),
+                runtime_variant=runtime_variant,
+                snapshot=snapshot,
             )
         failures.append(f"tagged_size={tagged_size}: no BytecodeArray candidates")
     source = "raw V8 serializer payload" if header.raw_payload else "V8 cached data"
     raise ValueError(f"unable to parse {source}: " + "; ".join(failures))
+
+
+def disassemble_bytes(
+    data: bytes,
+    version: str | None = None,
+    runtime_variant: str | None = None,
+    snapshot_blob: bytes | None = None,
+    payload_offset: int | None = None,
+) -> str:
+    parsed = parse_disassembly_bytes(
+        data,
+        version,
+        runtime_variant,
+        snapshot_blob,
+        payload_offset,
+    )
+    return _render(
+        parsed.header,
+        parsed.profile,
+        parsed.tagged_size,
+        list(parsed.objects),
+        list(parsed.arrays),
+        parsed.runtime_variant,
+        parsed.snapshot,
+    )
+
+
+def parse_disassembly_file(
+    path: str | Path,
+    version: str | None = None,
+    runtime_variant: str | None = None,
+    snapshot_blob: str | Path | None = None,
+    payload_offset: int | None = None,
+) -> ParsedDisassembly:
+    snapshot_data = (
+        Path(snapshot_blob).read_bytes() if snapshot_blob is not None else None
+    )
+    return parse_disassembly_bytes(
+        Path(path).read_bytes(),
+        version,
+        runtime_variant,
+        snapshot_data,
+        payload_offset,
+    )
 
 
 def disassemble_file(
@@ -1085,13 +1110,19 @@ def disassemble_file(
     snapshot_blob: str | Path | None = None,
     payload_offset: int | None = None,
 ) -> str:
-    snapshot_data = (
-        Path(snapshot_blob).read_bytes() if snapshot_blob is not None else None
-    )
-    return disassemble_bytes(
-        Path(path).read_bytes(),
+    parsed = parse_disassembly_file(
+        path,
         version,
         runtime_variant,
-        snapshot_data,
+        snapshot_blob,
         payload_offset,
+    )
+    return _render(
+        parsed.header,
+        parsed.profile,
+        parsed.tagged_size,
+        list(parsed.objects),
+        list(parsed.arrays),
+        parsed.runtime_variant,
+        parsed.snapshot,
     )

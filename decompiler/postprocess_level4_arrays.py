@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Tuple
 
-from postprocess_level4_common import _count_reg_uses, _extract_indent, _find_block_end
+from .postprocess_level4_common import _count_reg_uses, _extract_indent, _find_block_end
 
 
 def _compact_fixed_array_builders(lines: List[str]) -> List[str]:

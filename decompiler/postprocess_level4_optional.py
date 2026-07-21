@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Tuple
 
-from postprocess_level4_common import _extract_indent, _find_block_end
+from .postprocess_level4_common import _extract_indent, _find_block_end
 
 
 def recover_optional_chains(lines: List[str]) -> List[str]:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
-from postprocess_level4_binary import (
+from .postprocess_level4_binary import (
     _compact_adjacent_binary_temp_registers,
     _compact_accu_binary_exprs,
     _compact_accu_compare_if,
@@ -10,9 +10,9 @@ from postprocess_level4_binary import (
     _recover_accu_conditional_expr,
     _recover_accu_conditional_return_expr,
 )
-from postprocess_level4_arrays import _compact_fixed_array_builders, _compact_spread_array_builders
-from postprocess_level4_calls import _rewrite_bound_method_calls
-from postprocess_level4_cleanup import (
+from .postprocess_level4_arrays import _compact_fixed_array_builders, _compact_spread_array_builders
+from .postprocess_level4_calls import _rewrite_bound_method_calls
+from .postprocess_level4_cleanup import (
     _collapse_accu_store_return,
     _collapse_accu_store,
     _collapse_accu_push_context,
@@ -26,21 +26,21 @@ from postprocess_level4_cleanup import (
     _simplify_accu_throw,
     _simplify_accu_return,
 )
-from postprocess_level4_common import _compact_compound_assignments, _extract_indent
-from postprocess_level4_forof import (
+from .postprocess_level4_common import _compact_compound_assignments, _extract_indent
+from .postprocess_level4_forof import (
     _avoid_for_of_loop_var_source_collision,
     _recover_for_of,
     _strip_for_of_recovery_noise,
     _strip_for_of_state_initializers,
 )
-from postprocess_level4_defaults import recover_undefined_default_assignments
-from postprocess_level4_generators import _inline_generator_resume_mode_switches
-from postprocess_level4_guards import (
+from .postprocess_level4_defaults import recover_undefined_default_assignments
+from .postprocess_level4_generators import _inline_generator_resume_mode_switches
+from .postprocess_level4_guards import (
     _strip_iterator_exception_guard,
     _strip_pending_message_status_guard,
 )
-from postprocess_level4_inline import _inline_single_use_registers
-from postprocess_level4_logical import (
+from .postprocess_level4_inline import _inline_single_use_registers
+from .postprocess_level4_logical import (
     combine_nested_truthy_ifs,
     drop_redundant_empty_else_truthy_guards,
     inline_accu_equality_condition_loads,
@@ -51,13 +51,13 @@ from postprocess_level4_logical import (
     rewrite_accu_condition_after_duplicate_store,
     rewrite_accu_condition_after_reg_store,
 )
-from postprocess_level4_optional import recover_optional_chains
-from postprocess_level4_properties import (
+from .postprocess_level4_optional import recover_optional_chains
+from .postprocess_level4_properties import (
     _compact_accu_property_stores,
     _compact_keyed_property_reads,
 )
-from postprocess_level4_strings import _compact_string_concat_chains
-from postprocess_level4_switch import (
+from .postprocess_level4_strings import _compact_string_concat_chains
+from .postprocess_level4_switch import (
     _recover_constant_dispatch_assignments,
     _recover_switch_assignments,
     _recover_two_case_switch,

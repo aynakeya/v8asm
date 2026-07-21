@@ -30,6 +30,15 @@ class SharedFunctionInfoLayout:
 
 
 @dataclass(frozen=True)
+class ObjectBoilerplateLayout:
+    capacity_slot: int
+    backing_store_size_slot: int | None
+    flags_slot: int
+    elements_slot: int
+    backing_store_size_in_tail: bool
+
+
+@dataclass(frozen=True)
 class ScopeInfoLayout:
     flags_encoding: str
     variable_part_slot: int
@@ -38,6 +47,10 @@ class ScopeInfoLayout:
     max_inlined_local_names: int
     scope_type_shift: int
     scope_type_mask: int
+    scope_type_names: tuple[str, ...]
+    context_extension_slot_bit: int
+    min_context_slots: int
+    min_context_extended_slots: int
     saved_class_variable_bit: int
     function_variable_shift: int
     function_variable_mask: int
@@ -54,6 +67,7 @@ class Profile:
     serializer_tags: dict[str, int]
     bytecode_array_layout: BytecodeArrayLayout
     shared_function_info_layout: SharedFunctionInfoLayout
+    object_boilerplate_layout: ObjectBoilerplateLayout
     scope_info_layout: ScopeInfoLayout
     runtime_default_variant: str
     runtime_variants: dict[str, tuple[str, ...]]
@@ -129,7 +143,17 @@ def load_profiles() -> ProfileSet:
                     item["shared_function_info_layout"]["name_or_scope_info_slots"]
                 ),
             ),
-            scope_info_layout=ScopeInfoLayout(**item["scope_info_layout"]),
+            object_boilerplate_layout=ObjectBoilerplateLayout(
+                **item["object_boilerplate_layout"]
+            ),
+            scope_info_layout=ScopeInfoLayout(
+                **{
+                    **item["scope_info_layout"],
+                    "scope_type_names": tuple(
+                        item["scope_info_layout"]["scope_type_names"]
+                    ),
+                }
+            ),
             runtime_default_variant=item["runtime_default_variant"],
             runtime_variants={
                 name: tuple(names) for name, names in item["runtime_variants"].items()

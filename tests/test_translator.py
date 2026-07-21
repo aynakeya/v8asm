@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DECOMPILER = ROOT / "decompiler"
-if str(DECOMPILER) not in sys.path:
-    sys.path.insert(0, str(DECOMPILER))
-
-from context import ConstantPoolEntry, DecompilerContext
-from instruction import Instruction
-from objects.bytecode import CodeLine, V8BytecodeArray
-from translator import InstructionTranslator
+from decompiler.context import ConstantPoolEntry, DecompilerContext
+from decompiler.instruction import Instruction
+from decompiler.objects.bytecode import CodeLine, V8BytecodeArray
+from decompiler.translator import InstructionTranslator
 
 
 class TranslatorOpcodeTests(unittest.TestCase):

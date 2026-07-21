@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DECOMPILER = ROOT / "decompiler"
-if str(DECOMPILER) not in sys.path:
-    sys.path.insert(0, str(DECOMPILER))
-
-from postprocess_file import (
+from decompiler.postprocess_file import (
     compact_file_register_concat_returns,
     normalize_unique_string_function_names,
     postprocess_level4_file,

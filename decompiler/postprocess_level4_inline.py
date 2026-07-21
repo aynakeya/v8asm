@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import List
 
-from postprocess_level4_common import _count_reg_uses
+from .postprocess_level4_common import _count_reg_uses
 
 
 REG_TOKEN_RE = re.compile(r"\br\d+\b")

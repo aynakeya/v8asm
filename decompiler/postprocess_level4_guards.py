@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import List
 
-from postprocess_level4_common import _find_block_end
+from .postprocess_level4_common import _find_block_end
 
 
 def _strip_iterator_exception_guard(lines: List[str]) -> List[str]:

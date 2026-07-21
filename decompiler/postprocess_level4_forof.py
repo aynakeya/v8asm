@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Tuple
 
-from postprocess_level4_common import (
+from .postprocess_level4_common import (
     _compact_compound_assignments,
     _drop_unused_reg_assignments,
     _extract_indent,

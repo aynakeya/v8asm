@@ -1,7 +1,7 @@
 import ast
 from typing import Optional
 
-from objects.base import *
+from .base import *
 
 
 # 0x35c2300818c1: [String] in ReadOnlySpace: #value

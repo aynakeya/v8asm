@@ -4,11 +4,12 @@ import json
 import re
 from typing import Dict, List, Optional, Tuple
 
-from objects.bytecode import V8BytecodeArray
+from .objects import V8Address, V8SharedFunctionInfo
+from .objects.bytecode import V8BytecodeArray
 
-from context import ConstantPoolEntry, DecompilerContext
-from instruction import Instruction
-from utils import parse_jump_target
+from .context import ConstantPoolEntry, DecompilerContext
+from .instruction import Instruction
+from .utils import parse_jump_target
 
 CONST_INDEX_RE = re.compile(r"^\[(\-?\d+)\]$")
 RANGE_RE = re.compile(r"^([ra])(\d+)-([ra])(\d+)$")
@@ -133,7 +134,7 @@ class InstructionTranslator:
                 return token
             return inner.replace(" ", "_")
         if token.startswith("a") and token[1:].isdigit():
-            return f"arg{int(token[1:])}"
+            return self.context.parameter_name(self.bytecode, int(token[1:]))
         if token.startswith("r") and token[1:].isdigit():
             return token
         if token.startswith("CASE_"):
@@ -201,6 +202,16 @@ class InstructionTranslator:
         context_expr = self._reg_name(context)
         slot_expr = self._imm(slot, slot)
         depth_expr = self._imm(depth, depth)
+        slot_index = _parse_number_token(slot)
+        depth_index = _parse_number_token(depth)
+        if slot_index is not None:
+            name = self.context.context_slot_name(
+                self.bytecode,
+                slot_index,
+                depth_index or 0,
+            )
+            if name:
+                return name
         return f"context_slot({context_expr}, {slot_expr}, {depth_expr})"
 
     def _expand_range(self, token: str) -> List[str]:
@@ -306,8 +317,11 @@ class InstructionTranslator:
     def _op_LdaImmutableCurrentContextSlot(self, instr: Instruction) -> str:
         if not instr.args:
             return "ACCU = context_slot[?]"
-        idx = _parse_bracket_number(instr.args[0]) or 0
-        return f"ACCU = context_slot[{idx}]"
+        idx = _parse_bracket_number(instr.args[0])
+        if idx is None:
+            return "ACCU = context_slot[?]"
+        name = self.context.context_slot_name(self.bytecode, idx)
+        return f"ACCU = {name or f'context_slot[{idx}]'}"
 
     def _op_LdaCurrentContextSlot(self, instr: Instruction) -> str:
         return self._op_LdaImmutableCurrentContextSlot(instr)
@@ -321,7 +335,13 @@ class InstructionTranslator:
         return self._op_LdaImmutableContextSlot(instr)
 
     def _op_LdaCurrentScriptContextSlot(self, instr: Instruction) -> str:
-        return self._op_LdaImmutableCurrentContextSlot(instr)
+        if not instr.args:
+            return "ACCU = script_context[?]"
+        idx = _parse_bracket_number(instr.args[0])
+        if idx is None:
+            return "ACCU = script_context[?]"
+        name = self.context.context_slot_name(self.bytecode, idx)
+        return f"ACCU = {name or f'script_context[{idx}]'}"
 
     def _op_LdaZero(self, instr: Instruction) -> str:
         return "ACCU = 0"
@@ -355,11 +375,20 @@ class InstructionTranslator:
     def _op_StaCurrentScriptContextSlot(self, instr: Instruction) -> str:
         if not instr.args:
             return "script_context[?] = ACCU"
-        idx = _parse_bracket_number(instr.args[0]) or 0
-        return f"script_context[{idx}] = ACCU"
+        idx = _parse_bracket_number(instr.args[0])
+        if idx is None:
+            return "script_context[?] = ACCU"
+        name = self.context.context_slot_name(self.bytecode, idx)
+        return f"{name or f'script_context[{idx}]'} = ACCU"
 
     def _op_StaCurrentContextSlot(self, instr: Instruction) -> str:
-        return self._op_StaCurrentScriptContextSlot(instr)
+        if not instr.args:
+            return "context_slot[?] = ACCU"
+        idx = _parse_bracket_number(instr.args[0])
+        if idx is None:
+            return "context_slot[?] = ACCU"
+        name = self.context.context_slot_name(self.bytecode, idx)
+        return f"{name or f'context_slot[{idx}]'} = ACCU"
 
     def _op_StaContextSlot(self, instr: Instruction) -> str:
         if len(instr.args) >= 3:
@@ -788,6 +817,12 @@ class InstructionTranslator:
     def _op_CreateClosure(self, instr: Instruction) -> str:
         if not instr.args:
             return "ACCU = create_closure(<anonymous>)"
+        index = _parse_bracket_number(instr.args[0])
+        entry = self.constants.get(index) if index is not None else None
+        if entry and isinstance(entry.raw, V8Address):
+            target = self.context.get_object(entry.raw.address)
+            if isinstance(target, V8SharedFunctionInfo):
+                return f"ACCU = {self.context.get_function_name(target)}"
         callee = self._const_token(instr.args[0])
         return f"ACCU = create_closure({callee})"
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional
 
-from postprocess_level4 import _compact_compound_assignments, recover_js_structures
+from .postprocess_level4 import _compact_compound_assignments, recover_js_structures
 
 REG_TOKEN_RE = re.compile(r"\br(\d+)\b")
 IDENT_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")

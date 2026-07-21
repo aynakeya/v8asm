@@ -1,16 +1,18 @@
 # objects/shared_function_info.py
 from typing import Optional
-from objects.base import *
-from objects.string import V8String
-from objects.bytecode import V8BytecodeArray
+from .base import *
+from .string import V8String
+from .bytecode import V8BytecodeArray
 
 class V8SharedFunctionInfo(V8HeapObject):
     def __init__(self, address: int, i_type: str, lines: list[str]):
         super().__init__(address, i_type, lines)
         self.name: Optional[V8Address[V8String]] = None
+        self.name_value: Optional[str] = None
         self.formal_parameter_count: Optional[int] = None
         self.language_mode: Optional[str] = None
         self.trusted_function_data: Optional[V8Address[V8BytecodeArray]] = None
+        self.scope_info: Optional[V8Address] = None
         self.script_addr: Optional[int] = None
         self.func_kind: Optional[str] = None
         self.syntax_kind: Optional[str] = None

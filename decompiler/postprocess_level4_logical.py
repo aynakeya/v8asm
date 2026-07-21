@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import List
 
-from postprocess_level4_common import _extract_indent, _find_block_end
+from .postprocess_level4_common import _extract_indent, _find_block_end
 
 
 def _body_reads_accu_before_reassign(lines: List[str], start: int, end: int) -> bool:
