@@ -8,11 +8,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from .objects import (
     V8Address,
-    V8ArrayBoilerplateDescription,
     V8BytecodeArray,
-    V8FixedArray,
     V8HeapObject,
-    V8ObjectBoilerplateDescription,
     V8ScopeInfo,
     V8SharedFunctionInfo,
     V8String,
@@ -20,7 +17,11 @@ from .objects import (
     V8Smi,
 )
 from .instruction import Instruction
-from .utils import parse_jump_target
+from .normalization import (
+    DefaultParameterInitializer,
+    find_default_parameter_initializers,
+)
+from .value_formatter import ValueFormatter
 
 
 IDENT_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
@@ -50,6 +51,10 @@ class DecompilerContext:
         self.function_names: Dict[int, str] = {}
         self.bytecode_parameter_names: Dict[int, Dict[int, str]] = {}
         self.bytecode_parameter_defaults: Dict[int, Dict[int, str]] = {}
+        self.bytecode_parameter_initializers: Dict[
+            int, List[DefaultParameterInitializer]
+        ] = {}
+        self._value_formatter = ValueFormatter(self)
         self._build_indexes()
 
     def _build_indexes(self) -> None:
@@ -208,51 +213,23 @@ class DecompilerContext:
                 self.bytecode_parameter_names[obj.address] = names
 
     def _infer_parameter_defaults(self) -> None:
-        conditional_jumps = {
-            "JumpIfNotUndefined",
-            "JumpIfNotUndefinedConstant",
-        }
-        unconditional_jumps = {"Jump", "JumpConstant"}
         for obj in self.objects:
             if not isinstance(obj, V8BytecodeArray):
                 continue
             instructions = [
                 Instruction.from_codeline(line) for line in obj.instructions
             ]
-            defaults: Dict[int, str] = {}
-            for index in range(len(instructions) - 5):
-                load, branch, default_load, join, alternate, store = (
-                    instructions[index : index + 6]
-                )
-                parameter_index = self._parameter_index(load)
-                if parameter_index is None:
-                    continue
-                if branch.mnemonic not in conditional_jumps:
-                    continue
-                if join.mnemonic not in unconditional_jumps:
-                    continue
-                if self._parameter_index(alternate) != parameter_index:
-                    continue
-                if not store.mnemonic.startswith("Star"):
-                    continue
-                if parse_jump_target(branch) != alternate.offset:
-                    continue
-                if parse_jump_target(join) != store.offset:
-                    continue
-                default = self._literal_load(obj, default_load)
-                if default is not None:
-                    defaults.setdefault(parameter_index, default)
-            if defaults:
-                self.bytecode_parameter_defaults[obj.address] = defaults
-
-    @staticmethod
-    def _parameter_index(instruction: Instruction) -> Optional[int]:
-        if instruction.mnemonic != "Ldar" or not instruction.args:
-            return None
-        parameter = instruction.args[0].strip()
-        if not parameter.startswith("a") or not parameter[1:].isdigit():
-            return None
-        return int(parameter[1:])
+            initializers = find_default_parameter_initializers(
+                instructions,
+                lambda instruction: self._literal_load(obj, instruction),
+            )
+            if not initializers:
+                continue
+            self.bytecode_parameter_initializers[obj.address] = initializers
+            self.bytecode_parameter_defaults[obj.address] = {
+                initializer.parameter_index: initializer.value
+                for initializer in initializers
+            }
 
     def _literal_load(
         self, bytecode: V8BytecodeArray, instruction: Instruction
@@ -317,6 +294,31 @@ class DecompilerContext:
         )
         return f"{name} = {default}" if default is not None else name
 
+    def parameter_initializers(
+        self, bytecode: V8BytecodeArray
+    ) -> List[DefaultParameterInitializer]:
+        return list(self.bytecode_parameter_initializers.get(bytecode.address, ()))
+
+    def scope_for_instruction(
+        self, bytecode: V8BytecodeArray, instruction: Instruction
+    ) -> Optional[V8ScopeInfo]:
+        constant_index = self._instruction_constant_index(instruction)
+        if constant_index is None:
+            return None
+        target = self._constant_target(bytecode, constant_index)
+        return target if isinstance(target, V8ScopeInfo) else None
+
+    def constant_object_for_instruction(
+        self, bytecode: V8BytecodeArray, instruction: Instruction
+    ) -> Optional[V8HeapObject]:
+        constant_index = self._instruction_constant_index(instruction)
+        if constant_index is None:
+            return None
+        return self._constant_target(bytecode, constant_index)
+
+    def scope_slot_name(self, scope: V8ScopeInfo, slot: int) -> Optional[str]:
+        return self._scope_slot_name(scope, slot)
+
     def child_functions(self, bytecode: V8BytecodeArray) -> List[V8BytecodeArray]:
         return list(self.function_children.get(bytecode.address, ()))
 
@@ -351,100 +353,7 @@ class DecompilerContext:
         return entries
 
     def format_value(self, raw: Any) -> str:
-        if isinstance(raw, V8Smi):
-            return str(raw.value)
-
-        if isinstance(raw, V8Address):
-            target = self.get_object(raw.address)
-            if isinstance(target, V8String):
-                return json.dumps(target.value)
-            if isinstance(target, V8SharedFunctionInfo):
-                return self.get_function_name(target)
-            if isinstance(target, V8ArrayBoilerplateDescription):
-                return self._format_array_boilerplate(target)
-            if isinstance(target, V8ObjectBoilerplateDescription):
-                return self._format_object_boilerplate(target)
-            if isinstance(target, V8FixedArray):
-                return self._format_fixed_array(target)
-            if isinstance(target, V8BytecodeArray):
-                owner = self.bytecode_functions.get(target.address)
-                if owner:
-                    return f"<bytecode {self.get_function_name(owner)}>"
-                return f"<Bytecode 0x{target.address:012x}>"
-            if isinstance(target, V8ScopeInfo):
-                return self._format_scope_info(target)
-            desc_value = self._format_address_desc(raw.desc)
-            if desc_value is not None:
-                return desc_value
-            if target:
-                return json.dumps(f"<{target.i_type} 0x{target.address:012x}>")
-            return json.dumps(raw.desc or f"0x{raw.address:012x}")
-
-        if isinstance(raw, str):
-            return json.dumps(raw)
-
-        if raw is None:
-            return "undefined"
-
-        return str(raw)
-
-    def _format_fixed_array(self, arr: V8FixedArray) -> str:
-        parts = [self.format_value(el) for el in arr.elements]
-        return "[" + ", ".join(parts) + "]"
-
-    def _format_array_boilerplate(
-        self, boilerplate: V8ArrayBoilerplateDescription
-    ) -> str:
-        if not boilerplate.constant_elements:
-            return f"<ArrayBoilerplate {boilerplate.elements_kind}>"
-
-        const = self.get_object(boilerplate.constant_elements.address)
-        if isinstance(const, V8FixedArray):
-            return self._format_fixed_array(const)
-        return f"<ArrayBoilerplate {boilerplate.elements_kind}>"
-
-    def _format_address_desc(self, desc: str) -> Optional[str]:
-        text = desc.strip()
-        if not text:
-            return None
-        if text.startswith("<") and text.endswith(">"):
-            inner = text[1:-1]
-        else:
-            inner = text
-        if inner in {"true", "false", "null", "undefined"}:
-            return inner
-        normalized = "".join(
-            character for character in inner.lower() if character.isalpha()
-        )
-        if normalized == "uninitializedvalue":
-            return "undefined"
-        return None
-
-    def _format_object_key(self, raw: Any) -> str:
-        key = self.format_value(raw)
-        if key.startswith('"') and key.endswith('"'):
-            try:
-                plain = json.loads(key)
-            except json.JSONDecodeError:
-                return key
-            if plain.isidentifier():
-                return plain
-        return key
-
-    def _format_object_boilerplate(
-        self, boilerplate: V8ObjectBoilerplateDescription
-    ) -> str:
-        parts: List[str] = []
-        entries = boilerplate.entries
-        for idx in range(0, len(entries), 2):
-            key = entries[idx]
-            value = entries[idx + 1] if idx + 1 < len(entries) else None
-            parts.append(f"{self._format_object_key(key)}: {self.format_value(value)}")
-        return "{ " + ", ".join(parts) + " }"
-
-    def _format_scope_info(self, scope: V8ScopeInfo) -> str:
-        scope_type = scope.scope_type or "Scope"
-        return f"<ScopeInfo {scope_type}>"
+        return self._value_formatter.format(raw)
 
     def scope_context_name(self, raw: Any, index: int = 0) -> Optional[str]:
         if not isinstance(raw, V8Address):

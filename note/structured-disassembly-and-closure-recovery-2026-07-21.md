@@ -48,6 +48,19 @@ ScopeInfo 的以下数据都由对应 V8 tag 的官方源码生成 profile：
 字面量加载。该逻辑不依赖函数名、固定 bytecode offset 或某个 V8 版本的 opcode
 编号。
 
+level 4 还会在控制流证据完整时恢复以下源码结构：
+
+- BLOCK_SCOPE 中的 HOLE 初始化和匹配的 TDZ 检查恢复为词法变量声明；
+- 空 then 分支的 nullish 控制流恢复为 `??` 或保持求值顺序的 `??=`；
+- optional-chain guard 恢复为 `?.`，包括 ACCU 直接保存接收者的版本差异；
+- 对象 boilerplate 后紧邻、同序且无歧义的属性写入合并回对象字面量；
+- `LdaKeyedProperty` 后的 ACCU store 只保留一次属性求值，避免 getter 被打印为
+  执行两次。
+
+nullish 恢复不会把属性读取越过 callee/receiver 保存语句。存在中间 store 时，只有
+目标寄存器与 store、fallback 均无依赖，才使用目标寄存器保存已求出的值并输出
+`??=`；否则保留原始控制流。该限制用于维持 V8 字节码规定的求值顺序。
+
 ## 字面量对象
 
 ObjectBoilerplateDescription 在大版本间有两种布局：10.x 的 FixedArray 旧布局，以及
@@ -66,11 +79,20 @@ ObjectBoilerplateDescription 在大版本间有两种布局：10.x 的 FixedArra
 - 四个版本均恢复 6 个 BytecodeArray、唯一函数名、closure 嵌套、`value` 捕获变量，
   `arg0 = 0` / `arg0 = 1` 默认参数以及
   `{ enabled: true, value: 3 }` 等字面量内容；
+- 四个版本均恢复 `item?.enabled` 和 nullish fallback；12.4、13.6 还稳定恢复
+  `for (const item of arg0)`，10.2、11.3 保留版本特有的 iterator 清理控制流；
+- `structured.py` 已拆为公开 schema 入口、graph builder 和 object encoder。拆分前后
+  三个样本的规范化 JSON SHA-256 完全一致：
+  `739f7619...c40f`、`bc2f326e...8e48`、`fe2fe607...70b`；
+- 当前完整 Python 回归为 174 项，并通过 `compileall` 和 diff whitespace 检查；
 - legacy 文本输入继续由兼容路径处理。
 
 ## 仍未解决
 
 - 多层显式 context depth、slot shadowing 和定义 bytecode offset 仍需专门 IR；
 - 没有匹配 snapshot 时，部分 read-only 字符串只能保持 unresolved；
+- unresolved read-only property 不能仅根据调用形状猜成 `push` 等名称，因此相应方法
+  调用仍可能保留寄存器和 `.call(...)`；提供 checksum 匹配的 snapshot 后才能恢复
+  真实字符串并继续安全简化；
 - 参数名若未进入 ScopeInfo，cached data 本身通常没有足够信息恢复源码名称；
 - level 4 仍有寄存器、TDZ 检查和少量 goto，需要继续做有证据的数据流恢复。

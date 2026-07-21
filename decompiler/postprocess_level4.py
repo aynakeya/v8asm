@@ -52,6 +52,7 @@ from .postprocess_level4_logical import (
     rewrite_accu_condition_after_reg_store,
 )
 from .postprocess_level4_optional import recover_optional_chains
+from .postprocess_level4_objects import _compact_object_literal_initializers
 from .postprocess_level4_properties import (
     _compact_accu_property_stores,
     _compact_keyed_property_reads,
@@ -82,6 +83,7 @@ def recover_js_structures(lines: List[str]) -> List[str]:
     current = recover_or_fallback_returns(current)
     current = combine_nested_truthy_ifs(current)
     current = _recover_switch_assignments(current)
+    current = _compact_object_literal_initializers(current)
     current = _inline_single_use_registers(current)
     current = _recover_accu_conditional_expr(current)
     current = _compact_string_concat_chains(current)
@@ -92,6 +94,7 @@ def recover_js_structures(lines: List[str]) -> List[str]:
     current = _recover_two_case_switch(current)
     current = _recover_constant_dispatch_assignments(current)
     current = _compact_accu_compare_if(current)
+    current = _collapse_accu_store(current)
     current = _convert_unused_accu_assign_to_expr(current)
     current = inline_accu_equality_condition_loads(current)
     current = _rewrite_bound_method_calls(current)
@@ -113,10 +116,14 @@ def recover_js_structures(lines: List[str]) -> List[str]:
     current = _name_async_reject_handler_exceptions(current)
     current = _inline_simple_accu_loads_into_next_line(current)
     current = _drop_unused_pure_accu_loads(current)
+    current = _compact_adjacent_binary_temp_registers(current)
+    current = _compact_self_binary_assignments(current)
+    current = _compact_object_literal_initializers(current)
     current = _drop_unused_pure_reg_assignments(current)
     current = recover_or_fallback_returns(current)
     current = combine_nested_truthy_ifs(current)
     current = drop_redundant_empty_else_truthy_guards(current)
+    current = _compact_object_literal_initializers(current)
     current = _normalize_block_indentation(current)
     return current
 

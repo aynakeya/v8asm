@@ -58,11 +58,16 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
         accu_value = None
 
     def invalidate_aliases_depending_on(reg: str) -> None:
+        nonlocal accu_value
         for cached_reg, cached_expr in list(reg_values.items()):
             if cached_reg != reg and re.search(rf"\b{re.escape(reg)}\b", cached_expr):
                 del reg_values[cached_reg]
+        if accu_value is not None and re.search(
+            rf"\b{re.escape(reg)}\b", accu_value
+        ):
+            accu_value = None
 
-    for line in lines:
+    for line_index, line in enumerate(lines):
         stripped = line.lstrip()
         prefix = line[: len(line) - len(stripped)]
         if not stripped:
@@ -100,6 +105,7 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
             reg = reg.strip()
             expr = expr.strip()
             expr_before_replace = expr
+            coalesce_accu_store = False
             uses_post_goto_reg = bool(
                 post_goto_protected_regs
                 and re.search(
@@ -113,6 +119,15 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
             if expr == "ACCU" and accu_value is not None:
                 if "ACCU" not in accu_value:
                     expr = accu_value
+                    coalesce_accu_store = (
+                        recover_structures
+                        and _is_keyed_property_read(expr)
+                        and bool(simplified)
+                        and simplified[-1].strip() == f"ACCU = {expr}"
+                        and not _accu_is_read_before_reassign(
+                            lines, line_index + 1
+                        )
+                    )
                 else:
                     unstable_accu_alias = True
             elif expr == "ACCU":
@@ -120,6 +135,8 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
             else:
                 expr = replace_tokens(expr)
 
+            if coalesce_accu_store:
+                simplified.pop()
             simplified.append(f"{prefix}{reg} = {expr}")
             invalidate_aliases_depending_on(reg)
             if uses_post_goto_reg:
@@ -156,6 +173,8 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
             else:
                 expr = replace_tokens(expr)
             simplified.append(f"{prefix}{target} = {expr}")
+            if IDENT_RE.fullmatch(target.strip()):
+                invalidate_aliases_depending_on(target.strip())
             continue
 
         simplified.append(f"{prefix}{replace_tokens(stripped)}")
@@ -163,3 +182,28 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
     if recover_structures:
         return recover_js_structures(simplified)
     return simplified
+
+
+def _accu_is_read_before_reassign(lines: List[str], start: int) -> bool:
+    for line in lines[start:]:
+        stripped = line.strip()
+        reassignment = re.match(r"^ACCU\s*=\s*(.+)$", stripped)
+        if reassignment:
+            return re.search(r"\bACCU\b", reassignment.group(1)) is not None
+        if re.search(r"\bACCU\b", stripped):
+            return True
+        if stripped in {"}", "else {"}:
+            return False
+        if stripped.startswith(("return ", "throw ")):
+            return False
+    return False
+
+
+def _is_keyed_property_read(expr: str) -> bool:
+    if "ACCU" in expr or "(" in expr or ")" in expr:
+        return False
+    return re.fullmatch(
+        r"[A-Za-z_$][A-Za-z0-9_$]*"
+        r"(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]+\])+",
+        expr,
+    ) is not None and "[" in expr

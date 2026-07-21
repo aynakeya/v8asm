@@ -356,6 +356,58 @@ class SimplifyLinesTests(unittest.TestCase):
 
         self.assertEqual(simplified, ['return obj.method(pair(1, 2), "a,b", [3, 4])'])
 
+    def test_rewrites_keyed_bound_method_call_with_saved_receiver(self) -> None:
+        lines = [
+            'ACCU = r0["push"]',
+            "r11 = ACCU",
+            "r12 = r0",
+            "r13 = arg1",
+            "ACCU = r11.call(r12, r13)",
+            "return ACCU",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ['return r0["push"](arg1)'])
+
+    def test_keeps_keyed_bound_method_call_with_different_receiver(self) -> None:
+        lines = [
+            'r11 = r0["push"]',
+            "r12 = other",
+            "return r11.call(r12, arg1)",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(
+            simplified,
+            ['return r0["push"].call(other, arg1)'],
+        )
+
+    def test_invalidates_bound_method_alias_when_source_is_reassigned(self) -> None:
+        lines = [
+            "r2 = obj.method",
+            "r1 = obj",
+            "obj = other",
+            "return r2.call(r1)",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertIn("return r2.call(r1)", simplified)
+        self.assertNotIn("return obj.method()", simplified)
+
+    def test_property_load_followed_by_store_is_evaluated_once(self) -> None:
+        lines = [
+            'ACCU = r0["value"]',
+            "r11 = ACCU",
+            "return r11",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ['return r0["value"]'])
+
     def test_rewrites_bound_method_call_inside_string_wrapper(self) -> None:
         lines = [
             "r2 = r3.toUpperCase",
@@ -657,7 +709,7 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertEqual(simplified, ["this.n = (this.n + r0)", "return this.n"])
+        self.assertEqual(simplified, ["this.n += r0", "return this.n"])
 
     def test_compacts_adjacent_binary_temp_register(self) -> None:
         lines = [
@@ -828,6 +880,59 @@ class SimplifyLinesTests(unittest.TestCase):
         simplified = simplify_lines(lines, recover_structures=True)
 
         self.assertEqual(simplified, ['r13 += ":"'])
+
+    def test_compacts_named_context_variable_assignment(self) -> None:
+        lines = ["value = (value + arg0)"]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ["value += arg0"])
+
+    def test_compacts_named_assignment_through_binary_temp(self) -> None:
+        lines = ["r2 = (value + arg0)", "value = r2"]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ["value += arg0"])
+
+    def test_recovers_object_boilerplate_property_initializers(self) -> None:
+        lines = [
+            "r2 = { increment: undefined, read: undefined }",
+            "r2.increment = increment",
+            "r2.read = read",
+            "return r2",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ["return { increment, read }"])
+
+    def test_keeps_out_of_order_object_property_initializers(self) -> None:
+        lines = [
+            "r2 = { first: undefined, second: undefined }",
+            "r2.second = second()",
+            "r2.first = first()",
+            "return r2",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertIn("r2.second = second()", simplified)
+        self.assertIn("r2.first = first()", simplified)
+
+    def test_completes_partially_compacted_object_initializer(self) -> None:
+        lines = [
+            "r2 = { output, current: undefined }",
+            "r2.current = counter.read()",
+            "globalThis.result = r2",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(
+            simplified,
+            ["globalThis.result = { output, current: counter.read() }"],
+        )
 
     def test_strips_for_of_state_initializers(self) -> None:
         lines = [
@@ -1100,7 +1205,7 @@ class SimplifyLinesTests(unittest.TestCase):
         self.assertEqual(
             simplified,
             [
-                "arg0.count = (arg0.count + 1)",
+                "arg0.count += 1",
                 "arg0.seen = true",
                 "return arg0.count",
             ],
@@ -1143,7 +1248,66 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertEqual(simplified, ["r0 = (isNullish(arg0) ? arg2 : arg0)"])
+        self.assertEqual(simplified, ["r0 = (arg0 ?? arg2)"])
+
+    def test_recovers_nullish_assignment_with_pure_callee_save(self) -> None:
+        lines = [
+            "ACCU = r3.value",
+            "r13 = arg1",
+            "if (!(isNullish(ACCU))) {",
+            "}",
+            "else {",
+            "  ACCU = 0",
+            "}",
+            "r14 = ACCU",
+            "r13 = r13(r14)",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(
+            simplified,
+            [
+                "r14 = r3.value",
+                "r13 = arg1",
+                "r14 ??= 0",
+                "r13 = r13(r14)",
+            ],
+        )
+
+    def test_preserves_nullish_control_flow_when_saved_copy_reads_destination(self) -> None:
+        lines = [
+            "ACCU = r3.value",
+            "r13 = r14",
+            "if (!(isNullish(ACCU))) {",
+            "}",
+            "else {",
+            "  ACCU = 0",
+            "}",
+            "r14 = ACCU",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertIn("if (!(isNullish(ACCU))) {", simplified)
+        self.assertNotIn("r14 ??= 0", simplified)
+
+    def test_preserves_nullish_control_flow_with_effectful_interleave(self) -> None:
+        lines = [
+            "ACCU = r3.value",
+            "r13 = getTransform()",
+            "if (!(isNullish(ACCU))) {",
+            "}",
+            "else {",
+            "  ACCU = 0",
+            "}",
+            "r14 = ACCU",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertIn("if (!(isNullish(ACCU))) {", simplified)
+        self.assertNotIn("r14 = (r3.value ?? 0)", simplified)
 
     def test_recovers_optional_chain_to_accu_expression(self) -> None:
         lines = [
@@ -1175,6 +1339,44 @@ class SimplifyLinesTests(unittest.TestCase):
         simplified = simplify_lines(lines, recover_structures=True)
 
         self.assertEqual(simplified, ["r0 = arg0?.profile?.address?.city"])
+
+    def test_recovers_optional_chain_from_direct_register_base(self) -> None:
+        lines = [
+            "ACCU = r11",
+            "if (!(isNullish(ACCU))) {",
+            "  ACCU = r11.enabled",
+            "}",
+            "else {",
+            "  ACCU = undefined",
+            "}",
+            "if (truthy(ACCU)) {",
+            "  return true",
+            "}",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(
+            simplified,
+            ["if (truthy(r11?.enabled)) {", "  return true", "}"],
+        )
+
+    def test_preserves_optional_guard_with_extra_then_instruction(self) -> None:
+        lines = [
+            "ACCU = r11",
+            "if (!(isNullish(ACCU))) {",
+            "  log(r11)",
+            "  ACCU = r11.enabled",
+            "}",
+            "else {",
+            "  ACCU = undefined",
+            "}",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertIn("if (!(isNullish(ACCU))) {", simplified)
+        self.assertNotIn("ACCU = r11?.enabled", simplified)
 
     def test_recovers_or_fallback_assignment(self) -> None:
         lines = [

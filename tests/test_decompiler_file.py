@@ -76,13 +76,29 @@ class DecompilerFileTests(unittest.TestCase):
                 self.assertIn("\n  function read()", output)
                 self.assertNotIn("\nfunction increment(", output)
                 self.assertNotIn("\nfunction read()", output)
-                self.assertIn("ACCU = value", output)
+                self.assertIn("return value", output)
                 self.assertNotIn("context_slot[2]", output)
+                self.assertNotIn("arg0 === undefined", output)
+                self.assertNotIn("ensureDefined(", output)
+                self.assertNotIn("DeclareGlobals(", output)
+                self.assertIn("let value = arg0;", output)
+                self.assertIn("value += arg0", output)
+                self.assertEqual(output.count("?.enabled"), 1)
+                self.assertEqual(output.count("??"), 1)
+                if version in {"12.4.254.21", "13.6.233.10"}:
+                    self.assertIn("for (const item of arg0)", output)
+                self.assertIn("return { increment, read }", output)
+                self.assertNotIn("pushContext(create_block_context", output)
+                self.assertNotIn("value = HOLE", output)
                 self.assertIn("counter = createCounter(2)", output)
                 self.assertIn("output = mapValues(", output)
                 self.assertEqual(output.count("createCounter(2)"), 1)
                 self.assertEqual(output.count("counter.read()"), 1)
-                self.assertIn("r2.current = counter.read()", output)
+                self.assertIn(
+                    "globalThis.result = { output, current: counter.read() }",
+                    output,
+                )
+                self.assertNotIn("r2.current = counter.read()", output)
                 self.assertEqual(
                     output.count(
                         "mapValues([{ enabled: true, value: 3 }, "
@@ -91,8 +107,8 @@ class DecompilerFileTests(unittest.TestCase):
                 )
                 self.assertIn("let counter, output;", output)
                 self.assertNotIn("function anonymous_1()", output)
-                self.assertIn("r2.increment = increment", output)
-                self.assertIn("r2.read = read", output)
+                self.assertNotIn("r2.increment = increment", output)
+                self.assertNotIn("r2.read = read", output)
                 self.assertNotIn("create_closure(increment)", output)
                 self.assertNotIn("create_closure(read)", output)
 

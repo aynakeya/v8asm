@@ -23,30 +23,86 @@ def recover_nullish_assignments(lines: List[str]) -> List[str]:
     out: List[str] = []
     i = 0
     while i < len(lines):
-        if i + 6 < len(lines):
-            s = [lines[i + offset].strip() for offset in range(7)]
-            m_initial = re.match(r"^ACCU\s*=\s*(.+)$", s[0])
-            m_fallback = re.match(r"^ACCU\s*=\s*(.+)$", s[4])
-            m_store = re.match(r"^(r\d+)\s*=\s*ACCU$", s[6])
-            if (
-                m_initial
-                and m_fallback
-                and m_store
-                and s[1] == "if (!(isNullish(ACCU))) {"
-                and s[2] == "}"
-                and s[3] == "else {"
-                and s[5] == "}"
-            ):
-                lhs = m_initial.group(1).strip()
-                rhs = m_fallback.group(1).strip()
-                if "ACCU" not in lhs and "ACCU" not in rhs:
-                    indent = _extract_indent(lines[i + 6])
-                    out.append(f"{indent}{m_store.group(1)} = (isNullish({lhs}) ? {rhs} : {lhs})")
-                    i += 7
-                    continue
+        recovered = _try_recover_nullish_assignment(lines, i)
+        if recovered is not None:
+            replacement, next_i = recovered
+            out.extend(replacement)
+            i = next_i
+            continue
         out.append(lines[i])
         i += 1
     return out
+
+
+def _try_recover_nullish_assignment(
+    lines: List[str], start: int
+) -> tuple[List[str], int] | None:
+    initial = re.match(r"^ACCU\s*=\s*(.+)$", lines[start].strip())
+    if not initial:
+        return None
+
+    guard_idx = start + 1
+    saved_bindings: List[str] = []
+    while guard_idx < len(lines) and _is_pure_register_copy(lines[guard_idx]):
+        if _extract_indent(lines[guard_idx]) != _extract_indent(lines[start]):
+            return None
+        saved_bindings.append(lines[guard_idx])
+        guard_idx += 1
+
+    if (
+        guard_idx >= len(lines)
+        or lines[guard_idx].strip() != "if (!(isNullish(ACCU))) {"
+    ):
+        return None
+    then_end = _find_block_end(lines, guard_idx)
+    if then_end is None:
+        return None
+    then_body = [line.strip() for line in lines[guard_idx + 1 : then_end] if line.strip()]
+    if then_body or then_end + 1 >= len(lines) or lines[then_end + 1].strip() != "else {":
+        return None
+
+    else_end = _find_block_end(lines, then_end + 1)
+    if else_end is None or else_end + 1 >= len(lines):
+        return None
+    else_body = [line.strip() for line in lines[then_end + 2 : else_end] if line.strip()]
+    if len(else_body) != 1:
+        return None
+    fallback = re.match(r"^ACCU\s*=\s*(.+)$", else_body[0])
+    store = re.match(r"^(r\d+)\s*=\s*ACCU$", lines[else_end + 1].strip())
+    if not fallback or not store:
+        return None
+
+    lhs = initial.group(1).strip()
+    rhs = fallback.group(1).strip()
+    if "ACCU" in lhs or "ACCU" in rhs:
+        return None
+
+    destination = store.group(1)
+    indent = _extract_indent(lines[else_end + 1])
+    if saved_bindings:
+        if _register_is_used(destination, rhs) or any(
+            _register_is_used(destination, line) for line in saved_bindings
+        ):
+            return None
+        replacement = [f"{_extract_indent(lines[start])}{destination} = {lhs}"]
+        replacement.extend(saved_bindings)
+        replacement.append(f"{indent}{destination} ??= {rhs}")
+    else:
+        replacement = [f"{indent}{destination} = ({lhs} ?? {rhs})"]
+    return replacement, else_end + 2
+
+
+def _is_pure_register_copy(line: str) -> bool:
+    stripped = line.strip()
+    match = re.match(
+        r"^r\d+\s*=\s*([A-Za-z_$][A-Za-z0-9_$]*|r\d+|arg\d+)$",
+        stripped,
+    )
+    return match is not None
+
+
+def _register_is_used(register: str, text: str) -> bool:
+    return re.search(rf"\b{re.escape(register)}\b", text) is not None
 
 
 def inline_accu_condition_loads(lines: List[str]) -> List[str]:

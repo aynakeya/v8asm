@@ -54,7 +54,7 @@ def _inline_single_use_registers(lines: List[str]) -> List[str]:
                     break
                 if re.match(rf"^{re.escape(reg)}\s*[+\-*/%]?=", stripped):
                     break
-                if _assigns_any_referenced_register(stripped, expr):
+                if _assigns_referenced_value(stripped, expr):
                     break
                 if re.search(rf"\b{re.escape(reg)}\b", out[j]):
                     out[j] = re.sub(rf"\b{re.escape(reg)}\b", expr, out[j])
@@ -67,9 +67,19 @@ def _inline_single_use_registers(lines: List[str]) -> List[str]:
     return out
 
 
-def _assigns_any_referenced_register(line: str, expr: str) -> bool:
+def _assigns_referenced_value(line: str, expr: str) -> bool:
     referenced = {token for token in REG_TOKEN_RE.findall(expr)}
-    if not referenced:
-        return False
-    assign = re.match(r"^(r\d+)\s*=", line)
-    return bool(assign and assign.group(1) in referenced)
+    register_assign = re.match(r"^(r\d+)\s*=", line)
+    if register_assign and register_assign.group(1) in referenced:
+        return True
+
+    identifier_assign = re.match(
+        r"^([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)", line
+    )
+    return bool(
+        identifier_assign
+        and re.search(
+            rf"\b{re.escape(identifier_assign.group(1))}\b",
+            expr,
+        )
+    )

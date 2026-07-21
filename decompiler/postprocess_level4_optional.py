@@ -22,20 +22,26 @@ def recover_optional_chains(lines: List[str]) -> List[str]:
 
 
 def _try_recover_optional_chain(lines: List[str], start: int) -> Optional[Tuple[str, int]]:
-    if start + 2 >= len(lines):
+    if start + 1 >= len(lines):
         return None
     s0 = lines[start].strip()
-    s1 = lines[start + 1].strip()
     m_base = re.match(r"^ACCU\s*=\s*(.+)$", s0)
-    m_reg = re.match(r"^(r\d+)\s*=\s*(.+)$", s1)
-    if not m_base or not m_reg:
+    if not m_base:
         return None
     base = m_base.group(1).strip()
-    reg, reg_value = m_reg.groups()
-    if base != reg_value.strip() or "ACCU" in base:
+    if "ACCU" in base:
         return None
 
-    parsed = _parse_optional_guard(lines, start + 2, reg, base)
+    guard_idx = start + 1
+    reg = base if re.fullmatch(r"r\d+", base) else None
+    duplicate = re.match(r"^(r\d+)\s*=\s*(.+)$", lines[guard_idx].strip())
+    if duplicate and duplicate.group(2).strip() == base:
+        reg = duplicate.group(1)
+        guard_idx += 1
+    if reg is None:
+        return None
+
+    parsed = _parse_optional_guard(lines, guard_idx, reg, base)
     if parsed is None:
         return None
     expr, next_i = parsed

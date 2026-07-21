@@ -155,11 +155,16 @@ def _compact_self_binary_assignments(lines: List[str]) -> List[str]:
     out: List[str] = []
     for line in lines:
         stripped = line.strip()
-        match = re.match(r"^(r\d+)\s*=\s*\(\1\s*([+*])\s*(.+)\)$", stripped)
+        match = re.match(
+            r"^([A-Za-z_$][A-Za-z0-9_$]*"
+            r"(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]+\])*)"
+            r"\s*=\s*\(\1\s*([+*\-/%])\s*(.+)\)$",
+            stripped,
+        )
         if match:
-            reg, op, expr = match.groups()
+            target, op, expr = match.groups()
             indent = _extract_indent(line)
-            out.append(f"{indent}{reg} {op}= {expr.strip()}")
+            out.append(f"{indent}{target} {op}= {expr.strip()}")
             continue
         out.append(line)
     return out
@@ -172,6 +177,26 @@ def _compact_adjacent_binary_temp_registers(lines: List[str]) -> List[str]:
         if i + 1 < len(lines):
             s0 = lines[i].strip()
             s1 = lines[i + 1].strip()
+            m_compound_temp = re.match(
+                r"^(r\d+)\s*=\s*\((.+)\s+([+*\-/%])\s+(.+)\)$",
+                s0,
+            )
+            m_compound_store = re.match(r"^(.+?)\s*=\s*(r\d+)$", s1)
+            if m_compound_temp and m_compound_store:
+                temp, left, operator, right = m_compound_temp.groups()
+                target, stored_temp = m_compound_store.groups()
+                left = left.strip()
+                target = target.strip()
+                right = right.strip()
+                if (
+                    stored_temp == temp
+                    and target == left
+                    and temp not in right
+                ):
+                    indent = _extract_indent(lines[i + 1])
+                    out.append(f"{indent}{target} {operator}= {right}")
+                    i += 2
+                    continue
             m_temp = re.match(r"^(r\d+)\s*=\s*(.+)$", s0)
             m_binary_store = re.match(r"^(r\d+)\s*=\s*\((r\d+)\s*([+*])\s*(.+)\)$", s1)
             if m_temp and m_binary_store:
