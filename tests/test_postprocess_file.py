@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 from decompiler.postprocess_file import (
     compact_file_register_concat_returns,
     normalize_unique_string_function_names,
-    postprocess_level4_file,
+    postprocess_source_file,
     recover_context_slot_closure_names,
 )
 
@@ -146,7 +146,7 @@ class PostprocessFileTests(unittest.TestCase):
         self.assertIn("return create_closure(parseLine)", recovered)
         self.assertNotIn("String_9_parseLine", recovered)
 
-    def test_level4_file_postprocess_renames_recovered_context_slot_name(self) -> None:
+    def test_source_file_postprocess_renames_recovered_context_slot_name(self) -> None:
         text = "\n".join(
             [
                 "function bytecode() {",
@@ -162,7 +162,7 @@ class PostprocessFileTests(unittest.TestCase):
             ]
         )
 
-        recovered = postprocess_level4_file(text)
+        recovered = postprocess_source_file(text)
 
         self.assertIn("script_context[4] = new Counter(2)", recovered)
         self.assertIn("function Counter(arg0) {", recovered)

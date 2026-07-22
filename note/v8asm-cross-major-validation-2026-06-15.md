@@ -72,7 +72,7 @@ JSC=/home/aynakeya/workspace/v8asm/atom.compiled.dist.jsc
 DISASM=/tmp/atom.13.4.final.disasm.txt
 
 $V8ASM --snapshot_blob "$SNAPSHOT" disasm "$JSC" --force-incompatible > "$DISASM"
-python3 decompiler/v8decompiler.py "$DISASM" --level 4 --runtime \
+python3 decompiler/v8decompiler.py "$DISASM" --runtime \
   > note/atom.compiled.dist.decompiled.l4.js
 ```
 

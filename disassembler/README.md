@@ -10,7 +10,7 @@ Use structured JSON when feeding the result to the Python decompiler:
 
 ```bash
 python3 -m disassembler input.jsc --format json > /tmp/input.disasm.json
-python3 -m decompiler /tmp/input.disasm.json --level 4
+python3 -m decompiler /tmp/input.disasm.json
 ```
 
 The JSON document is a versioned, address-indexed object graph. Its addresses

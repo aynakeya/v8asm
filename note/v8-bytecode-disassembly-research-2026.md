@@ -1134,7 +1134,7 @@ A 12.9 self round was verified with `01_arith.js`:
 v8asm asm -> /tmp/v8asm-12.9-01.jsc
 checkversion -> magic/version_hash/flags_hash/read_only_snapshot_checksum all match
 v8asm disasm -> ok
-python decompiler --level 4 --runtime -> ok
+python decompiler --runtime -> ok
 ```
 
 The decompiled function was:
@@ -1198,7 +1198,7 @@ A 11.9 self round was verified with `01_arith.js`:
 v8asm asm -> /tmp/v8asm-11.9-01.jsc
 checkversion -> magic/version_hash/flags_hash/read_only_snapshot_checksum all match
 v8asm disasm -> ok
-python decompiler --level 4 --runtime -> ok
+python decompiler --runtime -> ok
 ```
 
 The current main validation target remains `13.6.233.10`, also built from the

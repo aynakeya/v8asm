@@ -366,7 +366,7 @@ def _remove_parameter_body_context(
     )
 
 
-def normalize_level4_instructions(
+def normalize_source_instructions(
     context: DecompilerContext,
     bytecode: V8BytecodeArray,
     instructions: Sequence[Instruction],

@@ -48,7 +48,7 @@ ScopeInfo 的以下数据都由对应 V8 tag 的官方源码生成 profile：
 字面量加载。该逻辑不依赖函数名、固定 bytecode offset 或某个 V8 版本的 opcode
 编号。
 
-level 4 还会在控制流证据完整时恢复以下源码结构：
+source-recovery pipeline 还会在控制流证据完整时恢复以下源码结构：
 
 - BLOCK_SCOPE 中的 HOLE 初始化和匹配的 TDZ 检查恢复为词法变量声明；
 - 空 then 分支的 nullish 控制流恢复为 `??` 或保持求值顺序的 `??=`；
@@ -95,4 +95,4 @@ ObjectBoilerplateDescription 在大版本间有两种布局：10.x 的 FixedArra
   调用仍可能保留寄存器和 `.call(...)`；提供 checksum 匹配的 snapshot 后才能恢复
   真实字符串并继续安全简化；
 - 参数名若未进入 ScopeInfo，cached data 本身通常没有足够信息恢复源码名称；
-- level 4 仍有寄存器、TDZ 检查和少量 goto，需要继续做有证据的数据流恢复。
+- source 输出仍有寄存器、TDZ 检查和少量 goto，需要继续做有证据的数据流恢复。

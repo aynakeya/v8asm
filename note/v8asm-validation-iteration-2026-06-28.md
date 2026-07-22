@@ -127,7 +127,7 @@ Validation commands used the build's own generated startup snapshot explicitly:
   disasm /tmp/v8asm-13.2-node-verify/01_arith.jsc
 
 python3 decompiler/v8decompiler.py \
-  /tmp/v8asm-13.2-node-verify/01_arith.disasm.txt --level 4 --runtime
+  /tmp/v8asm-13.2-node-verify/01_arith.disasm.txt --runtime
 ```
 
 Results:

@@ -11,7 +11,11 @@ from .postprocess_level4_binary import (
     _recover_accu_conditional_return_expr,
 )
 from .postprocess_level4_arrays import _compact_fixed_array_builders, _compact_spread_array_builders
-from .postprocess_level4_calls import _rewrite_bound_method_calls
+from .postprocess_level4_calls import (
+    _fold_adjacent_bound_method_calls,
+    _rewrite_bound_method_calls,
+    _rewrite_direct_bound_method_calls,
+)
 from .postprocess_level4_cleanup import (
     _collapse_accu_store_return,
     _collapse_accu_store,
@@ -124,6 +128,8 @@ def recover_js_structures(lines: List[str]) -> List[str]:
     current = combine_nested_truthy_ifs(current)
     current = drop_redundant_empty_else_truthy_guards(current)
     current = _compact_object_literal_initializers(current)
+    current = _fold_adjacent_bound_method_calls(current)
+    current = _rewrite_direct_bound_method_calls(current)
     current = _normalize_block_indentation(current)
     return current
 

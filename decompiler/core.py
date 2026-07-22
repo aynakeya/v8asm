@@ -7,12 +7,12 @@ from typing import Iterable, List, Optional
 
 from .context import DecompilerContext
 from .instruction import Instruction
-from .normalization import normalize_level4_instructions
+from .normalization import normalize_source_instructions
 from .objects import V8HeapObject
 from .objects.bytecode import V8BytecodeArray
 from .parser import parse_objects
 from .postprocess import simplify_lines
-from .postprocess_file import postprocess_level4_file
+from .postprocess_file import postprocess_source_file
 from .runtime import runtime_prelude
 from .structured import load_structured_objects
 from .structurer import decompile_to_statements
@@ -68,7 +68,7 @@ def _format_register_locals(bytecode: V8BytecodeArray) -> List[str]:
     return lines
 
 
-def render_level1(
+def _render_linear(
     translator: InstructionTranslator, instructions: List[Instruction]
 ) -> List[str]:
     lines: List[str] = []
@@ -79,7 +79,7 @@ def render_level1(
     return lines
 
 
-def render_level2(
+def _render_structured(
     translator: InstructionTranslator, instructions: List[Instruction]
 ) -> List[str]:
     statements = decompile_to_statements(translator, instructions)
@@ -89,19 +89,11 @@ def render_level2(
     return lines
 
 
-def render_level3(
+def _render_source_fragment(
     translator: InstructionTranslator, instructions: List[Instruction]
 ) -> List[str]:
     return simplify_lines(
-        render_level2(translator, instructions), recover_structures=False
-    )
-
-
-def _render_level4_fragment(
-    translator: InstructionTranslator, instructions: List[Instruction]
-) -> List[str]:
-    return simplify_lines(
-        render_level2(translator, instructions), recover_structures=True
+        _render_structured(translator, instructions), recover_structures=True
     )
 
 
@@ -109,7 +101,7 @@ def _indent_lines(lines: List[str]) -> List[str]:
     return [f"{INDENT}{line}" if line else line for line in lines]
 
 
-def render_level4(
+def _render_source(
     context: DecompilerContext,
     bytecode: V8BytecodeArray,
     translator: InstructionTranslator,
@@ -120,15 +112,15 @@ def render_level4(
     )
     if recovered is not None:
         return recovered
-    return _render_level4_fragment(translator, instructions)
+    return _render_source_fragment(translator, instructions)
 
 
 def decompile_bytecode(
     context: DecompilerContext,
     bytecode: V8BytecodeArray,
-    level: int,
-    nested_functions: Optional[List[str]] = None,
     *,
+    nested_functions: Optional[List[str]] = None,
+    linear: bool = False,
     as_script: bool = False,
 ) -> str:
     owner = context.get_function_for_bytecode(bytecode)
@@ -155,35 +147,31 @@ def decompile_bytecode(
     notes: List[str] = []
     lexical_declarations = []
     try:
-        if level == 1:
-            body_lines = render_level1(translator, instructions)
-        elif level == 2:
-            body_lines = render_level2(translator, instructions)
-        elif level == 3:
-            body_lines = render_level3(translator, instructions)
+        if linear:
+            body_lines = _render_linear(translator, instructions)
         else:
-            normalization = normalize_level4_instructions(
+            normalization = normalize_source_instructions(
                 context, bytecode, instructions
             )
             instructions = normalization.instructions
             lexical_declarations = list(
                 normalization.lexical_declarations
             )
-            body_lines = render_level4(
+            body_lines = _render_source(
                 context, bytecode, translator, instructions
             )
     except RecursionError:
         notes.append(
             "  // WARNING: structurer recursion overflow, "
-            "fallback to level-1 linear output"
+            "fallback to linear output"
         )
-        body_lines = render_level1(translator, original_instructions)
+        body_lines = _render_linear(translator, original_instructions)
     except Exception as exc:
         notes.append(
             f"  // WARNING: decompile error ({type(exc).__name__}), "
-            "fallback to level-1 linear output"
+            "fallback to linear output"
         )
-        body_lines = render_level1(translator, original_instructions)
+        body_lines = _render_linear(translator, original_instructions)
 
     body: List[str] = [metadata]
     if as_script:
@@ -225,22 +213,22 @@ def decompile_bytecode(
 def _decompile_function_tree(
     context: DecompilerContext,
     bytecode: V8BytecodeArray,
-    level: int,
+    linear: bool,
     ancestors: frozenset[int] = frozenset(),
 ) -> str:
     if bytecode.address in ancestors:
-        return decompile_bytecode(context, bytecode, level)
+        return decompile_bytecode(context, bytecode, linear=linear)
     next_ancestors = ancestors | {bytecode.address}
     nested = [
-        _decompile_function_tree(context, child, level, next_ancestors)
+        _decompile_function_tree(context, child, linear, next_ancestors)
         for child in context.child_functions(bytecode)
     ]
     return decompile_bytecode(
         context,
         bytecode,
-        level,
-        nested,
-        as_script=level >= 4 and context.is_script(bytecode),
+        nested_functions=nested,
+        linear=linear,
+        as_script=not linear and context.is_script(bytecode),
     )
 
 
@@ -253,7 +241,7 @@ def _read_disassembly_objects(path: Path):
 
 
 def decompile_objects(
-    objects: Iterable[V8HeapObject], level: int, runtime: bool = False
+    objects: Iterable[V8HeapObject], *, linear: bool = False, runtime: bool = False
 ) -> str:
     object_list = list(objects)
     context = DecompilerContext(object_list)
@@ -263,12 +251,16 @@ def decompile_objects(
         outputs.append(runtime_prelude().rstrip())
     for obj in object_list:
         if isinstance(obj, V8BytecodeArray) and not context.is_nested_function(obj):
-            outputs.append(_decompile_function_tree(context, obj, level))
+            outputs.append(_decompile_function_tree(context, obj, linear))
     output = "\n\n".join(outputs)
-    if level >= 4:
-        output = postprocess_level4_file(output)
+    if not linear:
+        output = postprocess_source_file(output)
     return output
 
 
-def decompile_file(path: Path, level: int, runtime: bool = False) -> str:
-    return decompile_objects(_read_disassembly_objects(path), level, runtime)
+def decompile_file(
+    path: Path, *, linear: bool = False, runtime: bool = False
+) -> str:
+    return decompile_objects(
+        _read_disassembly_objects(path), linear=linear, runtime=runtime
+    )

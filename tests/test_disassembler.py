@@ -595,7 +595,7 @@ class OfflineDisassemblerTests(unittest.TestCase):
                     for bytecode in structured_bytecodes
                 ]
                 self.assertEqual(structured_names, names)
-                decompiled = decompile_objects(structured_objects, level=1)
+                decompiled = decompile_objects(structured_objects, linear=True)
                 self.assertIn("function calc(", decompiled)
                 recognized += 1
         self.assertEqual(recognized, 26)

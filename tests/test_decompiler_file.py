@@ -19,7 +19,7 @@ from decompiler.structured import load_structured_objects
 
 
 class DecompilerFileTests(unittest.TestCase):
-    def test_module_cli_reads_structured_json(self) -> None:
+    def test_module_cli_reads_structured_json_in_linear_mode(self) -> None:
         document = disassembly_to_dict(
             parse_disassembly_file(ROOT / "samples" / "main.d8.jsc")
         )
@@ -32,8 +32,7 @@ class DecompilerFileTests(unittest.TestCase):
                     "-m",
                     "decompiler",
                     str(path),
-                    "--level",
-                    "1",
+                    "--linear",
                 ],
                 cwd=ROOT,
                 check=True,
@@ -44,6 +43,50 @@ class DecompilerFileTests(unittest.TestCase):
             path.unlink(missing_ok=True)
 
         self.assertIn("function add(arg0, arg1)", result.stdout)
+        self.assertIsNotNone(
+            re.search(r"^\s*\[\s*0\]\s", result.stdout, re.MULTILINE)
+        )
+
+    def test_module_cli_defaults_to_source_recovery(self) -> None:
+        document = disassembly_to_dict(
+            parse_disassembly_file(ROOT / "samples" / "main.d8.jsc")
+        )
+        path = ROOT / "tests" / "tmp_cli_source.json"
+        try:
+            path.write_text(json.dumps(document), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, "-m", "decompiler", str(path)],
+                cwd=ROOT,
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+            )
+        finally:
+            path.unlink(missing_ok=True)
+
+        self.assertIn("function add(arg0, arg1)", result.stdout)
+        self.assertIsNone(
+            re.search(r"^\s*\[\s*0\]\s", result.stdout, re.MULTILINE)
+        )
+
+    def test_module_cli_rejects_removed_level_option(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "decompiler",
+                str(ROOT / "samples" / "main.d8.jsc.txt"),
+                "--level",
+                "4",
+            ],
+            cwd=ROOT,
+            check=False,
+            text=True,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized arguments: --level 4", result.stderr)
 
     def test_complex_fixture_recovers_object_literals_and_closures(self) -> None:
         versions = (
@@ -62,7 +105,7 @@ class DecompilerFileTests(unittest.TestCase):
                 )
                 document = disassembly_to_dict(parsed)
                 output = decompile_objects(
-                    load_structured_objects(document), level=4
+                    load_structured_objects(document)
                 )
 
                 self.assertEqual(document["metadata"]["v8_version"], version)
@@ -135,7 +178,7 @@ class DecompilerFileTests(unittest.TestCase):
         path = ROOT / "tests" / "tmp_closure_disassembly.json"
         try:
             path.write_text(json.dumps(document), encoding="utf-8")
-            output = decompile_file(path, level=1)
+            output = decompile_file(path, linear=True)
         finally:
             path.unlink(missing_ok=True)
 
@@ -174,7 +217,7 @@ class DecompilerFileTests(unittest.TestCase):
                 "decompiler.core.parse_objects",
                 side_effect=AssertionError("text parser must not be used for JSON"),
             ):
-                output = decompile_file(path, level=1)
+                output = decompile_file(path, linear=True)
         finally:
             path.unlink(missing_ok=True)
 
@@ -198,7 +241,7 @@ class DecompilerFileTests(unittest.TestCase):
         path = ROOT / "tests" / "tmp_non_utf8_disasm.txt"
         try:
             path.write_bytes(dump)
-            output = decompile_file(path, level=1)
+            output = decompile_file(path, linear=True)
         finally:
             path.unlink(missing_ok=True)
 
@@ -234,7 +277,7 @@ class DecompilerFileTests(unittest.TestCase):
         path = ROOT / "tests" / "tmp_try_guard_disasm.txt"
         try:
             path.write_text(dump, encoding="utf-8")
-            output = decompile_file(path, level=4)
+            output = decompile_file(path)
         finally:
             path.unlink(missing_ok=True)
 
@@ -279,7 +322,7 @@ class DecompilerFileTests(unittest.TestCase):
         path = ROOT / "tests" / "tmp_try_alternate_disasm.txt"
         try:
             path.write_text(dump, encoding="utf-8")
-            output = decompile_file(path, level=4)
+            output = decompile_file(path)
         finally:
             path.unlink(missing_ok=True)
 
@@ -310,7 +353,7 @@ class DecompilerFileTests(unittest.TestCase):
         path = ROOT / "tests" / "tmp_jump_if_constant_disasm.txt"
         try:
             path.write_text(dump, encoding="utf-8")
-            output = decompile_file(path, level=4)
+            output = decompile_file(path)
         finally:
             path.unlink(missing_ok=True)
 
@@ -357,7 +400,7 @@ class DecompilerFileTests(unittest.TestCase):
         path = ROOT / "tests" / "tmp_constant_jump_chain_disasm.txt"
         try:
             path.write_text(dump, encoding="utf-8")
-            output = decompile_file(path, level=4)
+            output = decompile_file(path)
         finally:
             path.unlink(missing_ok=True)
 

@@ -39,7 +39,7 @@ python3 -m disassembler input.jsc > /tmp/input.disasm.txt
 
 ```bash
 python3 decompiler/v8decompiler.py \
-  /tmp/input.disasm.txt --level 4 --runtime \
+  /tmp/input.disasm.txt --runtime \
   > /tmp/input.decompiled.js
 ```
 

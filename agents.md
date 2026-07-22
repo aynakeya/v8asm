@@ -23,20 +23,17 @@ codex resume 019c42ba-60e2-7cb0-905b-0edd833425d3
   - `instruction.py`: 指令切分
   - `translator.py`: opcode -> 伪 JS
   - `cfg.py` + `structurer.py` + `statements.py`: CFG 与结构化输出
-  - `postprocess.py`: level 3/4 的简化和结构恢复
+  - `postprocess.py`: source 输出的简化和结构恢复
   - `v8decompiler.py`: CLI 入口
 - `v8patch/`: 构建 `v8asm` 的 patch/参考代码
 - `checkversion/`: 独立版本检测小工具
 - `tests/decomp_rounds/`: 真实回归流水线（新增）
 
-## Decompile Levels (Current)
+## Decompiler Output Modes
 
-命令：`python3 decompiler/v8decompiler.py <disasm.txt> --level N [--runtime]`
-
-- `level 1`: 线性指令视图（带 offset），用于核对 opcode 与跳转。
-- `level 2`: CFG 结构化（`if/while`），保留低层细节。
-- `level 3`: `level 2` + 保守表达式简化。
-- `level 4`: `level 3` + 高层模式恢复（如 `for...of`、`+=`、部分 switch 模式）。
+默认命令 `python3 -m decompiler <disasm.json> [--runtime]` 直接运行完整的
+source-recovery pipeline。需要核对 opcode 和 offset 时使用 `--linear`。旧的数字
+level 接口已经删除，不要在脚本或文档中重新引入。
 
 `--runtime` 会注入轻量 helper（`truthy/isNullish/isJSReceiver/...`）和上下文槽，方便直接运行伪代码。
 
@@ -80,7 +77,7 @@ codex resume 019c42ba-60e2-7cb0-905b-0edd833425d3
 1. `v8asm asm` 编译 case
 2. `bytenode` 编译 case（使用本机缓存路径）
 3. `v8asm disasm`
-4. `python decompiler/v8decompiler.py --level 4 --runtime`
+4. `python -m decompiler --runtime`
 5. 输出统计（`accu_lines/reg_refs/raw_goto/...`）
 
 默认 bytenode 使用 `nvm use 24.7.0`。验证其他 V8 版本时应显式指定：
@@ -196,7 +193,7 @@ tests/decomp_rounds/run_version_matrix.sh
 时一起纳入；不要把临时 out 目录硬编码进默认矩阵，需要临时 probe 时使用
 `VERSION_MATRIX_V8ASM_BINS`：
 
-- `v8asm asm` 自生成 cache 必须能 strict disasm + level-4 decompile。
+- `v8asm asm` 自生成 cache 必须能 strict disasm + source decompile。
 - bytenode cache 先记录 `checkversion`；只有 Node V8 数字版本等于
   `v8asm version`，且 Node 与 `v8asm` 的 pointer compression 布局一致时，
   才尝试 `--force-incompatible`。
@@ -233,17 +230,17 @@ tests/decomp_rounds/run_version_matrix.sh
 - `v8asm disasm` 默认拒绝不兼容 cached data；只有显式 `--force-incompatible` 时才启用 best-effort
   反汇编和对象打印保护。不要把缺失 print 当成 Python decompiler 问题；先看
   `checkversion` 的 snapshot checksum 和 summary 的 `current_ro_objects`。
-- `level 4` 对复杂异常/async handler 路径仍有低层状态机残留（例如 `HOLE`、pending message、reject
+- source recovery 对复杂异常/async handler 路径仍有低层状态机残留（例如 `HOLE`、pending message、reject
   handler 片段）。
 - 当前 round 的 `unknown` 和 `raw_goto` 应保持为 0；如果回升，优先看 translator opcode 覆盖或
-  level-4 pipeline 顺序是否破坏了已有结构恢复。
+  source-recovery pipeline 顺序是否破坏了已有结构恢复。
 
 ## Recent High-Impact Fixes
 
 - 修复了 `BytecodeArray` 指令解析遗漏（支持带 `S>` 前缀的行），恢复了关键分支与 return 指令。
 - 为结构器增加了递归/重入防护，降低了结构化爆栈概率。
 - 增加 `TestEqualStrict/TestGreaterThan/TestLessThan` 翻译。
-- `level 4` 新增/增强：
+- source recovery 新增/增强：
   - `for...of` 恢复（支持嵌套场景）
   - `switch` 两分支模式恢复（`if (x===1) return ...; if (x===2) return ...; return ...`）
   - 赋值型两分支 switch 恢复成条件值，避免 `label`/`r4` 这类变量被
@@ -252,7 +249,7 @@ tests/decomp_rounds/run_version_matrix.sh
   - bound method call 恢复可进入简单二元表达式，例如
     `return (r3 + r4.call(r1))` -> `return (r3 + r1.sum())`
   - 删除已被高层表达式吸收的纯临时寄存器赋值，但保留 call/new 等 effectful 表达式
-  - 文件级 level-4 后处理会用同函数内 `script_context[n] = create_closure(name)`
+  - 文件级 source 后处理会用同函数内 `script_context[n] = create_closure(name)`
     和 `ensureDefined("Name")` 的局部证据，把部分 `context_slot[n]` 恢复成闭包名；
     不做跨函数全局替换，避免误改闭包变量或私有字段槽。
 

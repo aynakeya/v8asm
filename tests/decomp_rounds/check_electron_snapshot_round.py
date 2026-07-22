@@ -197,8 +197,6 @@ def main() -> int:
                     sys.executable,
                     str(ROOT / "decompiler/v8decompiler.py"),
                     str(dis_txt),
-                    "--level",
-                    "4",
                     "--runtime",
                 ],
                 out=dec_js,

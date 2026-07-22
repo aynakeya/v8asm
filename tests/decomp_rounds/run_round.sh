@@ -170,7 +170,7 @@ for js in "$CASE_DIR"/*.js; do
     fi
 
     if run_v8asm disasm "$in_jsc" "${disasm_args[@]}" >"$dis_txt" 2>"$dis_err"; then
-      if ! python3 "$ROOT_DIR/decompiler/v8decompiler.py" "$dis_txt" --level 4 --runtime >"$dec_js" 2>"$casedir/$base.$mode.decompile.err"; then
+      if ! python3 "$ROOT_DIR/decompiler/v8decompiler.py" "$dis_txt" --runtime >"$dec_js" 2>"$casedir/$base.$mode.decompile.err"; then
         echo "// decompile failed for $dis_txt" >"$dec_js"
       fi
     else

@@ -14,7 +14,7 @@ SYNTHETIC_STRING_FUNCTION_DECL_RE = re.compile(
 )
 
 
-def postprocess_level4_file(text: str) -> str:
+def postprocess_source_file(text: str) -> str:
     text = compact_file_register_concat_returns(text)
     text = recover_context_slot_closure_names(text)
     return normalize_unique_string_function_names(text)

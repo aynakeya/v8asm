@@ -6,6 +6,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 from decompiler.postprocess import _compact_compound_assignments, simplify_lines
+from decompiler.postprocess_level4_calls import (
+    _fold_adjacent_bound_method_calls,
+    _rewrite_direct_bound_method_calls,
+)
 from decompiler.parser import parse_objects
 
 
@@ -341,6 +345,168 @@ class SimplifyLinesTests(unittest.TestCase):
                 "r3 = r14.toUpperCase()",
             ],
         )
+
+    def test_folds_adjacent_bound_calls_in_safe_expression_contexts(self) -> None:
+        cases = (
+            (
+                [
+                    "r1 = r0.isDestroyed",
+                    "if (truthy(r1.call(r0))) {",
+                ],
+                ["if (truthy(r0.isDestroyed())) {"],
+            ),
+            (
+                [
+                    "r0 = r1.useDarkThemeBefore",
+                    "if (!(r0.call(r1) !== null)) {",
+                ],
+                ["if (!(r1.useDarkThemeBefore() !== null)) {"],
+            ),
+            (
+                [
+                    "r9 = r10.exec",
+                    "r9 = (r9.call(r10, r4) || [])",
+                ],
+                ["r9 = (r10.exec(r4) || [])"],
+            ),
+            (
+                [
+                    "r2 = r3.render",
+                    "return String(r2.call(r3, arg0))",
+                ],
+                ["return String(r3.render(arg0))"],
+            ),
+        )
+
+        for lines, expected in cases:
+            with self.subTest(lines=lines):
+                self.assertEqual(
+                    _fold_adjacent_bound_method_calls(lines), expected
+                )
+
+    def test_does_not_fold_adjacent_bound_call_with_different_receiver(self) -> None:
+        lines = [
+            "r1 = r0.isDestroyed",
+            "if (truthy(r1.call(r2))) {",
+        ]
+
+        self.assertEqual(_fold_adjacent_bound_method_calls(lines), lines)
+
+    def test_does_not_fold_bound_call_across_intervening_statement(self) -> None:
+        lines = [
+            "r1 = r0.isDestroyed",
+            "observe(r0)",
+            "if (truthy(r1.call(r0))) {",
+        ]
+
+        self.assertEqual(_fold_adjacent_bound_method_calls(lines), lines)
+
+    def test_does_not_fold_complex_member_receiver(self) -> None:
+        lines = [
+            "r1 = obj.child.method",
+            "if (truthy(r1.call(obj.child))) {",
+        ]
+
+        self.assertEqual(_fold_adjacent_bound_method_calls(lines), lines)
+
+    def test_does_not_fold_bound_call_after_another_evaluated_expression(self) -> None:
+        lines = [
+            "r1 = r0.method",
+            "r2 = combine(sideEffect(), r1.call(r0))",
+        ]
+
+        self.assertEqual(_fold_adjacent_bound_method_calls(lines), lines)
+
+    def test_does_not_fold_bound_call_when_temporary_is_reused(self) -> None:
+        lines = [
+            "r1 = r0.method",
+            "r2 = (r1.call(r0) || r1)",
+        ]
+
+        self.assertEqual(_fold_adjacent_bound_method_calls(lines), lines)
+
+    def test_does_not_fold_bound_call_with_later_accu_result_alias(self) -> None:
+        lines = [
+            "r1 = r0.method",
+            "ACCU = r1.call(r0)",
+            "target.value = r1.call(r0)",
+        ]
+
+        self.assertEqual(_fold_adjacent_bound_method_calls(lines), lines)
+
+    def test_does_not_fold_before_self_referential_reassignment(self) -> None:
+        lines = [
+            "r1 = r0.method",
+            "ACCU = r1.call(r0)",
+            "r1 = r1.call(r0)",
+        ]
+
+        self.assertEqual(_fold_adjacent_bound_method_calls(lines), lines)
+
+    def test_does_not_treat_conditional_reassignment_as_killing_old_value(
+        self,
+    ) -> None:
+        lines = [
+            "r1 = r0.method",
+            "if (truthy(r1.call(r0))) {",
+            "  r1 = replacement",
+            "}",
+            "return r1",
+        ]
+
+        self.assertEqual(_fold_adjacent_bound_method_calls(lines), lines)
+
+    def test_rewrites_direct_bound_calls_inside_expressions(self) -> None:
+        lines = [
+            "if (!truthy(r0.isDestroyed.call(r0))) {",
+            'result = (settings.get.call(settings, "theme") || null)',
+            "return context_slot[58].isDestroyed.call(context_slot[58])",
+        ]
+
+        self.assertEqual(
+            _rewrite_direct_bound_method_calls(lines),
+            [
+                "if (!truthy(r0.isDestroyed())) {",
+                'result = (settings.get("theme") || null)',
+                "return context_slot[58].isDestroyed()",
+            ],
+        )
+
+    def test_keeps_non_matching_or_complex_direct_bound_calls(self) -> None:
+        lines = [
+            "if (truthy(r0.isDestroyed.call(r1))) {",
+            "return getTarget().method.call(getTarget())",
+            "return obj.child.method.call(obj.child)",
+        ]
+
+        self.assertEqual(_rewrite_direct_bound_method_calls(lines), lines)
+
+    def test_simplifies_adjacent_bound_call_inside_condition(self) -> None:
+        lines = [
+            "r1 = r0.isDestroyed",
+            "if (!truthy(r1.call(r0))) {",
+            "  return false",
+            "}",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertIn("if (!truthy(r0.isDestroyed())) {", simplified)
+        self.assertNotIn("r1.call(r0)", simplified)
+
+    def test_simplifies_bound_call_result_without_duplicate_invocation(self) -> None:
+        lines = [
+            "ACCU = r0.method",
+            "r1 = ACCU",
+            "ACCU = r1.call(r0)",
+            "r1 = ACCU",
+            "return r1",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ["r1 = r0.method()", "return r1"])
+        self.assertEqual("\n".join(simplified).count("r0.method()"), 1)
 
     def test_rewrites_direct_bound_method_call(self) -> None:
         lines = ["return JSON.parse.call(JSON, arg0)"]

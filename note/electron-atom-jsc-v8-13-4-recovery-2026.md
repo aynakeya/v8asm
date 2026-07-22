@@ -162,7 +162,7 @@ without manually setting environment variables:
   2> /tmp/atom.13.4.current.v8context.force.disasm.err
 
 python3 /home/aynakeya/workspace/v8asm/decompiler/v8decompiler.py \
-  /tmp/atom.13.4.current.v8context.force.disasm.txt --level 4 --runtime \
+  /tmp/atom.13.4.current.v8context.force.disasm.txt --runtime \
   > /tmp/atom.13.4.current.v8context.force.dec.l4.js \
   2> /tmp/atom.13.4.current.v8context.force.decompile.err
 ```
@@ -550,7 +550,7 @@ Current Atom check:
 
 ```text
 python3 decompiler/v8decompiler.py \
-  /tmp/atom.current.13.4.force.disasm.txt --level 4 --runtime \
+  /tmp/atom.current.13.4.force.disasm.txt --runtime \
   > /tmp/atom.current.13.4.force.dec.l4.final.js
 
 unknown_comments: 0
@@ -707,7 +707,7 @@ JSC=/home/aynakeya/workspace/v8asm/atom.compiled.dist.jsc
 $V8ASM --snapshot_blob "$SNAPSHOT" checkversion "$JSC" --force-incompatible
 $V8ASM --snapshot_blob "$SNAPSHOT" disasm "$JSC" --force-incompatible > /tmp/atom.13.4.plain.force.disasm.txt 2> /tmp/atom.13.4.plain.force.disasm.err
 cd /home/aynakeya/workspace/v8asm
-python3 decompiler/v8decompiler.py /tmp/atom.13.4.plain.force.disasm.txt --level 4 --runtime > /tmp/atom.13.4.plain.force.dec.l4.js
+python3 decompiler/v8decompiler.py /tmp/atom.13.4.plain.force.disasm.txt --runtime > /tmp/atom.13.4.plain.force.dec.l4.js
 
 # Optional closer Electron-suffix build:
 cd /home/aynakeya/workspace/tmp/v8test/v8

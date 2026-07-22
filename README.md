@@ -47,7 +47,7 @@ Runtime use requires only Python 3 and the checked-in per-version JSON profiles:
 
 ```bash
 python3 -m disassembler input.jsc --format json > /tmp/input.disasm.json
-python3 -m decompiler /tmp/input.disasm.json --level 4 --runtime
+python3 -m decompiler /tmp/input.disasm.json --runtime
 ```
 
 JSON is the primary disassembler/decompiler interface. It preserves typed
@@ -104,25 +104,20 @@ capture workflow, Windows commands, output files, and limitations.
 ## decompiler quick usage
 
 ```bash
-python3 -m decompiler samples/main.d8.jsc.txt --level 1
-python3 -m decompiler samples/main.d8.jsc.txt --level 2
-python3 -m decompiler samples/main.d8.jsc.txt --level 3
-python3 -m decompiler samples/main.d8.jsc.txt --level 4 --runtime
+python3 -m decompiler /tmp/input.disasm.json
+python3 -m decompiler /tmp/input.disasm.json --runtime
+python3 -m decompiler /tmp/input.disasm.json --linear
 ```
 
 Both schema-v1 JSON and legacy text dumps are accepted. The old
 `python3 decompiler/v8decompiler.py ...` entry point remains as a compatibility
 wrapper.
 
-### decompile levels
-
-- level 1: linear, bytecode-aligned listing (best for reverse mapping to offsets).
-- level 2: CFG structured output (`if/while`), keeps most low-level operations.
-- level 3: level 2 + conservative simplification (register propagation, safer readability).
-- level 4: level 3 + high-level pattern recovery (e.g. iterator state
-  machine -> `for...of`, `+=` folding, string-concat return folding, bound
-  method calls, dead temporary register cleanup, unique function naming,
-  lexical closure nesting, and ScopeInfo-based context variable recovery).
+The default output runs the complete source-recovery pipeline, including CFG
+structuring, iterator recovery, expression folding, closure nesting, and
+ScopeInfo-based variable recovery. `--linear` is the diagnostic alternative:
+it keeps bytecode offsets and translated operations aligned for reverse
+mapping. The former numeric level 1-4 interface has been removed.
 
 ### regression rounds
 
@@ -131,7 +126,7 @@ wrapper.
 ```
 
 The round tests compile each case with local `v8asm` and bytenode, disassemble
-both outputs, run the level-4 Python decompiler, and write
+both outputs, run Python source recovery, and write
 `tests/decomp_rounds/summary.md`. The summary tracks low-level residue
 (`ACCU`, register refs, raw gotos), missing translator coverage (`unknown`), and
 best-effort object-print placeholders (`undefined_fallbacks`). It also counts
@@ -258,13 +253,13 @@ unverified rather than substituting a nearby V8 branch.
 The script now behaves like a small CI gate by default:
 
 - existing `v8asm` binaries must pass self-generated asm, strict disasm, and
-  level-4 decompile;
+  source decompile;
 - bytenode force-disasm is required when numeric V8 and pointer compression
   both match; numeric or pointer-layout mismatches are skipped by default;
 - numeric mismatches can still be probed with `VERSION_MATRIX_FORCE_MISMATCH=1`
   for research, but any signal-style exit code such as `fail:139` is a gate
   failure rather than a warning;
-- successful level-4 outputs must keep raw `goto offset_...` statements and
+- successful source outputs must keep raw `goto offset_...` statements and
   missing-opcode `// 0x... @ ...` comments at zero by default; tune with
   `VERSION_MATRIX_MAX_RAW_GOTO` and `VERSION_MATRIX_MAX_UNKNOWN` only when
   deliberately recording a known regression;
@@ -439,7 +434,7 @@ snapshot instead of patching over the read-only snapshot layout check.
   the Electron 34.3.0 snapshot round with both Electron package snapshots. The
   cached `v8asm.13.2.152.41.node.x64.release` build uses
   `v8_enable_pointer_compression=false` and `v8_enable_sandbox=false`, passes
-  explicit self `--snapshot_blob` asm/checkversion/disasm and level-4
+  explicit self `--snapshot_blob` asm/checkversion/disasm and source
   decompile. The no-static-roots Electron cache is a best-effort probe for
   snapshots that fail with `Check failed: true == fixed_offset`.
 - `v8patch/v8asm-13.4.patch`: V8 13.4 adaptation used for the Electron
@@ -451,7 +446,7 @@ snapshot instead of patching over the read-only snapshot layout check.
   `v8asm.13.4.114.21.node.x64.release` build uses
   `v8_enable_pointer_compression=false` and `v8_enable_static_roots=false`,
   and passes explicit self `--snapshot_blob` asm/checkversion/disasm plus
-  level-4 decompile. The explicit
+  source decompile. The explicit
   `v8asm.13.4.114.21.electron.staticroots.x64.release` build uses
   `v8_enable_static_roots=true`; it loads `v8context/v8_context_snapshot.bin`
   for `atom.compiled.dist.jsc` without the `fixed_offset` failure.
@@ -499,7 +494,7 @@ snapshot instead of patching over the read-only snapshot layout check.
   `v8asm.10.8.node.x64.release` build uses
   `v8_enable_pointer_compression=false` and `v8_enable_static_roots=false`,
   and passes explicit self `--snapshot_blob` asm/checkversion/disasm plus
-  level-4 decompile.
+  source decompile.
 - `v8patch/v8asm-11.3.patch`: V8 11.3 adaptation for Node 20/bytenode
   (`v20.20.2`, V8 `11.3.244.8-node.38`). It uses the older `Object` member
   predicate API, moves the short-print segfault guard to `src/objects/objects.cc`,

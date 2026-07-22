@@ -271,7 +271,7 @@ decompile_status() {
   local out="$2"
   local err="$3"
   set +e
-  python3 "$ROOT_DIR/decompiler/v8decompiler.py" "$txt" --level 4 --runtime >"$out" 2>"$err"
+  python3 "$ROOT_DIR/decompiler/v8decompiler.py" "$txt" --runtime >"$out" 2>"$err"
   local code="$?"
   set -e
   status_of "$code"

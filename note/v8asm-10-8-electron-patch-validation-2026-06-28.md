@@ -90,7 +90,7 @@ SNAP=/home/aynakeya/workspace/tmp/v8test/v8/out/v8asm.10.8.electron.x64.release/
 $V8ASM --snapshot_blob "$SNAP" asm tests/decomp_rounds/cases/01_arith.js -o /tmp/v8asm-10.8-verify/01_arith.jsc
 $V8ASM --snapshot_blob "$SNAP" checkversion /tmp/v8asm-10.8-verify/01_arith.jsc
 $V8ASM --snapshot_blob "$SNAP" disasm /tmp/v8asm-10.8-verify/01_arith.jsc
-python3 decompiler/v8decompiler.py /tmp/v8asm-10.8-verify/01_arith.disasm.txt --level 4 --runtime
+python3 decompiler/v8decompiler.py /tmp/v8asm-10.8-verify/01_arith.disasm.txt --runtime
 ```
 
 Observed result:

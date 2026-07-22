@@ -6,7 +6,7 @@ import unittest
 from decompiler.instruction import Instruction
 from decompiler.normalization import (
     find_default_parameter_initializers,
-    normalize_level4_instructions,
+    normalize_source_instructions,
 )
 from decompiler.objects import V8BytecodeArray
 
@@ -108,7 +108,7 @@ class NormalizationTests(unittest.TestCase):
             self.default_sequence,
             lambda item: "0" if item.mnemonic == "LdaZero" else None,
         )
-        normalized = normalize_level4_instructions(
+        normalized = normalize_source_instructions(
             FakeContext(initializers), self.bytecode, self.default_sequence
         )
         self.assertEqual(
@@ -123,7 +123,7 @@ class NormalizationTests(unittest.TestCase):
             instruction(2, "ThrowReferenceErrorIfHole", "[0]"),
             instruction(4, "Return"),
         ]
-        normalized = normalize_level4_instructions(
+        normalized = normalize_source_instructions(
             FakeContext(), self.bytecode, instructions
         )
         self.assertEqual(
@@ -131,7 +131,7 @@ class NormalizationTests(unittest.TestCase):
             ["LdaCurrentContextSlot", "Return"],
         )
 
-        mismatched = normalize_level4_instructions(
+        mismatched = normalize_source_instructions(
             FakeContext(constant='"other"'), self.bytecode, instructions
         )
         self.assertEqual(
@@ -163,7 +163,7 @@ class NormalizationTests(unittest.TestCase):
             instruction(19, "StaCurrentContextSlot", "[2]"),
             instruction(21, "Return"),
         ]
-        normalized = normalize_level4_instructions(
+        normalized = normalize_source_instructions(
             FakeContext(initializers, scope=scope),
             self.bytecode,
             instructions,
