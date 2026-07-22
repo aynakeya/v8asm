@@ -91,9 +91,8 @@ The reader validates the V8 version, snapshot magic, and read-only checksum.
 It supports the page-image formats used by V8 11.9 through 13.6, including
 static-roots and relocatable snapshots. Without `--snapshot-blob`, unresolved
 objects remain explicit `<read_only_<space>,<offset>>` values instead of being
-omitted or guessed. See
-`note/disassembler-standalone-2026-07-15.md` for architecture and
-validation results.
+omitted or guessed. See `note/python-disassembler.md` for architecture and
+`note/validation.md` for validation results.
 
 For an Electron application that transforms `.jsc` files before V8 sees them,
 preload `disassembler/capture_cached_data.cjs` to save the exact input and a
