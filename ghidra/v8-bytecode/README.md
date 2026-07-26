@@ -2,6 +2,11 @@
 
 这个目录提供一个 **Ghidra SLEIGH 处理器语言原型**，用于分析 V8 Ignition bytecode。
 
+> **Note**
+>
+> 当前 Ghidra 原型的反编译可读性和语义还原效果不如本仓库的 Python
+> decompiler。该模块暂时停止开发，仅保留用于实验、验证和结果对比。
+
 当前目标：
 - 在 Ghidra 里识别常见 V8 bytecode 指令
 - 为后续反编译增强建立可迭代基础
@@ -14,6 +19,9 @@
 - `data/languages/v8bytecode.cspec`: compiler spec
 - `data/languages/v8bytecode.ldefs`: language definition
 - `tools/extract_bytecode_blob.py`: 从 `v8asm disasm` 文本提取原始 bytecode blob
+- `tools/compare_decompilers.py`: 对同一 `BytecodeArray` 比较 Python 与 Ghidra 反编译结果
+- `tools/compare_corpus.py`: 批量比较语料中的全部 `BytecodeArray`
+- `ghidra_scripts/DumpV8Decompile.java`: headless listing/反编译导出脚本
 
 ## Quick Start
 
@@ -83,25 +91,89 @@ $GHIDRA_HOME/support/analyzeHeadless /tmp gh-v8-demo \
 
 导出的 `out.txt` 会同时包含 listing 和 decompile 结果。
 
+## Compare With The Python Decompiler
+
+对比脚本接受 `.jsc` 或新版 disassembler 生成的结构化 JSON。它只读取
+disassembler 的现有输出，不修改 disassembler，也不会写入 Ghidra 安装目录。
+
+```bash
+python3 ghidra/v8-bytecode/tools/compare_decompilers.py \
+  samples/main.d8.jsc \
+  --function listSum \
+  --ghidra-home /home/aynakeya/Application/ctf/ghidra_12.0.4_PUBLIC \
+  --java-home /home/aynakeya/environments/jdks/openjdk-21.0.2 \
+  -o /tmp/v8asm-compare-listSum
+```
+
+也可以直接输入结构化 JSON：
+
+```bash
+python3 -m disassembler samples/main.d8.jsc --format json \
+  > /tmp/main.disasm.json
+
+python3 ghidra/v8-bytecode/tools/compare_decompilers.py \
+  /tmp/main.disasm.json \
+  --function add \
+  --ghidra-home /home/aynakeya/Application/ctf/ghidra_12.0.4_PUBLIC \
+  --java-home /home/aynakeya/environments/jdks/openjdk-21.0.2 \
+  -o /tmp/v8asm-compare-add
+```
+
+可以使用 `--bytecode-index N` 代替函数名。两者都不指定时，默认选择字节数
+最多的 `BytecodeArray`。输出目录包含：
+
+- `comparison.md`: 两边结果与输入元数据
+- `python.js`: 手写 Python decompiler 的单函数输出
+- `ghidra.c`: Ghidra decompiler 输出
+- `ghidra-full.txt`: Ghidra listing 与完整反编译输出
+- `comparison.diff`: 文本差异
+- `ghidra-*.log` 和 `sleigh.log`: 编译、导入和反编译诊断
+
+对于异常处理表和 generator/switch jump table，比较脚本会从结构化反汇编中
+提取额外入口。Ghidra 输出会把主 CFG 之外的入口追加为独立函数，例如
+`safeJson_handler_12` 或 `seq_switch_27`，避免静默丢失 catch/恢复路径。
+
+## Compare A Corpus
+
+一次 Ghidra headless 进程可以比较目录中的所有 `.v8asm.jsc`：
+
+```bash
+python3 ghidra/v8-bytecode/tools/compare_corpus.py \
+  tests/decomp_rounds/out \
+  --ghidra-home /home/aynakeya/Application/ctf/ghidra_12.0.4_PUBLIC \
+  --java-home /home/aynakeya/environments/jdks/openjdk-21.0.2 \
+  -o /tmp/v8asm-ghidra-corpus
+```
+
+总览位于 `/tmp/v8asm-ghidra-corpus/summary.md`。每个函数在 `results/`
+下分别保存 `python.js`、`ghidra.c`、完整 listing 和两者的 diff。命令在任何
+Ghidra 输出缺失、反编译失败或出现 bad instruction 时返回非零状态。
+
 ## Opcode Coverage (current)
 
 已覆盖（高频）：
 - load/store: `LdaZero/LdaSmi/LdaConstant/LdaGlobal/Ldar/Star*/Mov/...`
-- property/call: `GetNamedProperty/CallProperty0/CallProperty1/CallProperty2/CallUndefinedReceiver*/CallRuntime`
-- literals/context: `CreateArrayLiteral/CreateObjectLiteral/CreateClosure/CreateCatchContext/CreateFunctionContext/PushContext/PopContext`
-- flow: `Jump/JumpLoop/JumpIf*`
+- arithmetic/compare: `Add/AddSmi/SubSmi/MulSmi/Inc/Test*`
+- property/call: `Get/Set/Define*Property`、`Call*`、`Construct*`、`InvokeIntrinsic`、`CallRuntime`
+- literals/context: `Create*Literal/CreateClosure/Create*Context/CreateRestParameter/PushContext/PopContext`
+- flow: `Jump/JumpLoop/JumpIf*`、`SwitchOn*`、`Throw/ReThrow/Return`
   - `Jump/JumpLoop/JumpIf*` 已带基础 branch p-code，可在 Ghidra 中形成控制流边
-  - `Wide/ExtraWide` 已补上 flow opcode 的显式解码（当前聚焦分支类）
-- compare: `TestReferenceEqual/TestEqualStrict/TestGreaterThan/TestLessThan`
-- misc: `SetPendingMessage/ReThrow/Return/GetIterator/ToString`
+  - `Wide/ExtraWide` 已覆盖 example2 中出现的高频 flow/load/store/call/literal opcode
+- generator: `SwitchOnGeneratorState/SuspendGenerator/ResumeGenerator`
+- misc: `SetPendingMessage/GetIterator/ToString`
 
 ## Limitations
 
 - 目前是 **实验版**：偏重高频指令与控制流，不保证完整/精确 p-code 语义。
-- `Wide/ExtraWide` 目前优先覆盖 flow opcode；其余宽前缀指令仍需继续补全。
-- 复杂异常路径、上下文槽、运行时调用语义仍需继续补全。
+- 当前 opcode 表按 V8 13.x 构建；V8 10/11/12 等旧版本需要独立 language variant。
+- `Wide/ExtraWide` 仍只覆盖当前样例实际使用的指令，其他宽前缀指令需继续补全。
+- Ghidra raw binary 无法直接解析 V8 constant pool，属性名/字符串等仍显示为索引；
+  Python decompiler 在这方面通常更易读。
+- 异常处理和 generator/switch 续体会作为额外入口函数导出，不会自动还原为
+  原生 JavaScript `try/catch`、`async/await` 或 generator 语法。
+- 复杂异常 CFG 仍可能出现 `Removing unreachable block` 警告。
 
-## Suggested Next Steps
+## If Development Resumes
 
 - 完整建模寄存器/参数编码（含 `aN`/`rN` 与 short form）。
 - 扩展 `Wide/ExtraWide` 到 load/store/call 家族。

@@ -7,8 +7,18 @@ define space register type=register_space size=4;
 define register offset=0x000 size=4 [ pc ];
 define register offset=0x010 size=8 [ ACCU ];
 define register offset=0x020 size=8 [ sp ];
-define register offset=0x040 size=8 [ r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 ];
-define register offset=0x140 size=8 [ context closure a0 a1 a2 a3 a4 a5 a6 a7 ];
+define register offset=0x040 size=8 [
+  r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15
+  r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31
+  r32 r33 r34 r35 r36 r37 r38 r39 r40 r41 r42 r43 r44 r45 r46 r47
+  r48 r49 r50 r51 r52 r53 r54 r55 r56 r57 r58 r59 r60 r61 r62 r63
+  r64 r65 r66 r67 r68 r69 r70 r71 r72 r73 r74 r75 r76 r77 r78 r79
+  r80 r81 r82 r83 r84 r85 r86 r87 r88 r89 r90 r91 r92 r93 r94 r95
+  r96 r97 r98 r99 r100 r101 r102 r103 r104 r105 r106 r107 r108 r109 r110 r111
+  r112 r113 r114 r115 r116 r117 r118 r119 r120 r121 r122 r123 r124 r125 r126 r127
+];
+define register offset=0x500 size=8 [ context closure a0 a1 a2 a3 a4 a5 a6 a7 ];
+define register offset=0x550 size=8 [ receiver ];
 
 define token opbyte (8)
   op=(0,7)
@@ -50,50 +60,120 @@ define token opwide (8)
 define token w1 (16)
   vw1=(0,15)
   sw1=(0,15) signed
+  nw1=(15,15)
 ;
 
 define token d1 (32)
   vd1=(0,31)
   sd1=(0,31) signed
+  nd1=(31,31)
 ;
 
 define token w2 (16)
   vw2=(0,15)
+  sw2=(0,15) signed
+  nw2=(15,15)
 ;
 
 define token w3 (16)
   vw3=(0,15)
+  sw3=(0,15) signed
+  nw3=(15,15)
+;
+
+define token w4 (16)
+  vw4=(0,15)
+  sw4=(0,15) signed
+  nw4=(15,15)
+;
+
+define token w5 (16)
+  vw5=(0,15)
 ;
 
 define token d2 (32)
   vd2=(0,31)
+  sd2=(0,31) signed
+  nd2=(31,31)
 ;
 
 define token d3 (32)
   vd3=(0,31)
+  sd3=(0,31) signed
+  nd3=(31,31)
+;
+
+define token d4 (32)
+  vd4=(0,31)
+  sd4=(0,31) signed
+  nd4=(31,31)
+;
+
+define token d5 (32)
+  vd5=(0,31)
 ;
 
 define pcodeop V8LdaConstant;
 define pcodeop V8LdaContextSlot;
+define pcodeop V8LdaCurrentContextSlot;
 define pcodeop V8LdaGlobal;
+define pcodeop V8StaGlobal;
 define pcodeop V8GetNamedProperty;
+define pcodeop V8GetKeyedProperty;
+define pcodeop V8GetEnumeratedKeyedProperty;
 define pcodeop V8GetIterator;
+define pcodeop V8SetNamedProperty;
+define pcodeop V8DefineNamedOwnProperty;
+define pcodeop V8SetKeyedProperty;
+define pcodeop V8DefineKeyedOwnProperty;
+define pcodeop V8StaInArrayLiteral;
+define pcodeop V8CallUndefinedReceiver;
+define pcodeop V8CallProperty;
 define pcodeop V8CallProperty0;
 define pcodeop V8CallProperty1;
 define pcodeop V8CallProperty2;
 define pcodeop V8CallUndefinedReceiver0;
 define pcodeop V8CallUndefinedReceiver1;
 define pcodeop V8CallUndefinedReceiver2;
+define pcodeop V8CallWithSpread;
 define pcodeop V8CallRuntime;
+define pcodeop V8InvokeIntrinsic;
+define pcodeop V8Construct;
+define pcodeop V8ConstructWithSpread;
+define pcodeop V8CreateRegExpLiteral;
 define pcodeop V8CreateArrayLiteral;
+define pcodeop V8CreateEmptyArrayLiteral;
+define pcodeop V8CreateEmptyObjectLiteral;
+define pcodeop V8CloneObject;
+define pcodeop V8CreateBlockContext;
 define pcodeop V8CreateCatchContext;
 define pcodeop V8CreateObjectLiteral;
 define pcodeop V8CreateClosure;
 define pcodeop V8CreateFunctionContext;
+define pcodeop V8CreateRestParameter;
+define pcodeop V8CreateMappedArguments;
 define pcodeop V8ContextStore;
+define pcodeop V8DeleteProperty;
+define pcodeop V8TestUndetectable;
+define pcodeop V8TestTypeOf;
+define pcodeop V8TestInstanceOf;
+define pcodeop V8ToBoolean;
+define pcodeop V8ToNumeric;
+define pcodeop V8ToObject;
 define pcodeop V8ToString;
+define pcodeop V8ForInEnumerate;
+define pcodeop V8ForInPrepare;
+define pcodeop V8ForInNext;
+define pcodeop V8ForInDone;
+define pcodeop V8JumpConstant;
 define pcodeop V8SetPendingMessage;
 define pcodeop V8ReThrow;
+define pcodeop V8ThrowReferenceErrorIfHole;
+define pcodeop V8SwitchOnSmiNoFeedback;
+define pcodeop V8SwitchOnGeneratorState;
+define pcodeop V8SuspendGenerator;
+define pcodeop V8ResumeGenerator;
+define pcodeop V8Throw;
 
 u8_1: v1 is v1 { export *[const]:8 v1; }
 u8_2: v2 is v2 { export *[const]:8 v2; }
@@ -102,74 +182,139 @@ u8_4: v4 is v4 { export *[const]:8 v4; }
 u8_5: v5 is v5 { export *[const]:8 v5; }
 
 s8_1: s1 is s1 { export *[const]:8 s1; }
+s8_3: s3 is s3 { export *[const]:8 s3; }
 
 u16_1: vw1 is vw1 { export *[const]:8 vw1; }
 u16_2: vw2 is vw2 { export *[const]:8 vw2; }
 u16_3: vw3 is vw3 { export *[const]:8 vw3; }
+u16_4: vw4 is vw4 { export *[const]:8 vw4; }
+u16_5: vw5 is vw5 { export *[const]:8 vw5; }
 
 s16_1: sw1 is sw1 { export *[const]:8 sw1; }
+s16_2: sw2 is sw2 { export *[const]:8 sw2; }
+s16_3: sw3 is sw3 { export *[const]:8 sw3; }
+s16_4: sw4 is sw4 { export *[const]:8 sw4; }
 
 u32_1: vd1 is vd1 { export *[const]:8 vd1; }
 u32_2: vd2 is vd2 { export *[const]:8 vd2; }
 u32_3: vd3 is vd3 { export *[const]:8 vd3; }
+u32_4: vd4 is vd4 { export *[const]:8 vd4; }
+u32_5: vd5 is vd5 { export *[const]:8 vd5; }
 
 s32_1: sd1 is sd1 { export *[const]:8 sd1; }
+s32_2: sd2 is sd2 { export *[const]:8 sd2; }
+s32_3: sd3 is sd3 { export *[const]:8 sd3; }
+s32_4: sd4 is sd4 { export *[const]:8 sd4; }
 
-reg1: "a0" reg is s1=3 [ reg = 0x150; ] { export *[register]:8 reg; }
-reg1: "a1" reg is s1=4 [ reg = 0x158; ] { export *[register]:8 reg; }
-reg1: "a2" reg is s1=5 [ reg = 0x160; ] { export *[register]:8 reg; }
-reg1: "a3" reg is s1=6 [ reg = 0x168; ] { export *[register]:8 reg; }
-reg1: "a4" reg is s1=7 [ reg = 0x170; ] { export *[register]:8 reg; }
-reg1: "a5" reg is s1=8 [ reg = 0x178; ] { export *[register]:8 reg; }
-reg1: "a6" reg is s1=9 [ reg = 0x180; ] { export *[register]:8 reg; }
-reg1: "a7" reg is s1=10 [ reg = 0x188; ] { export *[register]:8 reg; }
-reg1: "<closure>" reg is v1=0xfe [ reg = 0x148; ] { export *[register]:8 reg; }
-reg1: "<context>" reg is v1=0xff [ reg = 0x140; ] { export *[register]:8 reg; }
+reg1: "<this>" reg is v1=2 [ reg = 0x550; ] { export *[register]:8 reg; }
+reg1: "a0" reg is s1=3 [ reg = 0x510; ] { export *[register]:8 reg; }
+reg1: "a1" reg is s1=4 [ reg = 0x518; ] { export *[register]:8 reg; }
+reg1: "a2" reg is s1=5 [ reg = 0x520; ] { export *[register]:8 reg; }
+reg1: "a3" reg is s1=6 [ reg = 0x528; ] { export *[register]:8 reg; }
+reg1: "a4" reg is s1=7 [ reg = 0x530; ] { export *[register]:8 reg; }
+reg1: "a5" reg is s1=8 [ reg = 0x538; ] { export *[register]:8 reg; }
+reg1: "a6" reg is s1=9 [ reg = 0x540; ] { export *[register]:8 reg; }
+reg1: "a7" reg is s1=10 [ reg = 0x548; ] { export *[register]:8 reg; }
+reg1: "<closure>" reg is v1=0xfe [ reg = 0x508; ] { export *[register]:8 reg; }
+reg1: "<context>" reg is v1=0xff [ reg = 0x500; ] { export *[register]:8 reg; }
 reg1: reg is n1=1 & v1 [ reg = 0x40 + ((0xf9 - v1) * 8); ] { export *[register]:8 reg; }
 
-reg2: "a0" reg is s2=3 [ reg = 0x150; ] { export *[register]:8 reg; }
-reg2: "a1" reg is s2=4 [ reg = 0x158; ] { export *[register]:8 reg; }
-reg2: "a2" reg is s2=5 [ reg = 0x160; ] { export *[register]:8 reg; }
-reg2: "a3" reg is s2=6 [ reg = 0x168; ] { export *[register]:8 reg; }
-reg2: "a4" reg is s2=7 [ reg = 0x170; ] { export *[register]:8 reg; }
-reg2: "a5" reg is s2=8 [ reg = 0x178; ] { export *[register]:8 reg; }
-reg2: "a6" reg is s2=9 [ reg = 0x180; ] { export *[register]:8 reg; }
-reg2: "a7" reg is s2=10 [ reg = 0x188; ] { export *[register]:8 reg; }
-reg2: "<closure>" reg is v2=0xfe [ reg = 0x148; ] { export *[register]:8 reg; }
-reg2: "<context>" reg is v2=0xff [ reg = 0x140; ] { export *[register]:8 reg; }
+reg2: "<this>" reg is v2=2 [ reg = 0x550; ] { export *[register]:8 reg; }
+reg2: "a0" reg is s2=3 [ reg = 0x510; ] { export *[register]:8 reg; }
+reg2: "a1" reg is s2=4 [ reg = 0x518; ] { export *[register]:8 reg; }
+reg2: "a2" reg is s2=5 [ reg = 0x520; ] { export *[register]:8 reg; }
+reg2: "a3" reg is s2=6 [ reg = 0x528; ] { export *[register]:8 reg; }
+reg2: "a4" reg is s2=7 [ reg = 0x530; ] { export *[register]:8 reg; }
+reg2: "a5" reg is s2=8 [ reg = 0x538; ] { export *[register]:8 reg; }
+reg2: "a6" reg is s2=9 [ reg = 0x540; ] { export *[register]:8 reg; }
+reg2: "a7" reg is s2=10 [ reg = 0x548; ] { export *[register]:8 reg; }
+reg2: "<closure>" reg is v2=0xfe [ reg = 0x508; ] { export *[register]:8 reg; }
+reg2: "<context>" reg is v2=0xff [ reg = 0x500; ] { export *[register]:8 reg; }
 reg2: reg is n2=1 & v2 [ reg = 0x40 + ((0xf9 - v2) * 8); ] { export *[register]:8 reg; }
 
-reg3: "a0" reg is s3=3 [ reg = 0x150; ] { export *[register]:8 reg; }
-reg3: "a1" reg is s3=4 [ reg = 0x158; ] { export *[register]:8 reg; }
-reg3: "a2" reg is s3=5 [ reg = 0x160; ] { export *[register]:8 reg; }
-reg3: "a3" reg is s3=6 [ reg = 0x168; ] { export *[register]:8 reg; }
-reg3: "a4" reg is s3=7 [ reg = 0x170; ] { export *[register]:8 reg; }
-reg3: "a5" reg is s3=8 [ reg = 0x178; ] { export *[register]:8 reg; }
-reg3: "a6" reg is s3=9 [ reg = 0x180; ] { export *[register]:8 reg; }
-reg3: "a7" reg is s3=10 [ reg = 0x188; ] { export *[register]:8 reg; }
-reg3: "<closure>" reg is v3=0xfe [ reg = 0x148; ] { export *[register]:8 reg; }
-reg3: "<context>" reg is v3=0xff [ reg = 0x140; ] { export *[register]:8 reg; }
+reg3: "<this>" reg is v3=2 [ reg = 0x550; ] { export *[register]:8 reg; }
+reg3: "a0" reg is s3=3 [ reg = 0x510; ] { export *[register]:8 reg; }
+reg3: "a1" reg is s3=4 [ reg = 0x518; ] { export *[register]:8 reg; }
+reg3: "a2" reg is s3=5 [ reg = 0x520; ] { export *[register]:8 reg; }
+reg3: "a3" reg is s3=6 [ reg = 0x528; ] { export *[register]:8 reg; }
+reg3: "a4" reg is s3=7 [ reg = 0x530; ] { export *[register]:8 reg; }
+reg3: "a5" reg is s3=8 [ reg = 0x538; ] { export *[register]:8 reg; }
+reg3: "a6" reg is s3=9 [ reg = 0x540; ] { export *[register]:8 reg; }
+reg3: "a7" reg is s3=10 [ reg = 0x548; ] { export *[register]:8 reg; }
+reg3: "<closure>" reg is v3=0xfe [ reg = 0x508; ] { export *[register]:8 reg; }
+reg3: "<context>" reg is v3=0xff [ reg = 0x500; ] { export *[register]:8 reg; }
 reg3: reg is n3=1 & v3 [ reg = 0x40 + ((0xf9 - v3) * 8); ] { export *[register]:8 reg; }
 
-reg4: "a0" reg is s4=3 [ reg = 0x150; ] { export *[register]:8 reg; }
-reg4: "a1" reg is s4=4 [ reg = 0x158; ] { export *[register]:8 reg; }
-reg4: "a2" reg is s4=5 [ reg = 0x160; ] { export *[register]:8 reg; }
-reg4: "a3" reg is s4=6 [ reg = 0x168; ] { export *[register]:8 reg; }
-reg4: "a4" reg is s4=7 [ reg = 0x170; ] { export *[register]:8 reg; }
-reg4: "a5" reg is s4=8 [ reg = 0x178; ] { export *[register]:8 reg; }
-reg4: "a6" reg is s4=9 [ reg = 0x180; ] { export *[register]:8 reg; }
-reg4: "a7" reg is s4=10 [ reg = 0x188; ] { export *[register]:8 reg; }
-reg4: "<closure>" reg is v4=0xfe [ reg = 0x148; ] { export *[register]:8 reg; }
-reg4: "<context>" reg is v4=0xff [ reg = 0x140; ] { export *[register]:8 reg; }
+reg4: "<this>" reg is v4=2 [ reg = 0x550; ] { export *[register]:8 reg; }
+reg4: "a0" reg is s4=3 [ reg = 0x510; ] { export *[register]:8 reg; }
+reg4: "a1" reg is s4=4 [ reg = 0x518; ] { export *[register]:8 reg; }
+reg4: "a2" reg is s4=5 [ reg = 0x520; ] { export *[register]:8 reg; }
+reg4: "a3" reg is s4=6 [ reg = 0x528; ] { export *[register]:8 reg; }
+reg4: "a4" reg is s4=7 [ reg = 0x530; ] { export *[register]:8 reg; }
+reg4: "a5" reg is s4=8 [ reg = 0x538; ] { export *[register]:8 reg; }
+reg4: "a6" reg is s4=9 [ reg = 0x540; ] { export *[register]:8 reg; }
+reg4: "a7" reg is s4=10 [ reg = 0x548; ] { export *[register]:8 reg; }
+reg4: "<closure>" reg is v4=0xfe [ reg = 0x508; ] { export *[register]:8 reg; }
+reg4: "<context>" reg is v4=0xff [ reg = 0x500; ] { export *[register]:8 reg; }
 reg4: reg is n4=1 & v4 [ reg = 0x40 + ((0xf9 - v4) * 8); ] { export *[register]:8 reg; }
 
+regw1: "<this>" reg is vw1=2 [ reg = 0x550; ] { export *[register]:8 reg; }
+regw1: "<closure>" reg is vw1=0xfffe [ reg = 0x508; ] { export *[register]:8 reg; }
+regw1: "<context>" reg is vw1=0xffff [ reg = 0x500; ] { export *[register]:8 reg; }
+regw1: reg is nw1=1 & sw1 [ reg = 0x40 + ((-7 - sw1) * 8); ] { export *[register]:8 reg; }
+regw1: "a0" reg is vw1=3 [ reg = 0x510; ] { export *[register]:8 reg; }
+regw1: "a1" reg is vw1=4 [ reg = 0x518; ] { export *[register]:8 reg; }
+regw1: "a2" reg is vw1=5 [ reg = 0x520; ] { export *[register]:8 reg; }
+regw1: "a3" reg is vw1=6 [ reg = 0x528; ] { export *[register]:8 reg; }
+regw1: "a4" reg is vw1=7 [ reg = 0x530; ] { export *[register]:8 reg; }
+
+regw2: "<this>" reg is vw2=2 [ reg = 0x550; ] { export *[register]:8 reg; }
+regw2: "<closure>" reg is vw2=0xfffe [ reg = 0x508; ] { export *[register]:8 reg; }
+regw2: "<context>" reg is vw2=0xffff [ reg = 0x500; ] { export *[register]:8 reg; }
+regw2: reg is nw2=1 & sw2 [ reg = 0x40 + ((-7 - sw2) * 8); ] { export *[register]:8 reg; }
+regw2: "a0" reg is vw2=3 [ reg = 0x510; ] { export *[register]:8 reg; }
+regw2: "a1" reg is vw2=4 [ reg = 0x518; ] { export *[register]:8 reg; }
+regw2: "a2" reg is vw2=5 [ reg = 0x520; ] { export *[register]:8 reg; }
+regw2: "a3" reg is vw2=6 [ reg = 0x528; ] { export *[register]:8 reg; }
+regw2: "a4" reg is vw2=7 [ reg = 0x530; ] { export *[register]:8 reg; }
+
+regw3: "<this>" reg is vw3=2 [ reg = 0x550; ] { export *[register]:8 reg; }
+regw3: "<closure>" reg is vw3=0xfffe [ reg = 0x508; ] { export *[register]:8 reg; }
+regw3: "<context>" reg is vw3=0xffff [ reg = 0x500; ] { export *[register]:8 reg; }
+regw3: reg is nw3=1 & sw3 [ reg = 0x40 + ((-7 - sw3) * 8); ] { export *[register]:8 reg; }
+regw3: "a0" reg is vw3=3 [ reg = 0x510; ] { export *[register]:8 reg; }
+regw3: "a1" reg is vw3=4 [ reg = 0x518; ] { export *[register]:8 reg; }
+regw3: "a2" reg is vw3=5 [ reg = 0x520; ] { export *[register]:8 reg; }
+regw3: "a3" reg is vw3=6 [ reg = 0x528; ] { export *[register]:8 reg; }
+regw3: "a4" reg is vw3=7 [ reg = 0x530; ] { export *[register]:8 reg; }
+
+regw4: "<this>" reg is vw4=2 [ reg = 0x550; ] { export *[register]:8 reg; }
+regw4: "<closure>" reg is vw4=0xfffe [ reg = 0x508; ] { export *[register]:8 reg; }
+regw4: "<context>" reg is vw4=0xffff [ reg = 0x500; ] { export *[register]:8 reg; }
+regw4: reg is nw4=1 & sw4 [ reg = 0x40 + ((-7 - sw4) * 8); ] { export *[register]:8 reg; }
+regw4: "a0" reg is vw4=3 [ reg = 0x510; ] { export *[register]:8 reg; }
+regw4: "a1" reg is vw4=4 [ reg = 0x518; ] { export *[register]:8 reg; }
+regw4: "a2" reg is vw4=5 [ reg = 0x520; ] { export *[register]:8 reg; }
+regw4: "a3" reg is vw4=6 [ reg = 0x528; ] { export *[register]:8 reg; }
+regw4: "a4" reg is vw4=7 [ reg = 0x530; ] { export *[register]:8 reg; }
+
+regd1: "<this>" reg is vd1=2 [ reg = 0x550; ] { export *[register]:8 reg; }
+regd1: "<closure>" reg is vd1=0xfffffffe [ reg = 0x508; ] { export *[register]:8 reg; }
+regd1: "<context>" reg is vd1=0xffffffff [ reg = 0x500; ] { export *[register]:8 reg; }
+regd1: reg is nd1=1 & sd1 [ reg = 0x40 + ((-7 - sd1) * 8); ] { export *[register]:8 reg; }
+regd1: "a0" reg is vd1=3 [ reg = 0x510; ] { export *[register]:8 reg; }
+regd1: "a1" reg is vd1=4 [ reg = 0x518; ] { export *[register]:8 reg; }
+regd1: "a2" reg is vd1=5 [ reg = 0x520; ] { export *[register]:8 reg; }
+regd1: "a3" reg is vd1=6 [ reg = 0x528; ] { export *[register]:8 reg; }
+regd1: "a4" reg is vd1=7 [ reg = 0x530; ] { export *[register]:8 reg; }
+
 jump8: target is v1 [ target = inst_start + v1; ] { export *[ram]:4 target; }
-jump16: target is vw1 [ target = inst_start + vw1; ] { export *[ram]:4 target; }
-jump32: target is vd1 [ target = inst_start + vd1; ] { export *[ram]:4 target; }
+jump16: target is vw1 [ target = inst_start + vw1 + 1; ] { export *[ram]:4 target; }
+jump32: target is vd1 [ target = inst_start + vd1 + 1; ] { export *[ram]:4 target; }
 
 loop8: target is v1 [ target = inst_start - v1; ] { export *[ram]:4 target; }
-loop16: target is vw1 [ target = inst_start - vw1; ] { export *[ram]:4 target; }
-loop32: target is vd1 [ target = inst_start - vd1; ] { export *[ram]:4 target; }
+loop16: target is vw1 [ target = inst_start - vw1 + 1; ] { export *[ram]:4 target; }
+loop32: target is vd1 [ target = inst_start - vd1 + 1; ] { export *[ram]:4 target; }
 
 # Constants / loads
 :LdaZero is op=0x0c { ACCU = 0; }
@@ -183,15 +328,35 @@ loop32: target is vd1 [ target = inst_start - vd1; ] { export *[ram]:4 target; }
   local tmp:8 = V8LdaConstant(u8_1);
   ACCU = tmp;
 }
-:LdaCurrentContextSlot u8_1,u8_2 is op=0x18; u8_1; u8_2 {
-  local tmp:8 = V8LdaContextSlot(u8_1, u8_2);
+:LdaContextSlot reg1,u8_2,u8_3 is op=0x14; reg1; u8_2; u8_3 {
+  local tmp:8 = V8LdaContextSlot(reg1, u8_2, u8_3);
   ACCU = tmp;
 }
-:LdaImmutableCurrentContextSlot u8_1,u8_2 is op=0x19; u8_1; u8_2 {
-  local tmp:8 = V8LdaContextSlot(u8_1, u8_2);
+:LdaScriptContextSlot reg1,u8_2,u8_3 is op=0x15; reg1; u8_2; u8_3 {
+  local tmp:8 = V8LdaContextSlot(reg1, u8_2, u8_3);
+  ACCU = tmp;
+}
+:LdaImmutableContextSlot reg1,u8_2,u8_3 is op=0x16; reg1; u8_2; u8_3 {
+  local tmp:8 = V8LdaContextSlot(reg1, u8_2, u8_3);
+  ACCU = tmp;
+}
+:LdaCurrentContextSlot u8_1 is op=0x17; u8_1 {
+  local tmp:8 = V8LdaCurrentContextSlot(u8_1);
+  ACCU = tmp;
+}
+:LdaCurrentScriptContextSlot u8_1 is op=0x18; u8_1 {
+  local tmp:8 = V8LdaCurrentContextSlot(u8_1);
+  ACCU = tmp;
+}
+:LdaImmutableCurrentContextSlot u8_1 is op=0x19; u8_1 {
+  local tmp:8 = V8LdaCurrentContextSlot(u8_1);
   ACCU = tmp;
 }
 :LdaGlobal u8_1,u8_2 is op=0x23; u8_1; u8_2 {
+  local tmp:8 = V8LdaGlobal(u8_1, u8_2);
+  ACCU = tmp;
+}
+:LdaGlobalInsideTypeof u8_1,u8_2 is op=0x24; u8_1; u8_2 {
   local tmp:8 = V8LdaGlobal(u8_1, u8_2);
   ACCU = tmp;
 }
@@ -202,8 +367,17 @@ loop32: target is vd1 [ target = inst_start - vd1; ] { export *[ram]:4 target; }
 :Mov reg1,reg2 is op=0x1b; reg1; reg2 { reg2 = reg1; }
 :PushContext reg1 is op=0x1c; reg1 { context = reg1; }
 :PopContext reg1 is op=0x1d; reg1 { context = reg1; }
+:StaContextSlot reg1,u8_2,u8_3 is op=0x26; reg1; u8_2; u8_3 {
+  V8ContextStore(reg1, u8_2, u8_3, ACCU);
+}
+:StaCurrentContextSlot u8_1 is op=0x27; u8_1 { V8ContextStore(u8_1, ACCU); }
+:StaScriptContextSlot reg1,u8_2,u8_3 is op=0x28; reg1; u8_2; u8_3 {
+  V8ContextStore(reg1, u8_2, u8_3, ACCU);
+}
 :StaCurrentScriptContextSlot u8_1 is op=0x29; u8_1 { V8ContextStore(u8_1, ACCU); }
-:StaCurrentContextSlot u8_1 is op=0x28; u8_1 { V8ContextStore(u8_1, ACCU); }
+:StaGlobal u8_1,u8_2 is op=0x25; u8_1; u8_2 {
+  V8StaGlobal(u8_1, ACCU, u8_2);
+}
 
 # StarN short forms frequently emitted by V8
 :Star15 is op=0xbf { r15 = ACCU; }
@@ -228,12 +402,43 @@ loop32: target is vd1 [ target = inst_start - vd1; ] { export *[ram]:4 target; }
   local tmp:8 = V8GetNamedProperty(reg1, u8_2, u8_3);
   ACCU = tmp;
 }
+:GetKeyedProperty reg1,u8_2 is op=0x35; reg1; u8_2 {
+  local tmp:8 = V8GetKeyedProperty(reg1, ACCU, u8_2);
+  ACCU = tmp;
+}
+:GetEnumeratedKeyedProperty reg1,reg2,reg3,u8_4 is op=0x36; reg1; reg2; reg3; u8_4 {
+  local tmp:8 = V8GetEnumeratedKeyedProperty(reg1, reg2, reg3, u8_4);
+  ACCU = tmp;
+}
 :GetIterator reg1,u8_2,u8_3 is op=0xbb; reg1; u8_2; u8_3 {
   local tmp:8 = V8GetIterator(reg1, u8_2, u8_3);
   ACCU = tmp;
 }
+:SetNamedProperty reg1,u8_2,u8_3 is op=0x39; reg1; u8_2; u8_3 {
+  V8SetNamedProperty(reg1, u8_2, ACCU, u8_3);
+}
+:DefineNamedOwnProperty reg1,u8_2,u8_3 is op=0x3a; reg1; u8_2; u8_3 {
+  V8DefineNamedOwnProperty(reg1, u8_2, ACCU, u8_3);
+}
+:SetKeyedProperty reg1,reg2,u8_3 is op=0x3b; reg1; reg2; u8_3 {
+  V8SetKeyedProperty(reg1, reg2, ACCU, u8_3);
+}
+:DefineKeyedOwnProperty reg1,reg2,u8_3,u8_4 is op=0x3c; reg1; reg2; u8_3; u8_4 {
+  V8DefineKeyedOwnProperty(reg1, reg2, ACCU, u8_3, u8_4);
+}
+:StaInArrayLiteral reg1,reg2,u8_3 is op=0x3d; reg1; reg2; u8_3 {
+  V8StaInArrayLiteral(reg1, reg2, ACCU, u8_3);
+}
 
 # Calls (partial, common forms)
+:CallProperty reg1,reg2,u8_3,u8_4 is op=0x63; reg1; reg2; u8_3; u8_4 {
+  local tmp:8 = V8CallProperty(reg1, reg2, u8_3, u8_4);
+  ACCU = tmp;
+}
+:CallUndefinedReceiver reg1,reg2,u8_3,u8_4 is op=0x67; reg1; reg2; u8_3; u8_4 {
+  local tmp:8 = V8CallUndefinedReceiver(reg1, reg2, u8_3, u8_4);
+  ACCU = tmp;
+}
 :CallProperty0 reg1,reg2,u8_3 is op=0x64; reg1; reg2; u8_3 {
   local tmp:8 = V8CallProperty0(reg1, reg2, u8_3);
   ACCU = tmp;
@@ -258,18 +463,46 @@ loop32: target is vd1 [ target = inst_start - vd1; ] { export *[ram]:4 target; }
   local tmp:8 = V8CallUndefinedReceiver2(reg1, reg2, reg3, u8_4);
   ACCU = tmp;
 }
+:CallWithSpread reg1,reg2,u8_3,u8_4 is op=0x6b; reg1; reg2; u8_3; u8_4 {
+  local tmp:8 = V8CallWithSpread(reg1, reg2, u8_3, u8_4);
+  ACCU = tmp;
+}
 :CallRuntime u16_1,reg3,u8_4 is op=0x6c; u16_1; reg3; u8_4 {
   local tmp:8 = V8CallRuntime(u16_1, reg3, u8_4);
   ACCU = tmp;
 }
+:InvokeIntrinsic u8_1,reg2,u8_3 is op=0x6f; u8_1; reg2; u8_3 {
+  local tmp:8 = V8InvokeIntrinsic(u8_1, reg2, u8_3);
+  ACCU = tmp;
+}
+:Construct reg1,reg2,u8_3,u8_4 is op=0x70; reg1; reg2; u8_3; u8_4 {
+  local tmp:8 = V8Construct(reg1, reg2, u8_3, u8_4);
+  ACCU = tmp;
+}
+:ConstructWithSpread reg1,reg2,u8_3,u8_4 is op=0x71; reg1; reg2; u8_3; u8_4 {
+  local tmp:8 = V8ConstructWithSpread(reg1, reg2, u8_3, u8_4);
+  ACCU = tmp;
+}
 
 # Constructors / literals
+:CreateRegExpLiteral u8_1,u8_2,u16_3 is op=0x81; u8_1; u8_2; u16_3 {
+  local tmp:8 = V8CreateRegExpLiteral(u8_1, u8_2, u16_3);
+  ACCU = tmp;
+}
 :CreateArrayLiteral u8_1,u8_2,u8_3 is op=0x82; u8_1; u8_2; u8_3 {
   local tmp:8 = V8CreateArrayLiteral(u8_1, u8_2, u8_3);
   ACCU = tmp;
 }
+:CreateEmptyArrayLiteral u8_1 is op=0x84; u8_1 {
+  local tmp:8 = V8CreateEmptyArrayLiteral(u8_1);
+  ACCU = tmp;
+}
 :CreateCatchContext reg1,u8_2 is op=0x8b; reg1; u8_2 {
   local tmp:8 = V8CreateCatchContext(reg1, u8_2);
+  ACCU = tmp;
+}
+:CreateBlockContext u8_1 is op=0x8a; u8_1 {
+  local tmp:8 = V8CreateBlockContext(u8_1);
   ACCU = tmp;
 }
 :CreateFunctionContext u8_1,u8_2 is op=0x8c; u8_1; u8_2 {
@@ -280,39 +513,254 @@ loop32: target is vd1 [ target = inst_start - vd1; ] { export *[ram]:4 target; }
   local tmp:8 = V8CreateObjectLiteral(u8_1, u8_2, u8_3);
   ACCU = tmp;
 }
+:CreateEmptyObjectLiteral is op=0x86 {
+  local tmp:8 = V8CreateEmptyObjectLiteral();
+  ACCU = tmp;
+}
+:CloneObject reg1,u8_2,u8_3 is op=0x87; reg1; u8_2; u8_3 {
+  local tmp:8 = V8CloneObject(reg1, u8_2, u8_3);
+  ACCU = tmp;
+}
 :CreateClosure u8_1,u8_2,u8_3 is op=0x89; u8_1; u8_2; u8_3 {
   local tmp:8 = V8CreateClosure(u8_1, u8_2, u8_3);
+  ACCU = tmp;
+}
+:CreateRestParameter is op=0x91 {
+  local tmp:8 = V8CreateRestParameter();
+  ACCU = tmp;
+}
+:CreateMappedArguments is op=0x8f {
+  local tmp:8 = V8CreateMappedArguments();
   ACCU = tmp;
 }
 
 # Arithmetic / comparison tests
 :Add reg1,u8_2 is op=0x3f; reg1; u8_2 { ACCU = reg1 + ACCU; }
+:Sub reg1,u8_2 is op=0x40; reg1; u8_2 { ACCU = reg1 - ACCU; }
+:Mul reg1,u8_2 is op=0x41; reg1; u8_2 { ACCU = reg1 * ACCU; }
+:Div reg1,u8_2 is op=0x42; reg1; u8_2 { ACCU = reg1 / ACCU; }
+:Mod reg1,u8_2 is op=0x43; reg1; u8_2 { ACCU = reg1 % ACCU; }
+:BitwiseOr reg1,u8_2 is op=0x45; reg1; u8_2 { ACCU = reg1 | ACCU; }
+:BitwiseAnd reg1,u8_2 is op=0x47; reg1; u8_2 { ACCU = reg1 & ACCU; }
+:ShiftLeft reg1,u8_2 is op=0x48; reg1; u8_2 { ACCU = reg1 << ACCU; }
+:ShiftRight reg1,u8_2 is op=0x49; reg1; u8_2 { ACCU = reg1 s>> ACCU; }
 :AddSmi s8_1,u8_2 is op=0x4b; s8_1; u8_2 { ACCU = ACCU + s8_1; }
 :SubSmi s8_1,u8_2 is op=0x4c; s8_1; u8_2 { ACCU = ACCU - s8_1; }
+:MulSmi s8_1,u8_2 is op=0x4d; s8_1; u8_2 { ACCU = ACCU * s8_1; }
+:DivSmi s8_1,u8_2 is op=0x4e; s8_1; u8_2 { ACCU = ACCU / s8_1; }
+:ModSmi s8_1,u8_2 is op=0x4f; s8_1; u8_2 { ACCU = ACCU % s8_1; }
+:BitwiseOrSmi s8_1,u8_2 is op=0x51; s8_1; u8_2 { ACCU = ACCU | s8_1; }
+:BitwiseAndSmi s8_1,u8_2 is op=0x53; s8_1; u8_2 { ACCU = ACCU & s8_1; }
+:ShiftLeftSmi s8_1,u8_2 is op=0x54; s8_1; u8_2 { ACCU = ACCU << s8_1; }
+:Inc u8_1 is op=0x57; u8_1 { ACCU = ACCU + 1; }
+:Dec u8_1 is op=0x58; u8_1 { ACCU = ACCU - 1; }
+:BitwiseNot u8_1 is op=0x5a; u8_1 { ACCU = ~ACCU; }
+:ToBooleanLogicalNot is op=0x5b {
+  local tmp:8 = V8ToBoolean(ACCU);
+  ACCU = zext(tmp == 0);
+}
+:LogicalNot is op=0x5c { ACCU = zext(ACCU == 0); }
+:DeletePropertySloppy reg1 is op=0x5f; reg1 {
+  local tmp:8 = V8DeleteProperty(reg1, ACCU);
+  ACCU = tmp;
+}
+:ToNumeric u8_1 is op=0x7d; u8_1 {
+  local tmp:8 = V8ToNumeric(ACCU, u8_1);
+  ACCU = tmp;
+}
+:ToObject reg1 is op=0x7e; reg1 {
+  local tmp:8 = V8ToObject(ACCU);
+  reg1 = tmp;
+  ACCU = tmp;
+}
 :ToString is op=0x7f {
   local tmp:8 = V8ToString(ACCU);
   ACCU = tmp;
 }
+:ToBoolean is op=0x80 {
+  local tmp:8 = V8ToBoolean(ACCU);
+  ACCU = tmp;
+}
 :TestReferenceEqual reg1 is op=0x1e; reg1 { ACCU = zext(reg1 == ACCU); }
+:TestUndetectable is op=0x1f {
+  local tmp:8 = V8TestUndetectable(ACCU);
+  ACCU = tmp;
+}
+:TestUndefined is op=0x21 { ACCU = zext(ACCU == 0xfffffffffffffff1); }
+:TestTypeOf u8_1 is op=0x22; u8_1 {
+  local tmp:8 = V8TestTypeOf(ACCU, u8_1);
+  ACCU = tmp;
+}
+:TestEqual reg1,u8_2 is op=0x73; reg1; u8_2 { ACCU = zext(reg1 == ACCU); }
 :TestEqualStrict reg1,u8_2 is op=0x74; reg1; u8_2 { ACCU = zext(reg1 == ACCU); }
 :TestGreaterThan reg1,u8_2 is op=0x76; reg1; u8_2 { ACCU = zext(reg1 s> ACCU); }
 :TestLessThan reg1,u8_2 is op=0x75; reg1; u8_2 { ACCU = zext(reg1 s< ACCU); }
+:TestLessThanOrEqual reg1,u8_2 is op=0x77; reg1; u8_2 { ACCU = zext(reg1 s<= ACCU); }
+:TestGreaterThanOrEqual reg1,u8_2 is op=0x78; reg1; u8_2 { ACCU = zext(reg1 s>= ACCU); }
+:TestInstanceOf reg1,u8_2 is op=0x79; reg1; u8_2 {
+  local tmp:8 = V8TestInstanceOf(reg1, ACCU, u8_2);
+  ACCU = tmp;
+}
 
 # Branches
 :Jump jump8 is op=0x93; jump8 { goto jump8; }
+:JumpConstant u8_1 is op=0x94; u8_1 {
+  local kind:8 = 0;
+  V8JumpConstant(kind, u8_1, ACCU);
+  return [pc];
+}
+:JumpIfUndefinedConstant u8_1 is op=0x97; u8_1 {
+  local kind:8 = 1;
+  V8JumpConstant(kind, u8_1, ACCU);
+}
+:JumpIfUndefinedOrNullConstant u8_1 is op=0x99; u8_1 {
+  local kind:8 = 2;
+  V8JumpConstant(kind, u8_1, ACCU);
+}
+:JumpIfTrueConstant u8_1 is op=0x9a; u8_1 {
+  local kind:8 = 3;
+  V8JumpConstant(kind, u8_1, ACCU);
+}
+:JumpIfForInDoneConstant u8_1,reg2,reg3 is op=0x9d; u8_1; reg2; reg3 {
+  local kind:8 = 4;
+  V8JumpConstant(kind, u8_1, reg2, reg3, ACCU);
+}
+:JumpIfToBooleanTrueConstant u8_1 is op=0x9e; u8_1 {
+  local kind:8 = 5;
+  V8JumpConstant(kind, u8_1, ACCU);
+}
+:JumpIfToBooleanFalseConstant u8_1 is op=0x9f; u8_1 {
+  local kind:8 = 6;
+  V8JumpConstant(kind, u8_1, ACCU);
+}
 :JumpLoop loop8,u8_2,u8_3 is op=0x92; loop8; u8_2; u8_3 { goto loop8; }
 :JumpIfToBooleanTrue jump8 is op=0xa0; jump8 { if (ACCU != 0) goto jump8; }
 :JumpIfToBooleanFalse jump8 is op=0xa1; jump8 { if (ACCU == 0) goto jump8; }
 :JumpIfTrue jump8 is op=0xa2; jump8 { if (ACCU != 0) goto jump8; }
 :JumpIfFalse jump8 is op=0xa3; jump8 { if (ACCU == 0) goto jump8; }
+:JumpIfNull jump8 is op=0xa4; jump8 {
+  if (ACCU == 0xfffffffffffffff2) goto jump8;
+}
+:JumpIfNotNull jump8 is op=0xa5; jump8 {
+  if (ACCU != 0xfffffffffffffff2) goto jump8;
+}
+:JumpIfUndefined jump8 is op=0xa6; jump8 {
+  if (ACCU == 0xfffffffffffffff1) goto jump8;
+}
+:JumpIfNotUndefined jump8 is op=0xa7; jump8 {
+  if (ACCU != 0xfffffffffffffff1) goto jump8;
+}
 :JumpIfUndefinedOrNull jump8 is op=0xa8; jump8 {
   if (ACCU == 0xfffffffffffffff1) goto jump8;
   if (ACCU == 0xfffffffffffffff2) goto jump8;
 }
 :JumpIfJSReceiver jump8 is op=0xa9; jump8 { if (ACCU != 0) goto jump8; }
+:JumpIfForInDone jump8,reg2,reg3 is op=0xaa; jump8; reg2; reg3 {
+  local tmp:8 = V8ForInDone(reg2, reg3);
+  if (tmp != 0) goto jump8;
+}
+:SwitchOnSmiNoFeedback u8_1,u8_2,s8_3 is op=0xab; u8_1; u8_2; s8_3 {
+  V8SwitchOnSmiNoFeedback(ACCU, u8_1, u8_2, s8_3);
+}
 
-# Wide / ExtraWide flow variants. This keeps instruction decoding aligned for
-# larger offsets and gives Ghidra actual branch edges for the common flow ops.
+:ForInEnumerate reg1 is op=0xac; reg1 {
+  local tmp:8 = V8ForInEnumerate(reg1);
+  ACCU = tmp;
+}
+:ForInPrepare reg1,u8_2 is op=0xad; reg1; u8_2 {
+  V8ForInPrepare(reg1, ACCU, u8_2);
+}
+:ForInNext reg1,reg2,reg3,u8_4 is op=0xae; reg1; reg2; reg3; u8_4 {
+  local tmp:8 = V8ForInNext(reg1, reg2, reg3, u8_4);
+  ACCU = tmp;
+}
+:ForInStep reg1 is op=0xaf; reg1 { reg1 = reg1 + 1; }
+
+# Wide / ExtraWide variants emitted by the 13.4 corpus.
+:LdaSmi s16_1 is op=0x00; opw=0x0d; s16_1 { ACCU = s16_1; }
+:LdaSmi s32_1 is op=0x01; opw=0x0d; s32_1 { ACCU = s32_1; }
+:LdaConstant u16_1 is op=0x00; opw=0x13; u16_1 {
+  local tmp:8 = V8LdaConstant(u16_1);
+  ACCU = tmp;
+}
+:LdaGlobal u16_1,u16_2 is op=0x00; opw=0x23; u16_1; u16_2 {
+  local tmp:8 = V8LdaGlobal(u16_1, u16_2);
+  ACCU = tmp;
+}
+
+:GetNamedProperty regw1,u16_2,u16_3 is op=0x00; opw=0x33; regw1; u16_2; u16_3 {
+  local tmp:8 = V8GetNamedProperty(regw1, u16_2, u16_3);
+  ACCU = tmp;
+}
+:GetKeyedProperty regw1,u16_2 is op=0x00; opw=0x35; regw1; u16_2 {
+  local tmp:8 = V8GetKeyedProperty(regw1, ACCU, u16_2);
+  ACCU = tmp;
+}
+:SetNamedProperty regw1,u16_2,u16_3 is op=0x00; opw=0x39; regw1; u16_2; u16_3 {
+  V8SetNamedProperty(regw1, u16_2, ACCU, u16_3);
+}
+:DefineNamedOwnProperty regw1,u16_2,u16_3 is op=0x00; opw=0x3a; regw1; u16_2; u16_3 {
+  V8DefineNamedOwnProperty(regw1, u16_2, ACCU, u16_3);
+}
+:StaInArrayLiteral regw1,regw2,u16_3 is op=0x00; opw=0x3d; regw1; regw2; u16_3 {
+  V8StaInArrayLiteral(regw1, regw2, ACCU, u16_3);
+}
+
+:Add regw1,u16_2 is op=0x00; opw=0x3f; regw1; u16_2 { ACCU = regw1 + ACCU; }
+:SubSmi s16_1,u16_2 is op=0x00; opw=0x4c; s16_1; u16_2 { ACCU = ACCU - s16_1; }
+:MulSmi s16_1,u16_2 is op=0x00; opw=0x4d; s16_1; u16_2 { ACCU = ACCU * s16_1; }
+:MulSmi s32_1,u32_2 is op=0x01; opw=0x4d; s32_1; u32_2 { ACCU = ACCU * s32_1; }
+:DivSmi s32_1,u32_2 is op=0x01; opw=0x4e; s32_1; u32_2 { ACCU = ACCU / s32_1; }
+:BitwiseAndSmi s16_1,u16_2 is op=0x00; opw=0x53; s16_1; u16_2 {
+  ACCU = ACCU & s16_1;
+}
+
+:CallProperty0 regw1,regw2,u16_3 is op=0x00; opw=0x64; regw1; regw2; u16_3 {
+  local tmp:8 = V8CallProperty0(regw1, regw2, u16_3);
+  ACCU = tmp;
+}
+:CallProperty1 regw1,regw2,regw3,u16_4 is op=0x00; opw=0x65; regw1; regw2; regw3; u16_4 {
+  local tmp:8 = V8CallProperty1(regw1, regw2, regw3, u16_4);
+  ACCU = tmp;
+}
+:CallProperty2 regw1,regw2,regw3,regw4,u16_5 is op=0x00; opw=0x66; regw1; regw2; regw3; regw4; u16_5 {
+  local tmp:8 = V8CallProperty2(regw1, regw2, regw3, regw4, u16_5);
+  ACCU = tmp;
+}
+:CallUndefinedReceiver1 regw1,regw2,u16_3 is op=0x00; opw=0x69; regw1; regw2; u16_3 {
+  local tmp:8 = V8CallUndefinedReceiver1(regw1, regw2, u16_3);
+  ACCU = tmp;
+}
+:CallUndefinedReceiver2 regw1,regw2,regw3,u16_4 is op=0x00; opw=0x6a; regw1; regw2; regw3; u16_4 {
+  local tmp:8 = V8CallUndefinedReceiver2(regw1, regw2, regw3, u16_4);
+  ACCU = tmp;
+}
+
+:TestEqual regw1,u16_2 is op=0x00; opw=0x73; regw1; u16_2 {
+  ACCU = zext(regw1 == ACCU);
+}
+:TestGreaterThan regw1,u16_2 is op=0x00; opw=0x76; regw1; u16_2 {
+  ACCU = zext(regw1 s> ACCU);
+}
+
+:CreateArrayLiteral u16_1,u16_2,u8_3 is op=0x00; opw=0x82; u16_1; u16_2; u8_3 {
+  local tmp:8 = V8CreateArrayLiteral(u16_1, u16_2, u8_3);
+  ACCU = tmp;
+}
+:CreateEmptyArrayLiteral u16_1 is op=0x00; opw=0x84; u16_1 {
+  local tmp:8 = V8CreateEmptyArrayLiteral(u16_1);
+  ACCU = tmp;
+}
+:CreateObjectLiteral u16_1,u16_2,u8_3 is op=0x00; opw=0x85; u16_1; u16_2; u8_3 {
+  local tmp:8 = V8CreateObjectLiteral(u16_1, u16_2, u8_3);
+  ACCU = tmp;
+}
+:CreateClosure u16_1,u16_2,u8_3 is op=0x00; opw=0x89; u16_1; u16_2; u8_3 {
+  local tmp:8 = V8CreateClosure(u16_1, u16_2, u8_3);
+  ACCU = tmp;
+}
+
+# Flow variants give Ghidra real branch edges for scaled direct offsets.
 :Jump jump16 is op=0x00; opw=0x93; jump16 { goto jump16; }
 :Jump jump32 is op=0x01; opw=0x93; jump32 { goto jump32; }
 
@@ -340,8 +788,25 @@ loop32: target is vd1 [ target = inst_start - vd1; ] { export *[ram]:4 target; }
 
 # Exception / control
 :SetPendingMessage is op=0xb0 { V8SetPendingMessage(ACCU); }
+:Throw is op=0xb1 {
+  V8Throw(ACCU);
+  return [pc];
+}
 :ReThrow is op=0xb2 {
   V8ReThrow(ACCU);
   return [pc];
 }
 :Return is op=0xb3 { return [pc]; }
+:ThrowReferenceErrorIfHole u8_1 is op=0xb4; u8_1 {
+  V8ThrowReferenceErrorIfHole(ACCU, u8_1);
+}
+:SwitchOnGeneratorState reg1,u8_2,u8_3 is op=0xb8; reg1; u8_2; u8_3 {
+  V8SwitchOnGeneratorState(reg1, u8_2, u8_3);
+}
+:SuspendGenerator reg1,reg2,u8_3,u8_4 is op=0xb9; reg1; reg2; u8_3; u8_4 {
+  V8SuspendGenerator(reg1, reg2, u8_3, u8_4, ACCU);
+}
+:ResumeGenerator reg1,reg2,u8_3 is op=0xba; reg1; reg2; u8_3 {
+  local tmp:8 = V8ResumeGenerator(reg1, reg2, u8_3);
+  ACCU = tmp;
+}
