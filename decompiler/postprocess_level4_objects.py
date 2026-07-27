@@ -137,6 +137,27 @@ def _is_pure_existing_value(value: str) -> bool:
     return False
 
 
+def _register_is_read_before_reassignment(
+    lines: List[str], start: int, register: str
+) -> bool:
+    for line in lines[start:]:
+        stripped = line.strip()
+        assignment = re.match(
+            rf"^{re.escape(register)}\s*=(?!=)\s*(.*)$", stripped
+        )
+        if assignment:
+            return bool(
+                re.search(
+                    rf"\b{re.escape(register)}\b", assignment.group(1)
+                )
+            )
+        if re.search(rf"\b{re.escape(register)}\b", stripped):
+            return True
+        if stripped.startswith(("function ", "return ", "throw ")):
+            return False
+    return False
+
+
 def _compact_object_literal_initializers(lines: List[str]) -> List[str]:
     output: List[str] = []
     index = 0
@@ -204,9 +225,15 @@ def _compact_object_literal_initializers(lines: List[str]) -> List[str]:
                     next_line,
                 )
                 if final_assignment:
-                    output.append(
-                        f"{indent}{final_assignment.group(1)} = {object_literal}"
-                    )
+                    if _register_is_read_before_reassignment(
+                        lines, cursor + 1, register
+                    ):
+                        output.append(f"{indent}{register} = {object_literal}")
+                        output.append(lines[cursor])
+                    else:
+                        output.append(
+                            f"{indent}{final_assignment.group(1)} = {object_literal}"
+                        )
                     cursor += 1
                 else:
                     output.append(f"{indent}{register} = {object_literal}")

@@ -21,7 +21,15 @@ listing.
   "objects": {
     "0xf00000000100": {
       "address": "0xf00000000100",
-      "type": "BytecodeArray"
+      "type": "BytecodeArray",
+      "type_evidence": {
+        "kind": "bytecode_array_layout"
+      },
+      "provenance": {
+        "kind": "serialized_object",
+        "id": "serialized_object:1",
+        "object_index": 1
+      }
     }
   }
 }
@@ -60,16 +68,35 @@ Object, root, and read-only references use:
 {
   "kind": "reference",
   "reference_kind": "object",
+  "source": {
+    "kind": "serialized_object",
+    "id": "serialized_object:18",
+    "object_index": 18
+  },
+  "resolution": "serialized_object",
   "address": "0xf00000001200",
   "object_index": 18,
   "target_type": "String",
+  "type_evidence": {
+    "kind": "serialized_string_layout",
+    "map_name": "SeqOneByteStringMap"
+  },
   "description": "<String>"
 }
 ```
 
 `address` is present when the target has a document identity. `reference_kind`
-preserves how V8 encoded the reference. Unresolved references remain explicit;
-the disassembler does not invent application-level names.
+preserves how V8 encoded the reference. `source.kind` distinguishes serializer
+objects, roots, read-only heap objects, startup/read-only/shared object caches,
+attached references, and external references. `source.id` is stable within
+equivalent parses even when the source has no synthetic address.
+
+`resolution` records whether the target was resolved from a serialized object,
+profile metadata, a matching read-only snapshot, or only an external identity.
+`type_evidence.kind` states why a type was assigned. A root map name is included
+only when the checked-in profile proves it. Unknown cache or attached targets
+remain `unresolved`; the disassembler does not invent a V8 instance type or an
+application-level name.
 
 ## Bytecode arrays
 

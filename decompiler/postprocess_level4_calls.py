@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from .postprocess_level4_common import _extract_indent
 
@@ -32,19 +32,10 @@ def _is_member_expr(expr: str) -> bool:
     return bool(
         re.fullmatch(
             r"[A-Za-z_$][A-Za-z0-9_$]*"
-            r"(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+",
+            r"(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]+\])+",
             expr,
         )
     )
-
-
-def _resolve_register_alias(value: str, aliases: Dict[str, str]) -> str:
-    resolved = value
-    seen: set[str] = set()
-    while resolved in aliases and resolved not in seen:
-        seen.add(resolved)
-        resolved = aliases[resolved]
-    return resolved
 
 
 def _split_call_args(arg_text: str) -> Optional[List[str]]:
@@ -116,6 +107,8 @@ def _matching_parenthesis(text: str, open_index: int) -> Optional[int]:
 
 def _call_is_first_evaluated_expression(prefix: str) -> bool:
     remaining = prefix.strip()
+    if remaining in {"return", "throw"}:
+        return True
     control = re.match(r"^(?:if|while)\s*\(\s*(.*)$", remaining)
     if control:
         remaining = control.group(1)
@@ -328,21 +321,19 @@ def _split_wrapped_binary_expr(expr: str) -> Optional[tuple[str, str, str]]:
     return None
 
 
-def _rewrite_call_expr(
-    expr: str, reg_members: Dict[str, str], reg_aliases: Dict[str, str]
-) -> str:
+def _rewrite_call_expr(expr: str) -> str:
     outer = re.match(r"^String\((.+)\)$", expr.strip())
     if outer:
         inner = outer.group(1).strip()
-        rewritten_inner = _rewrite_call_expr(inner, reg_members, reg_aliases)
+        rewritten_inner = _rewrite_call_expr(inner)
         if rewritten_inner != inner:
             return f"String({rewritten_inner})"
 
     binary = _split_wrapped_binary_expr(expr)
     if binary:
         lhs, op, rhs = binary
-        rewritten_lhs = _rewrite_call_expr(lhs, reg_members, reg_aliases)
-        rewritten_rhs = _rewrite_call_expr(rhs, reg_members, reg_aliases)
+        rewritten_lhs = _rewrite_call_expr(lhs)
+        rewritten_rhs = _rewrite_call_expr(rhs)
         if rewritten_lhs != lhs or rewritten_rhs != rhs:
             return f"({rewritten_lhs} {op} {rewritten_rhs})"
 
@@ -357,22 +348,23 @@ def _rewrite_call_expr(
     args = _split_call_args(arg_text)
     if not args:
         return expr
-    receiver = _resolve_register_alias(args[0], reg_aliases)
+    receiver = args[0]
     call_args = ", ".join(args[1:])
-    member = reg_members.get(callee, callee)
-    member_receiver = _member_receiver(member)
-    if member_receiver is not None:
-        member_receiver = _resolve_register_alias(member_receiver, reg_aliases)
-    if receiver == "undefined" and re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*|r\d+", member):
-        return f"{member}({call_args})" if call_args else f"{member}()"
-    if member_receiver != receiver:
+    if receiver == "undefined" and re.fullmatch(
+        r"[A-Za-z_$][A-Za-z0-9_$]*|r\d+",
+        callee,
+    ):
+        return f"{callee}({call_args})" if call_args else f"{callee}()"
+    member_receiver = _member_receiver(callee)
+    if (
+        member_receiver != receiver
+        or not SIMPLE_BOUND_RECEIVER_RE.fullmatch(receiver)
+    ):
         return expr
-    return f"{member}({call_args})" if call_args else f"{member}()"
+    return f"{callee}({call_args})" if call_args else f"{callee}()"
 
 
 def _rewrite_bound_method_calls(lines: List[str]) -> List[str]:
-    reg_members: Dict[str, str] = {}
-    reg_aliases: Dict[str, str] = {}
     out: List[str] = []
 
     for line in lines:
@@ -387,22 +379,13 @@ def _rewrite_bound_method_calls(lines: List[str]) -> List[str]:
         )
         if m_assign:
             lhs, expr = m_assign.groups()
-            expr = _rewrite_call_expr(expr.strip(), reg_members, reg_aliases)
+            expr = _rewrite_call_expr(expr.strip())
             out.append(f"{indent}{lhs} = {expr}")
-            if re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", lhs):
-                _kill_bindings(lhs, reg_members, reg_aliases)
-            if re.fullmatch(r"r\d+", lhs):
-                if _is_member_expr(expr):
-                    reg_members[lhs] = expr
-                elif re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*|r\d+", expr):
-                    reg_aliases[lhs] = _resolve_register_alias(expr, reg_aliases)
             continue
 
         m_return = re.match(r"^return\s+(.+)$", stripped)
         if m_return:
-            expr = _rewrite_call_expr(
-                m_return.group(1).strip(), reg_members, reg_aliases
-            )
+            expr = _rewrite_call_expr(m_return.group(1).strip())
             out.append(f"{indent}return {expr}")
             continue
 
@@ -411,26 +394,11 @@ def _rewrite_bound_method_calls(lines: List[str]) -> List[str]:
             lhs, expr = m_compound.groups()
             out.append(
                 f"{indent}{lhs} "
-                f"{_rewrite_call_expr(expr.strip(), reg_members, reg_aliases)}"
+                f"{_rewrite_call_expr(expr.strip())}"
             )
             continue
 
-        rewritten = _rewrite_call_expr(stripped, reg_members, reg_aliases)
+        rewritten = _rewrite_call_expr(stripped)
         out.append(f"{indent}{rewritten}" if rewritten != stripped else line)
 
     return out
-
-
-def _kill_bindings(
-    name: str,
-    members: Dict[str, str],
-    aliases: Dict[str, str],
-) -> None:
-    members.pop(name, None)
-    aliases.pop(name, None)
-    for alias, value in list(aliases.items()):
-        if value == name:
-            aliases.pop(alias)
-    for alias, member in list(members.items()):
-        if re.search(rf"\b{re.escape(name)}\b", member):
-            members.pop(alias)

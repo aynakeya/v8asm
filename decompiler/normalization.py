@@ -366,6 +366,127 @@ def _remove_parameter_body_context(
     )
 
 
+def _simple_context_initializer(
+    context: DecompilerContext,
+    bytecode: V8BytecodeArray,
+    instruction: Instruction,
+) -> Optional[str]:
+    if instruction.mnemonic == "Ldar" and instruction.args:
+        parameter = instruction.args[0].strip()
+        if parameter.startswith("a") and parameter[1:].isdigit():
+            return context.parameter_name(bytecode, int(parameter[1:]))
+        return None
+    literals = {
+        "CreateEmptyArrayLiteral": "[]",
+        "CreateEmptyObjectLiteral": "{}",
+    }
+    if instruction.mnemonic in literals:
+        return literals[instruction.mnemonic]
+    return context.literal_load(bytecode, instruction)
+
+
+def _remove_function_context_prologue(
+    context: DecompilerContext,
+    bytecode: V8BytecodeArray,
+    instructions: Sequence[Instruction],
+) -> tuple[List[Instruction], tuple[LexicalDeclaration, ...]]:
+    try:
+        create_index = next(
+            index
+            for index, instruction in enumerate(instructions)
+            if instruction.mnemonic == "CreateFunctionContext"
+        )
+    except StopIteration:
+        return list(instructions), ()
+    if create_index + 1 >= len(instructions):
+        return list(instructions), ()
+    create = instructions[create_index]
+    push = instructions[create_index + 1]
+    if push.mnemonic != "PushContext":
+        return list(instructions), ()
+
+    scope = context.scope_for_instruction(bytecode, create)
+    if scope is None or scope.scope_type != "FUNCTION_SCOPE":
+        return list(instructions), ()
+    expected_slots = set(scope.context_slot_names)
+    if not expected_slots:
+        return list(instructions), ()
+
+    removed = {create_index, create_index + 1}
+    hole_slots: set[int] = set()
+    index = create_index + 2
+    while index + 1 < len(instructions):
+        hole, store = instructions[index : index + 2]
+        if (
+            hole.mnemonic != "LdaTheHole"
+            or store.mnemonic != "StaCurrentContextSlot"
+            or not store.args
+        ):
+            break
+        slot = _index(store.args[0])
+        if slot is None or slot not in expected_slots:
+            break
+        hole_slots.add(slot)
+        removed.update((index, index + 1))
+        index += 2
+
+    direct_parameter_slots: set[int] = set()
+    initializers: dict[int, str] = {}
+    scan = index
+    while scan < len(instructions):
+        if (
+            scan + 1 < len(instructions)
+            and instructions[scan].mnemonic == "CreateClosure"
+            and _star_register(instructions[scan + 1]) is not None
+        ):
+            scan += 2
+            continue
+        if scan + 1 >= len(instructions):
+            break
+        load, store = instructions[scan : scan + 2]
+        if (
+            store.mnemonic != "StaCurrentContextSlot"
+            or not store.args
+            or (slot := _index(store.args[0])) not in expected_slots
+        ):
+            break
+        initializer = _simple_context_initializer(context, bytecode, load)
+        if initializer is None:
+            break
+        if slot in hole_slots:
+            initializers[slot] = initializer
+        elif (
+            load.mnemonic == "Ldar"
+            and load.args
+            and load.args[0].strip().startswith("a")
+        ):
+            direct_parameter_slots.add(slot)
+        else:
+            break
+        removed.update((scan, scan + 1))
+        scan += 2
+
+    if expected_slots != hole_slots | direct_parameter_slots:
+        return list(instructions), ()
+
+    declarations = tuple(
+        LexicalDeclaration(
+            context.scope_slot_name(scope, slot)
+            or f"context_{scope.address:012x}_{slot}",
+            initializers.get(slot),
+        )
+        for slot in sorted(hole_slots)
+    )
+    return (
+        [
+            instruction
+            for instruction_index, instruction in enumerate(instructions)
+            if instruction_index not in removed
+        ],
+        declarations,
+    )
+
+
 def normalize_source_instructions(
     context: DecompilerContext,
     bytecode: V8BytecodeArray,
@@ -378,10 +499,16 @@ def normalize_source_instructions(
     rewritten = _rewrite_default_parameter_initializers(
         without_declarations, initializers
     )
+    without_function_context, function_declarations = (
+        _remove_function_context_prologue(context, bytecode, rewritten)
+    )
     without_context, declarations = _remove_parameter_body_context(
-        context, bytecode, rewritten, initializers
+        context, bytecode, without_function_context, initializers
     )
     normalized = _remove_redundant_hole_checks(
         context, bytecode, without_context
     )
-    return NormalizedInstructions(normalized, declarations)
+    return NormalizedInstructions(
+        normalized,
+        function_declarations + declarations,
+    )

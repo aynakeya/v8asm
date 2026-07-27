@@ -52,15 +52,28 @@ class StructuredObjectEncoder:
             ],
         }
 
-    def object_type(self, obj: SerializedObject) -> str:
+    def object_type_info(
+        self, obj: SerializedObject
+    ) -> tuple[str, dict[str, Any]]:
+        map_name = _map_name(obj, self.parsed.profile)
+        map_evidence = {"kind": "root_map", "map_name": map_name}
         if obj.index in self.arrays:
-            return "BytecodeArray"
+            return "BytecodeArray", {"kind": "bytecode_array_layout"}
         if obj.index in self.parsed.functions:
-            return "SharedFunctionInfo"
+            return "SharedFunctionInfo", {
+                "kind": "shared_function_info_layout",
+                **({"map_name": map_name} if map_name else {}),
+            }
         if obj.index in self.semantic_types:
-            return self.semantic_types[obj.index]
+            return self.semantic_types[obj.index], {
+                "kind": "bytecode_literal_operand",
+                **({"map_name": map_name} if map_name else {}),
+            }
         if _decode_string(obj, self.parsed.profile, self.parsed.tagged_size) is not None:
-            return "String"
+            return "String", {
+                "kind": "serialized_string_layout",
+                **({"map_name": map_name} if map_name else {}),
+            }
         map_type = _map_type(obj, self.parsed.profile)
         special = {
             "arrayboilerplatedescriptionmap": "ArrayBoilerplateDescription",
@@ -71,15 +84,26 @@ class StructuredObjectEncoder:
             "sharedfunctioninfomap": "SharedFunctionInfo",
         }
         if map_type in special:
-            return special[map_type]
-        map_name = _map_name(obj, self.parsed.profile)
+            return special[map_type], map_evidence
         if map_name:
-            return map_name.removesuffix("Map")
-        return "SerializedObject"
+            return map_name.removesuffix("Map"), map_evidence
+        return "SerializedObject", {"kind": "unresolved"}
+
+    def object_type(self, obj: SerializedObject) -> str:
+        return self.object_type_info(obj)[0]
 
     def encode(self, obj: SerializedObject) -> dict[str, Any]:
+        object_type, type_evidence = self.object_type_info(obj)
         record: dict[str, Any] = {
-            "type": self.object_type(obj),
+            "type": object_type,
+            "type_evidence": type_evidence,
+            "provenance": {
+                "kind": "serialized_object",
+                "id": f"serialized_object:{obj.index}",
+                "object_index": obj.index,
+                "space": obj.space,
+                "payload_offset": obj.payload_offset,
+            },
             "serializer": self.serializer_metadata(obj),
         }
         object_type = record["type"]

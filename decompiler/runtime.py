@@ -33,6 +33,15 @@ function ensureDefined(name) {
 function ThrowIteratorResultNotAnObject(v) {
   throw new TypeError("Iterator result is not an object: " + String(v));
 }
+function DefineAccessorPropertyUnchecked(receiver, key, getter, setter) {
+  Object.defineProperty(receiver, key, {
+    get: getter === null ? undefined : getter,
+    set: setter === null ? undefined : setter,
+    enumerable: true,
+    configurable: true,
+  });
+  return receiver;
+}
 function _CopyDataPropertiesWithExcludedPropertiesOnStack(source, ...keys) {
   const out = {};
   for (const key of Object.keys(Object(source))) {

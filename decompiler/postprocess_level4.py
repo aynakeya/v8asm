@@ -17,6 +17,7 @@ from .postprocess_level4_calls import (
     _rewrite_direct_bound_method_calls,
 )
 from .postprocess_level4_cleanup import (
+    _coalesce_accu_store_aliases,
     _collapse_accu_store_return,
     _collapse_accu_store,
     _collapse_accu_push_context,
@@ -71,10 +72,12 @@ from .postprocess_level4_switch import (
 
 def recover_js_structures(lines: List[str]) -> List[str]:
     current = _recover_for_of_until_stable(lines)
+    current = _coalesce_accu_store_aliases(current)
     current = _strip_iterator_exception_guard(current)
     current = _strip_pending_message_status_guard(current)
     current = _compact_spread_array_builders(current)
     current = _compact_keyed_property_reads(current)
+    current = _coalesce_accu_store_aliases(current)
     current = _compact_accu_property_stores(current)
     current = recover_optional_chains(current)
     current = recover_nullish_assignments(current)
@@ -101,6 +104,7 @@ def recover_js_structures(lines: List[str]) -> List[str]:
     current = _collapse_accu_store(current)
     current = _convert_unused_accu_assign_to_expr(current)
     current = inline_accu_equality_condition_loads(current)
+    current = _fold_adjacent_bound_method_calls(current)
     current = _rewrite_bound_method_calls(current)
     current = _compact_string_concat_chains(current)
     current = _drop_duplicate_expr_before_assignment(current)
@@ -124,12 +128,15 @@ def recover_js_structures(lines: List[str]) -> List[str]:
     current = _compact_self_binary_assignments(current)
     current = _compact_object_literal_initializers(current)
     current = _drop_unused_pure_reg_assignments(current)
+    current = _compact_accu_binary_exprs(current)
+    current = _compact_self_binary_assignments(current)
     current = recover_or_fallback_returns(current)
     current = combine_nested_truthy_ifs(current)
     current = drop_redundant_empty_else_truthy_guards(current)
     current = _compact_object_literal_initializers(current)
     current = _fold_adjacent_bound_method_calls(current)
     current = _rewrite_direct_bound_method_calls(current)
+    current = _inline_object_values_until_stable(current)
     current = _normalize_block_indentation(current)
     return current
 
@@ -138,6 +145,17 @@ def _recover_for_of_until_stable(lines: List[str]) -> List[str]:
     current = lines
     while True:
         nxt = _recover_for_of(current)
+        if nxt == current:
+            return current
+        current = nxt
+
+
+def _inline_object_values_until_stable(lines: List[str]) -> List[str]:
+    current = lines
+    while True:
+        nxt = _compact_object_literal_initializers(
+            _inline_single_use_registers(current)
+        )
         if nxt == current:
             return current
         current = nxt

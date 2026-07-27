@@ -35,6 +35,15 @@ class ConstantPoolEntry:
     display: str
 
 
+@dataclass(frozen=True)
+class ContextBinding:
+    name: str
+    slot: int
+    scope_address: int
+    defining_bytecode_address: int
+    definition_offset: Optional[int]
+
+
 class DecompilerContext:
     """Holds cross-object metadata used during decompilation."""
 
@@ -46,9 +55,12 @@ class DecompilerContext:
         self.bytecode_constant_pools: Dict[int, V8TrustedFixedArray] = {}
         self.bytecode_functions: Dict[int, V8SharedFunctionInfo] = {}
         self.bytecode_scopes: Dict[int, List[V8ScopeInfo]] = {}
+        self.scope_owners: Dict[int, int] = {}
         self.function_children: Dict[int, List[V8BytecodeArray]] = {}
         self.function_parent: Dict[int, int] = {}
+        self.function_creation_offsets: Dict[int, int] = {}
         self.function_names: Dict[int, str] = {}
+        self.context_bindings: Dict[tuple[int, int], ContextBinding] = {}
         self.bytecode_parameter_names: Dict[int, Dict[int, str]] = {}
         self.bytecode_parameter_defaults: Dict[int, Dict[int, str]] = {}
         self.bytecode_parameter_initializers: Dict[
@@ -83,8 +95,12 @@ class DecompilerContext:
                         self.bytecode_scopes.setdefault(
                             obj.trusted_function_data.address, []
                         ).append(scope)
+                        self.scope_owners.setdefault(
+                            scope.address, obj.trusted_function_data.address
+                        )
         self._build_function_names()
         self._build_scope_and_closure_indexes()
+        self._build_context_bindings()
         self._infer_parameter_names()
         self._infer_parameter_defaults()
 
@@ -138,19 +154,20 @@ class DecompilerContext:
                 Instruction.from_codeline(line) for line in obj.instructions
             ]
             for instruction in instructions:
+                constant_index = self._scope_constant_index(instruction)
+                if constant_index is not None:
+                    target = self._constant_target(obj, constant_index)
+                    if isinstance(target, V8ScopeInfo):
+                        scopes = self.bytecode_scopes.setdefault(obj.address, [])
+                        if target not in scopes:
+                            scopes.append(target)
+                        self.scope_owners.setdefault(target.address, obj.address)
+
                 constant_index = self._instruction_constant_index(instruction)
                 if constant_index is None:
                     continue
                 target = self._constant_target(obj, constant_index)
                 if (
-                    instruction.mnemonic
-                    in {"CreateFunctionContext", "CreateBlockContext"}
-                    and isinstance(target, V8ScopeInfo)
-                ):
-                    scopes = self.bytecode_scopes.setdefault(obj.address, [])
-                    if target not in scopes:
-                        scopes.append(target)
-                elif (
                     instruction.mnemonic == "CreateClosure"
                     and isinstance(target, V8SharedFunctionInfo)
                     and target.trusted_function_data is not None
@@ -162,9 +179,24 @@ class DecompilerContext:
                     if existing_parent is not None and existing_parent != obj.address:
                         continue
                     self.function_parent[child.address] = obj.address
+                    self.function_creation_offsets[child.address] = instruction.offset
                     children = self.function_children.setdefault(obj.address, [])
                     if child not in children:
                         children.append(child)
+
+    def _scope_constant_index(
+        self, instruction: Instruction
+    ) -> Optional[int]:
+        scope_arg = {
+            "CreateBlockContext": 0,
+            "CreateCatchContext": 1,
+            "CreateClassContext": 0,
+            "CreateFunctionContext": 0,
+            "CreateWithContext": 1,
+        }.get(instruction.mnemonic)
+        if scope_arg is None or len(instruction.args) <= scope_arg:
+            return None
+        return self._bracket_index(instruction.args[scope_arg])
 
     def _instruction_constant_index(self, instruction: Instruction) -> Optional[int]:
         if not instruction.args:
@@ -183,6 +215,58 @@ class DecompilerContext:
             return None
         return self.get_object(raw.address)
 
+    def _build_context_bindings(self) -> None:
+        used_names: Dict[int, Counter[str]] = {}
+        for bytecode_address, scopes in self.bytecode_scopes.items():
+            bytecode = self.get_object(bytecode_address)
+            if not isinstance(bytecode, V8BytecodeArray):
+                continue
+            owner_names = used_names.setdefault(bytecode_address, Counter())
+            for scope in scopes:
+                for slot in sorted(scope.context_slot_names):
+                    strict_name = self._scope_slot_name(scope, slot)
+                    base = strict_name or (
+                        f"context_{scope.address:012x}_{slot}"
+                    )
+                    owner_names[base] += 1
+                    name = (
+                        base
+                        if owner_names[base] == 1
+                        else f"{base}_scope_{scope.address:012x}"
+                    )
+                    self.context_bindings[(scope.address, slot)] = ContextBinding(
+                        name=name,
+                        slot=slot,
+                        scope_address=scope.address,
+                        defining_bytecode_address=bytecode_address,
+                        definition_offset=self._context_definition_offset(
+                            bytecode, slot
+                        ),
+                    )
+
+    def _context_definition_offset(
+        self, bytecode: V8BytecodeArray, slot: int
+    ) -> Optional[int]:
+        instructions = [
+            Instruction.from_codeline(line) for line in bytecode.instructions
+        ]
+        stores = {
+            "StaCurrentContextSlot",
+            "StaCurrentScriptContextSlot",
+        }
+        for index, instruction in enumerate(instructions):
+            if (
+                instruction.mnemonic not in stores
+                or not instruction.args
+                or self._bracket_index(instruction.args[0]) != slot
+            ):
+                continue
+            previous = instructions[index - 1] if index else None
+            if previous is not None and previous.mnemonic == "LdaTheHole":
+                continue
+            return instruction.offset
+        return None
+
     def _infer_parameter_names(self) -> None:
         storing = {
             "StaCurrentContextSlot",
@@ -194,6 +278,14 @@ class DecompilerContext:
             instructions = [
                 Instruction.from_codeline(line) for line in obj.instructions
             ]
+            lexical_slots = {
+                slot
+                for load, store in zip(instructions, instructions[1:])
+                if load.mnemonic == "LdaTheHole"
+                and store.mnemonic in storing
+                and store.args
+                and (slot := self._bracket_index(store.args[0])) is not None
+            }
             names: Dict[int, str] = {}
             for load, store in zip(instructions, instructions[1:]):
                 if load.mnemonic != "Ldar" or not load.args:
@@ -204,7 +296,7 @@ class DecompilerContext:
                 if store.mnemonic not in storing or not store.args:
                     continue
                 slot = self._bracket_index(store.args[0])
-                if slot is None:
+                if slot is None or slot in lexical_slots:
                     continue
                 name = self.context_slot_name(obj, slot, own_scope_only=True)
                 if name and IDENT_RE.match(name):
@@ -299,6 +391,11 @@ class DecompilerContext:
     ) -> List[DefaultParameterInitializer]:
         return list(self.bytecode_parameter_initializers.get(bytecode.address, ()))
 
+    def literal_load(
+        self, bytecode: V8BytecodeArray, instruction: Instruction
+    ) -> Optional[str]:
+        return self._literal_load(bytecode, instruction)
+
     def scope_for_instruction(
         self, bytecode: V8BytecodeArray, instruction: Instruction
     ) -> Optional[V8ScopeInfo]:
@@ -317,7 +414,8 @@ class DecompilerContext:
         return self._constant_target(bytecode, constant_index)
 
     def scope_slot_name(self, scope: V8ScopeInfo, slot: int) -> Optional[str]:
-        return self._scope_slot_name(scope, slot)
+        binding = self.context_bindings.get((scope.address, slot))
+        return binding.name if binding is not None else self._scope_slot_name(scope, slot)
 
     def child_functions(self, bytecode: V8BytecodeArray) -> List[V8BytecodeArray]:
         return list(self.function_children.get(bytecode.address, ()))
@@ -337,7 +435,7 @@ class DecompilerContext:
             if scope.scope_type != "SCRIPT_SCOPE":
                 continue
             for slot in sorted(scope.context_slot_names):
-                name = self._scope_slot_name(scope, slot)
+                name = self.scope_slot_name(scope, slot)
                 if name and IDENT_RE.match(name) and name not in names:
                     names.append(name)
         return names
@@ -384,23 +482,92 @@ class DecompilerContext:
         *,
         own_scope_only: bool = False,
     ) -> Optional[str]:
+        binding = self.context_slot_binding(
+            bytecode,
+            slot,
+            depth,
+            own_scope_only=own_scope_only,
+        )
+        return binding.name if binding is not None else None
+
+    def context_slot_binding(
+        self,
+        bytecode: V8BytecodeArray,
+        slot: int,
+        depth: int = 0,
+        *,
+        own_scope_only: bool = False,
+    ) -> Optional[ContextBinding]:
+        scopes = self._context_scope_chain(
+            bytecode, own_scope_only=own_scope_only
+        )
+        if depth < 0 or depth >= len(scopes):
+            return None
+        return self.context_bindings.get((scopes[depth].address, slot))
+
+    def _context_scope_chain(
+        self,
+        bytecode: V8BytecodeArray,
+        *,
+        own_scope_only: bool = False,
+    ) -> List[V8ScopeInfo]:
+        chain: List[V8ScopeInfo] = []
         current: Optional[V8BytecodeArray] = bytecode
-        scopes_to_skip = max(0, depth)
         while current is not None:
-            scopes = self.bytecode_scopes.get(current.address, ())
-            for scope in reversed(scopes):
-                if scopes_to_skip:
-                    scopes_to_skip -= 1
-                    continue
-                name = self._scope_slot_name(scope, slot)
-                if name:
-                    return name
+            scopes = [
+                scope
+                for scope in self.bytecode_scopes.get(current.address, ())
+                if scope.context_slot_names
+            ]
+            chain.extend(reversed(scopes))
             if own_scope_only:
                 break
             parent_address = self.function_parent.get(current.address)
             parent = self.get_object(parent_address) if parent_address else None
             current = parent if isinstance(parent, V8BytecodeArray) else None
-        return None
+        return chain
+
+    def captured_context_bindings(
+        self, bytecode: V8BytecodeArray
+    ) -> List[ContextBinding]:
+        found: Dict[tuple[int, int], ContextBinding] = {}
+        current_ops = {
+            "LdaCurrentContextSlot",
+            "LdaCurrentScriptContextSlot",
+            "LdaImmutableCurrentContextSlot",
+            "StaCurrentContextSlot",
+            "StaCurrentScriptContextSlot",
+        }
+        depth_ops = {
+            "LdaContextSlot",
+            "LdaImmutableContextSlot",
+            "StaContextSlot",
+        }
+        for raw in bytecode.instructions:
+            instruction = Instruction.from_codeline(raw)
+            slot: Optional[int] = None
+            depth = 0
+            if instruction.mnemonic in current_ops and instruction.args:
+                slot = self._bracket_index(instruction.args[0])
+            elif (
+                instruction.mnemonic in depth_ops
+                and len(instruction.args) >= 3
+                and instruction.args[0].strip() in {"<context>", "context"}
+            ):
+                slot = self._bracket_index(instruction.args[1])
+                parsed_depth = self._bracket_index(instruction.args[2])
+                if parsed_depth is None:
+                    continue
+                depth = parsed_depth
+            if slot is None:
+                continue
+            binding = self.context_slot_binding(bytecode, slot, depth)
+            if (
+                binding is not None
+                and binding.defining_bytecode_address != bytecode.address
+            ):
+                found[(binding.scope_address, binding.slot)] = binding
+        return list(found.values())
 
     def _scope_slot_name(self, scope: V8ScopeInfo, slot: int) -> Optional[str]:
         raw = scope.context_slot_names.get(slot)
@@ -412,7 +579,11 @@ class DecompilerContext:
                 value = json.loads(name)
             except json.JSONDecodeError:
                 return None
-            return value if isinstance(value, str) else None
+            return (
+                value
+                if isinstance(value, str) and IDENT_RE.match(value)
+                else None
+            )
         if isinstance(raw, V8Address):
             match = re.search(r"#([^>]+)", raw.desc)
             if match:

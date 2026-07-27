@@ -6,28 +6,101 @@ from typing import Dict, List
 from .postprocess_level4_common import _extract_indent, _find_block_end
 
 
+def _coalesce_accu_store_aliases(lines: List[str]) -> List[str]:
+    out: List[str] = []
+    active_alias: str | None = None
+    index = 0
+
+    while index < len(lines):
+        if index + 1 < len(lines):
+            accu_load = re.match(r"^\s*ACCU\s*=\s*(.+)$", lines[index])
+            register_load = re.match(
+                r"^(\s*)(r\d+)\s*=\s*ACCU$",
+                lines[index + 1],
+            )
+            if (
+                accu_load
+                and register_load
+                and (
+                    "ACCU" not in accu_load.group(1)
+                    or _is_self_keyed_accu_load(
+                        accu_load.group(1).strip(),
+                        register_load.group(2),
+                    )
+                )
+                and _accu_alias_is_safe(lines, index + 2, register_load.group(2))
+            ):
+                out.append(
+                    f"{register_load.group(1)}{register_load.group(2)} = "
+                    f"{accu_load.group(1).strip()}"
+                )
+                active_alias = register_load.group(2)
+                index += 2
+                continue
+
+        line = lines[index]
+        stripped = line.strip()
+        if active_alias is not None:
+            accu_assignment = re.match(r"^ACCU\s*=\s*(.+)$", stripped)
+            if accu_assignment:
+                rhs = accu_assignment.group(1)
+                if re.search(r"\bACCU\b", rhs):
+                    line = re.sub(r"\bACCU\b", active_alias, line)
+                active_alias = None
+            elif re.search(r"\bACCU\b", stripped):
+                line = re.sub(r"\bACCU\b", active_alias, line)
+
+            if active_alias is not None and re.match(
+                rf"^{re.escape(active_alias)}\s*=",
+                stripped,
+            ):
+                active_alias = None
+
+        out.append(line)
+        index += 1
+
+    return out
+
+
+def _is_self_keyed_accu_load(expr: str, alias: str) -> bool:
+    return re.fullmatch(
+        rf"{re.escape(alias)}"
+        r"(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\[ACCU\]",
+        expr,
+    ) is not None
+
+
+def _accu_alias_is_safe(lines: List[str], start: int, alias: str) -> bool:
+    alias_reassigned = False
+    for line in lines[start:]:
+        stripped = line.strip()
+        accu_assignment = re.match(r"^ACCU\s*=\s*(.+)$", stripped)
+        if accu_assignment:
+            if re.search(r"\bACCU\b", accu_assignment.group(1)):
+                return not alias_reassigned
+            return True
+        if re.search(r"\bACCU\b", stripped) and alias_reassigned:
+            return False
+        if re.match(rf"^{re.escape(alias)}\s*=", stripped):
+            alias_reassigned = True
+    return True
+
+
 def _is_pure_expr_level4(expr: str) -> bool:
     expr = expr.strip()
     if not expr:
         return False
-    if expr.startswith(("true", "false", "null", "undefined", "HOLE", '"', "'")):
+    if expr in {"true", "false", "null", "undefined", "HOLE", "this"}:
         return True
-    if expr.startswith(("[", "{", "String(")):
+    if re.fullmatch(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', expr):
         return True
-    if re.fullmatch(r"[-+]?\d+", expr):
+    if re.fullmatch(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?n?", expr):
         return True
-    if re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*", expr):
+    if re.fullmatch(r"(?:r|arg)\d+", expr):
         return True
-    if re.fullmatch(
-        r"[A-Za-z_$][A-Za-z0-9_$]*(?:\?\.(?:[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]+\]))+",
-        expr,
-    ):
+    if re.fullmatch(r"(?:context_slot|script_context)\[[^\]]+\]", expr):
         return True
-    if expr.startswith(("context_slot[", "script_context[", "globalThis[")):
-        if "(" in expr:
-            return False
-        return True
-    if expr.startswith("(") and expr.endswith(")") and "call(" not in expr:
+    if expr in {"[]", "{}"}:
         return True
     return False
 
@@ -108,6 +181,8 @@ def _convert_unused_accu_assign_to_expr(lines: List[str]) -> List[str]:
             continue
         indent, expr = match.groups()
         expr = expr.strip()
+        if indent:
+            continue
         if _is_pure_expr_level4(expr):
             continue
         if "(" not in expr and not _is_property_read_expr(expr):
@@ -147,7 +222,13 @@ def _inline_simple_accu_loads_into_next_line(lines: List[str]) -> List[str]:
             ):
                 expr = m_accu.group(1).strip()
                 if _is_pure_expr_level4(expr) and "ACCU" not in expr:
-                    out.append(re.sub(r"\bACCU\b", expr, lines[i + 1]))
+                    out.append(
+                        re.sub(
+                            r"\bACCU\b",
+                            lambda _match: expr,
+                            lines[i + 1],
+                        )
+                    )
                     i += 2
                     continue
         out.append(lines[i])
@@ -184,21 +265,6 @@ def _drop_duplicate_expr_before_assignment(lines: List[str]) -> List[str]:
                 i += 1
                 continue
 
-            m_assign = re.match(
-                r"^[A-Za-z_$][A-Za-z0-9_$]*"
-                r"(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]+\])*"
-                r"\s*=(?!=)\s*(.+)$",
-                next_line,
-            )
-            if (
-                expr
-                and m_assign
-                and expr == m_assign.group(1).strip()
-                and "(" in expr
-                and not expr.startswith(("if ", "for ", "while ", "return ", "throw "))
-            ):
-                i += 1
-                continue
         out.append(lines[i])
         i += 1
     return out

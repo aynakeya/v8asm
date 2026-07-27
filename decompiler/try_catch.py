@@ -71,7 +71,7 @@ def _branch_path_condition(
 def _condition_with_load(condition: str, expression: str) -> Optional[str]:
     if not condition or not expression or "ACCU" in expression:
         return None
-    return re.sub(r"\bACCU\b", expression, condition)
+    return re.sub(r"\bACCU\b", lambda _match: expression, condition)
 
 
 def _match_short_circuit_alternate(
@@ -165,6 +165,319 @@ def _catch_binding_name(
         if match and IDENT_RE.match(match.group(1)):
             return match.group(1)
     return name or "e"
+
+
+def _star_target(instruction: Instruction) -> Optional[str]:
+    if instruction.mnemonic == "Star" and instruction.args:
+        return instruction.args[0].strip()
+    match = re.fullmatch(r"Star(\d+)", instruction.mnemonic)
+    return f"r{match.group(1)}" if match else None
+
+
+def _load_source(instruction: Instruction) -> Optional[str]:
+    if instruction.mnemonic == "Ldar" and instruction.args:
+        return instruction.args[0].strip()
+    match = re.fullmatch(r"Ldar(\d+)", instruction.mnemonic)
+    return f"r{match.group(1)}" if match else None
+
+
+def _smi_value(instruction: Instruction) -> Optional[int]:
+    if instruction.mnemonic == "LdaZero":
+        return 0
+    if instruction.mnemonic != "LdaSmi" or not instruction.args:
+        return None
+    token = instruction.args[0].strip()
+    if token.startswith("[") and token.endswith("]"):
+        token = token[1:-1]
+    try:
+        return int(token)
+    except ValueError:
+        return None
+
+
+def _match_finally_handler(
+    instructions: List[Instruction], handler_index: int
+) -> Optional[tuple[str, str, str, int]]:
+    if handler_index + 6 > len(instructions):
+        return None
+    result_register = _star_target(instructions[handler_index])
+    if result_register is None or _smi_value(instructions[handler_index + 1]) != 0:
+        return None
+    completion_register = _star_target(instructions[handler_index + 2])
+    if completion_register is None:
+        return None
+    if (
+        instructions[handler_index + 3].mnemonic != "LdaTheHole"
+        or instructions[handler_index + 4].mnemonic != "SetPendingMessage"
+    ):
+        return None
+    pending_register = _star_target(instructions[handler_index + 5])
+    if pending_register is None:
+        return None
+    return (
+        result_register,
+        completion_register,
+        pending_register,
+        handler_index + 6,
+    )
+
+
+def _match_finally_dispatch(
+    instructions: List[Instruction],
+    start_index: int,
+    result_register: str,
+    completion_register: str,
+    pending_register: str,
+) -> Optional[tuple[int, int]]:
+    for index in range(start_index, len(instructions) - 8):
+        branch = instructions[index + 2]
+        if (
+            _smi_value(instructions[index]) != 0
+            or instructions[index + 1].mnemonic != "TestReferenceEqual"
+            or not instructions[index + 1].args
+            or instructions[index + 1].args[0].strip() != completion_register
+            or branch.mnemonic not in {"JumpIfFalse", "JumpIfFalseConstant"}
+            or _load_source(instructions[index + 3]) != pending_register
+            or instructions[index + 4].mnemonic != "SetPendingMessage"
+            or _load_source(instructions[index + 5]) != result_register
+            or instructions[index + 6].mnemonic != "ReThrow"
+        ):
+            continue
+        return_offset = parse_jump_target(branch)
+        return_index = (
+            _instruction_index_at_or_after(instructions, return_offset)
+            if return_offset is not None
+            else None
+        )
+        if (
+            return_index is None
+            or return_index != index + 7
+            or _load_source(instructions[return_index]) != result_register
+            or instructions[return_index + 1].mnemonic != "Return"
+        ):
+            continue
+        return index, return_index + 2
+    return None
+
+
+def _match_return_completion(
+    translator: InstructionTranslator,
+    instructions: List[Instruction],
+    completion_register: str,
+    result_register: str,
+    finalizer_offset: int,
+) -> Optional[tuple[List[Instruction], str]]:
+    if len(instructions) < 4:
+        return None
+    token, save_token, save_result, jump = instructions[-4:]
+    if (
+        _smi_value(token) in {None, 0}
+        or _star_target(save_token) != completion_register
+        or save_result.mnemonic != "Mov"
+        or len(save_result.args) < 2
+        or save_result.args[1].strip() != result_register
+        or jump.mnemonic not in {"Jump", "JumpConstant"}
+        or parse_jump_target(jump) != finalizer_offset
+    ):
+        return None
+    translated = translator.translate(save_result).strip()
+    assignment = re.match(
+        rf"^{re.escape(result_register)}\s*=\s*(.+)$", translated
+    )
+    if assignment is None:
+        return None
+    return instructions[:-4], assignment.group(1).strip()
+
+
+def _strip_exception_scaffolding(
+    instructions: List[Instruction],
+    context_registers: set[str],
+    pending_register: str,
+) -> List[Instruction]:
+    result: List[Instruction] = []
+    index = 0
+    while index < len(instructions):
+        instruction = instructions[index]
+        if (
+            instruction.mnemonic == "LdaTheHole"
+            and index + 1 < len(instructions)
+            and _star_target(instructions[index + 1]) == pending_register
+        ):
+            index += 2
+            continue
+        if (
+            instruction.mnemonic == "Mov"
+            and len(instruction.args) >= 2
+            and instruction.args[0].strip() == "<context>"
+            and instruction.args[1].strip() in context_registers
+        ):
+            index += 1
+            continue
+        result.append(instruction)
+        index += 1
+    return result
+
+
+def _render_try_catch_finally(
+    context: DecompilerContext,
+    bytecode: V8BytecodeArray,
+    translator: InstructionTranslator,
+    instructions: List[Instruction],
+) -> Optional[List[str]]:
+    entries = bytecode.handler_entries
+    for outer in entries:
+        if outer.handler != outer.end:
+            continue
+        outer_start = _instruction_index_at_or_after(instructions, outer.start)
+        outer_end = _instruction_index_at_or_after(instructions, outer.end)
+        outer_handler = _instruction_index_at_or_after(instructions, outer.handler)
+        if outer_start is None or outer_end is None or outer_handler is None:
+            continue
+        handler = _match_finally_handler(instructions, outer_handler)
+        if handler is None:
+            continue
+        result_register, completion_register, pending_register, finalizer_start = (
+            handler
+        )
+        dispatch = _match_finally_dispatch(
+            instructions,
+            finalizer_start,
+            result_register,
+            completion_register,
+            pending_register,
+        )
+        if dispatch is None:
+            continue
+        dispatch_start, suffix_start = dispatch
+        finalizer_offset = instructions[finalizer_start].offset
+
+        inner = next(
+            (
+                entry
+                for entry in entries
+                if entry is not outer
+                and outer.start <= entry.start
+                and entry.end <= outer.end
+                and entry.handler < outer.end
+            ),
+            None,
+        )
+        if inner is None:
+            continue
+        try_start = _instruction_index_at_or_after(instructions, inner.start)
+        catch_start = _instruction_index_at_or_after(instructions, inner.handler)
+        if try_start is None or catch_start is None:
+            continue
+
+        try_completion = _match_return_completion(
+            translator,
+            instructions[try_start:catch_start],
+            completion_register,
+            result_register,
+            finalizer_offset,
+        )
+        catch_instructions = instructions[catch_start:outer_end]
+        push_index = next(
+            (
+                index
+                for index, instruction in enumerate(catch_instructions)
+                if instruction.mnemonic == "PushContext"
+            ),
+            None,
+        )
+        pop_index = (
+            next(
+                (
+                    index
+                    for index, instruction in enumerate(
+                        catch_instructions[push_index + 1 :],
+                        start=push_index + 1,
+                    )
+                    if instruction.mnemonic == "PopContext"
+                ),
+                None,
+            )
+            if push_index is not None
+            else None
+        )
+        if try_completion is None or push_index is None or pop_index is None:
+            continue
+        catch_completion = _match_return_completion(
+            translator,
+            catch_instructions[pop_index + 1 :],
+            completion_register,
+            result_register,
+            finalizer_offset,
+        )
+        catch_context = next(
+            (
+                instruction
+                for instruction in catch_instructions[:push_index]
+                if instruction.mnemonic == "CreateCatchContext"
+            ),
+            None,
+        )
+        if catch_completion is None or catch_context is None:
+            continue
+
+        context_registers = {
+            f"r{entry.data}" for entry in entries if entry.data >= 0
+        }
+        prefix = _strip_exception_scaffolding(
+            instructions[:outer_start],
+            context_registers,
+            pending_register,
+        )
+        outer_prefix = _strip_exception_scaffolding(
+            instructions[outer_start:try_start],
+            context_registers,
+            pending_register,
+        )
+        try_body, try_result = try_completion
+        catch_body = catch_instructions[push_index + 1 : pop_index]
+        _, catch_result = catch_completion
+        finalizer_body = instructions[finalizer_start:dispatch_start]
+        catch_name = _catch_binding_name(context, translator, catch_context)
+
+        output = _render_fragment(translator, prefix)
+        if not outer_prefix:
+            output.append(f"{INDENT}try {{")
+            output.extend(_indent_lines(_render_fragment(translator, try_body)))
+            output.append(f"{INDENT * 2}return {try_result}")
+            output.append(f"{INDENT}}} catch ({catch_name}) {{")
+            output.extend(
+                _indent_lines(_render_fragment(translator, catch_body))
+            )
+            output.append(f"{INDENT * 2}return {catch_result}")
+        else:
+            inner_lines = [f"{INDENT}try {{"]
+            inner_lines.extend(
+                _indent_lines(_render_fragment(translator, try_body))
+            )
+            inner_lines.append(f"{INDENT * 2}return {try_result}")
+            inner_lines.append(f"{INDENT}}} catch ({catch_name}) {{")
+            inner_lines.extend(
+                _indent_lines(_render_fragment(translator, catch_body))
+            )
+            inner_lines.append(f"{INDENT * 2}return {catch_result}")
+            inner_lines.append(f"{INDENT}}}")
+
+            output.append(f"{INDENT}try {{")
+            output.extend(
+                _indent_lines(_render_fragment(translator, outer_prefix))
+            )
+            output.extend(_indent_lines(inner_lines))
+        output.append(f"{INDENT}}} finally {{")
+        output.extend(
+            _indent_lines(_render_fragment(translator, finalizer_body))
+        )
+        output.append(f"{INDENT}}}")
+        if suffix_start < len(instructions):
+            output.extend(
+                _render_fragment(translator, instructions[suffix_start:])
+            )
+        return output
+    return None
 
 
 def _render_single_try_catch(
@@ -290,7 +603,9 @@ def _render_single_try_catch(
                         prefix = prefix[:-1]
                         if "ACCU" not in expression:
                             guard_condition = re.sub(
-                                r"\bACCU\b", expression, guard_condition
+                                r"\bACCU\b",
+                                lambda _match: expression,
+                                guard_condition,
                             )
                         else:
                             prefix_lines = _render_fragment(translator, prefix)
@@ -364,6 +679,11 @@ def render_simple_try_catch(
     translator: InstructionTranslator,
     instructions: List[Instruction],
 ) -> Optional[List[str]]:
+    rendered = _render_try_catch_finally(
+        context, bytecode, translator, instructions
+    )
+    if rendered is not None:
+        return rendered
     for entry in bytecode.handler_entries:
         rendered = _render_single_try_catch(
             context, translator, instructions, entry

@@ -20,14 +20,17 @@ def _parse_iter_setup(lines: List[str]) -> Optional[Tuple[int, int, str, str, st
         if not s0.startswith("ACCU = GetIterator(") or not s0.endswith(")"):
             continue
         source = s0[len("ACCU = GetIterator(") : -1]
-        m1 = re.match(r"^(r\d+) = GetIterator\((.+)\)$", s1)
+        m1 = re.match(r"^(r\d+) = (?:GetIterator\((.+)\)|ACCU)$", s1)
         if not m1:
             continue
         iter_reg = m1.group(1)
-        if m1.group(2) != source:
+        if m1.group(2) is not None and m1.group(2) != source:
             continue
         m2 = re.match(rf"^ACCU = {re.escape(iter_reg)}\.next$", s2)
-        m3 = re.match(rf"^(r\d+) = {re.escape(iter_reg)}\.next$", s3)
+        m3 = re.match(
+            rf"^(r\d+) = (?:{re.escape(iter_reg)}\.next|ACCU)$",
+            s3,
+        )
         if not m2 or not m3:
             continue
         next_reg = m3.group(1)
@@ -58,9 +61,14 @@ def _recover_for_of(lines: List[str]) -> List[str]:
     next_call_a = f"ACCU = {next_reg}.call({iter_reg})"
     next_call_b = re.compile(rf"^(r\d+) = {re.escape(next_reg)}\.call\({re.escape(iter_reg)}\)$")
     result_reg = None
-    for line in body:
+    for body_index, line in enumerate(body):
         s = line.strip()
         if next_call_a == s:
+            if body_index + 1 < len(body):
+                store = re.match(r"^(r\d+) = ACCU$", body[body_index + 1].strip())
+                if store:
+                    result_reg = store.group(1)
+                    break
             continue
         m = next_call_b.match(s)
         if m:

@@ -37,6 +37,37 @@ def _reference_address(reference: Reference) -> int | None:
     return None
 
 
+def _reference_source(reference: Reference) -> dict[str, Any]:
+    if reference.object_index is not None:
+        return {
+            "kind": "serialized_object",
+            "id": f"serialized_object:{reference.object_index}",
+            "object_index": reference.object_index,
+        }
+
+    source_kinds = {
+        "root": "root",
+        "read_only": "read_only_heap",
+        "startup_cache": "startup_object_cache",
+        "read_only_cache": "read_only_object_cache",
+        "shared_cache": "shared_heap_object_cache",
+        "attached": "attached_reference",
+        "external": "external_reference",
+        "raw_external": "raw_external_reference",
+    }
+    kind = source_kinds.get(reference.kind, reference.kind)
+    source: dict[str, Any] = {"kind": kind}
+    if reference.kind == "read_only" and len(reference.values) == 2:
+        source.update(page=reference.values[0], offset=reference.values[1])
+    elif reference.values:
+        source["index"] = reference.values[0]
+        if len(reference.values) > 1:
+            source["values"] = list(reference.values)
+    suffix = ":".join(str(value) for value in reference.values)
+    source["id"] = f"{kind}:{suffix}" if suffix else kind
+    return source
+
+
 def _root_literal(name: str | None) -> str | None:
     if name is None:
         return None
@@ -179,6 +210,12 @@ class StructuredGraphBuilder:
             pool_address,
             {
                 "type": "TrustedFixedArray",
+                "type_evidence": {"kind": "bytecode_constant_pool"},
+                "provenance": {
+                    "kind": "derived_constant_pool",
+                    "id": f"constant_pool:{array.object_index}",
+                    "owner_object_index": array.object_index,
+                },
                 "owner_address": _address(address),
                 "length": len(pool_values),
                 "elements": pool_values,
@@ -244,6 +281,8 @@ class StructuredGraphBuilder:
             "kind": "reference",
             "reference_kind": reference.kind,
             "values": list(reference.values),
+            "source": _reference_source(reference),
+            "resolution": "unresolved",
         }
         if reference.object_index is not None:
             result["object_index"] = reference.object_index
@@ -254,7 +293,12 @@ class StructuredGraphBuilder:
 
         target = _target_object(reference, self.objects)
         if target is not None:
-            result["target_type"] = self.object_encoder.object_type(target)
+            target_type, type_evidence = self.object_encoder.object_type_info(target)
+            result.update(
+                target_type=target_type,
+                type_evidence=type_evidence,
+                resolution="serialized_object",
+            )
             result["description"] = f"<{result['target_type']}>"
             return result
 
@@ -267,41 +311,70 @@ class StructuredGraphBuilder:
                 root_name = profile.root_names[index]
         literal = _root_literal(root_name)
         if value is not None:
-            result.update(target_type="String", description=f"<String[{len(value)}]>")
+            evidence = (
+                "read_only_snapshot"
+                if reference.kind == "read_only"
+                and self.parsed.snapshot is not None
+                and len(reference.values) == 2
+                and self.parsed.snapshot.string_at(*reference.values) is not None
+                else "profile_metadata"
+            )
+            result.update(
+                target_type="String",
+                type_evidence={"kind": evidence},
+                resolution=evidence,
+                description=f"<String[{len(value)}]>",
+            )
             if address is not None:
                 self._put(
                     address,
                     {
                         "type": "String",
+                        "type_evidence": {"kind": evidence},
                         "value": value,
                         "length": len(value),
                         "external": True,
+                        "provenance": result["source"],
                         "reference_kind": reference.kind,
                     },
                 )
         elif literal is not None:
-            result.update(target_type="Primitive", literal=literal)
+            result.update(
+                target_type="Primitive",
+                type_evidence={"kind": "profile_root_name"},
+                resolution="profile_metadata",
+                literal=literal,
+            )
             result["description"] = f"<{literal}>"
             if address is not None:
                 self._put(
                     address,
                     {
                         "type": "Primitive",
+                        "type_evidence": {"kind": "profile_root_name"},
                         "value": literal,
                         "external": True,
+                        "provenance": result["source"],
                         "reference_kind": reference.kind,
                     },
                 )
         elif address is not None:
             target_type = "RootObject" if reference.kind == "root" else "ReadOnlyObject"
             description = root_name or target_type
-            result.update(target_type=target_type, description=f"<{description}>")
+            result.update(
+                target_type=target_type,
+                type_evidence={"kind": "unresolved"},
+                resolution="external_identity",
+                description=f"<{description}>",
+            )
             self._put(
                 address,
                 {
                     "type": target_type,
+                    "type_evidence": {"kind": "unresolved"},
                     "name": root_name,
                     "external": True,
+                    "provenance": result["source"],
                     "reference_kind": reference.kind,
                     "reference_values": list(reference.values),
                 },

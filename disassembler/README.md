@@ -18,6 +18,12 @@ are deterministic offline identities, not process heap pointers. See
 `SCHEMA.md` for field and compatibility rules. Text remains the default for
 backwards compatibility.
 
+Each structured reference also records a stable `source.id`, a source category
+such as `serialized_object`, `read_only_heap`, `startup_object_cache`, or
+`attached_reference`, and its resolution state. Object types include
+`type_evidence`; unresolved external targets are left unresolved instead of
+being assigned a guessed V8 or application type.
+
 Use `--version` when a custom runtime has an unknown version hash but its V8
 source layout matches a checked-in profile. Use the startup snapshot whose
 read-only checksum matches the cache:

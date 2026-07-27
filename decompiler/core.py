@@ -68,6 +68,33 @@ def _format_register_locals(bytecode: V8BytecodeArray) -> List[str]:
     return lines
 
 
+def _format_captures(
+    context: DecompilerContext, bytecode: V8BytecodeArray
+) -> List[str]:
+    captures = []
+    for binding in context.captured_context_bindings(bytecode):
+        owner = context.get_object(binding.defining_bytecode_address)
+        owner_function = (
+            context.get_function_for_bytecode(owner)
+            if isinstance(owner, V8BytecodeArray)
+            else None
+        )
+        owner_name = (
+            context.get_function_name(owner_function)
+            if owner_function is not None
+            else f"bytecode_{binding.defining_bytecode_address:012x}"
+        )
+        location = (
+            f" defined@{binding.definition_offset}"
+            if binding.definition_offset is not None
+            else ""
+        )
+        captures.append(
+            f"{binding.name} <- {owner_name} slot={binding.slot}{location}"
+        )
+    return [f"  // Captures: {', '.join(captures)}"] if captures else []
+
+
 def _render_linear(
     translator: InstructionTranslator, instructions: List[Instruction]
 ) -> List[str]:
@@ -174,6 +201,7 @@ def decompile_bytecode(
         body_lines = _render_linear(translator, original_instructions)
 
     body: List[str] = [metadata]
+    body.extend(_format_captures(context, bytecode))
     if as_script:
         context_names = context.script_context_names(bytecode)
         if context_names:

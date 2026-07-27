@@ -9,7 +9,8 @@ blog (chinese only): [a-quick-guide-to-disassemble-v8-bytecode](https://www.ayna
 - [x] standalone Python disassembler
 - [x] versioned structured JSON object graph
 - [x] source-generated V8 version profiles and version search
-- [x] closure nesting and basic ScopeInfo context-name recovery
+- [x] closure nesting and depth-aware ScopeInfo/context provenance
+- [x] executable semantic regression fixtures for decompiler rewrites
 - [ ] checksum rewrite: allow modify bytecode
 - [ ] rewrite header
 - [ ] continue high-level decompiler data-flow and expression recovery
@@ -52,8 +53,10 @@ python3 -m decompiler /tmp/input.disasm.json --runtime
 
 JSON is the primary disassembler/decompiler interface. It preserves typed
 instructions, constant-pool references, SFI/ScopeInfo links, handler entries,
-and object relationships without reparsing display text. Object keys look like
-addresses but are deterministic offline identities, not live V8 heap pointers.
+and object relationships without reparsing display text. References identify
+their serializer/root/read-only/cache/attached source and object types include
+their evidence. Object keys look like addresses but are deterministic offline
+identities, not live V8 heap pointers.
 See `disassembler/SCHEMA.md` for the versioned schema. Omit `--format json` to
 produce the backwards-compatible text listing.
 
@@ -117,6 +120,13 @@ structuring, iterator recovery, expression folding, closure nesting, and
 ScopeInfo-based variable recovery. `--linear` is the diagnostic alternative:
 it keeps bytecode offsets and translated operations aligned for reverse
 mapping. The former numeric level 1-4 interface has been removed.
+
+Decompiler rewrites are also checked with executable semantic fixtures. The
+suite compares original and recovered JavaScript for evaluation order, getter
+side effects, closures/context shadowing, short-circuiting, and
+`try/catch/finally` completion. String deobfuscation and application-meaning
+inference belong in a separate analyzer rather than this fidelity-oriented
+pipeline.
 
 ### regression rounds
 

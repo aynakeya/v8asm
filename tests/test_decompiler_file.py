@@ -137,10 +137,12 @@ class DecompilerFileTests(unittest.TestCase):
                 self.assertIn("output = mapValues(", output)
                 self.assertEqual(output.count("createCounter(2)"), 1)
                 self.assertEqual(output.count("counter.read()"), 1)
+                self.assertIn("r1 = globalThis", output)
                 self.assertIn(
-                    "globalThis.result = { output, current: counter.read() }",
+                    "r2 = { output, current: counter.read() }",
                     output,
                 )
+                self.assertIn("r1.result = r2", output)
                 self.assertNotIn("r2.current = counter.read()", output)
                 self.assertEqual(
                     output.count(

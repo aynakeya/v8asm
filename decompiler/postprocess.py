@@ -11,23 +11,11 @@ IDENT_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 
 def _is_simple_expr(expr: str) -> bool:
     expr = expr.strip()
-    if not expr:
-        return False
-    if expr.startswith(('"', "'")):
+    if _is_repeatable_accu_value(expr):
         return True
-    if expr[0] in "[{":
+    if IDENT_RE.fullmatch(expr):
         return True
-    if expr[0].isdigit() or expr[0] in "-+" and expr[1:].isdigit():
-        return True
-    if expr.startswith(("global[", "context_slot[", "Const[", "undefined", "null", "true", "false")):
-        return True
-    if expr.startswith(("Scope[", "script_context[")):
-        return True
-    if expr.startswith(("String(", "create_object_literal(", "create_function_context(")):
-        return True
-    if IDENT_RE.match(expr):
-        return True
-    return False
+    return expr.startswith(("Const[", "Scope["))
 
 
 def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[str]:
@@ -67,7 +55,7 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
         ):
             accu_value = None
 
-    for line_index, line in enumerate(lines):
+    for line in lines:
         stripped = line.lstrip()
         prefix = line[: len(line) - len(stripped)]
         if not stripped:
@@ -105,7 +93,7 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
             reg = reg.strip()
             expr = expr.strip()
             expr_before_replace = expr
-            coalesce_accu_store = False
+            stores_accumulator = expr_before_replace == "ACCU"
             uses_post_goto_reg = bool(
                 post_goto_protected_regs
                 and re.search(
@@ -118,16 +106,10 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
             unstable_accu_alias = False
             if expr == "ACCU" and accu_value is not None:
                 if "ACCU" not in accu_value:
-                    expr = accu_value
-                    coalesce_accu_store = (
-                        recover_structures
-                        and _is_keyed_property_read(expr)
-                        and bool(simplified)
-                        and simplified[-1].strip() == f"ACCU = {expr}"
-                        and not _accu_is_read_before_reassign(
-                            lines, line_index + 1
-                        )
-                    )
+                    if _is_repeatable_accu_value(accu_value):
+                        expr = accu_value
+                    else:
+                        unstable_accu_alias = True
                 else:
                     unstable_accu_alias = True
             elif expr == "ACCU":
@@ -135,8 +117,6 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
             else:
                 expr = replace_tokens(expr)
 
-            if coalesce_accu_store:
-                simplified.pop()
             simplified.append(f"{prefix}{reg} = {expr}")
             invalidate_aliases_depending_on(reg)
             if uses_post_goto_reg:
@@ -153,6 +133,8 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
                 reg_values[reg] = expr
             elif reg in reg_values:
                 del reg_values[reg]
+            if stores_accumulator:
+                accu_value = reg
             continue
 
         m_assignment = re.match(r"^(.+?)\s*=\s*(.+)$", stripped)
@@ -168,7 +150,12 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
                 reg_values.pop(reg, None)
                 invalidate_aliases_depending_on(reg)
             expr = expr.strip()
-            if expr == "ACCU" and accu_value is not None and "ACCU" not in accu_value:
+            if (
+                expr == "ACCU"
+                and accu_value is not None
+                and "ACCU" not in accu_value
+                and _is_repeatable_accu_value(accu_value)
+            ):
                 expr = accu_value
             else:
                 expr = replace_tokens(expr)
@@ -184,26 +171,17 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
     return simplified
 
 
-def _accu_is_read_before_reassign(lines: List[str], start: int) -> bool:
-    for line in lines[start:]:
-        stripped = line.strip()
-        reassignment = re.match(r"^ACCU\s*=\s*(.+)$", stripped)
-        if reassignment:
-            return re.search(r"\bACCU\b", reassignment.group(1)) is not None
-        if re.search(r"\bACCU\b", stripped):
-            return True
-        if stripped in {"}", "else {"}:
-            return False
-        if stripped.startswith(("return ", "throw ")):
-            return False
-    return False
-
-
-def _is_keyed_property_read(expr: str) -> bool:
-    if "ACCU" in expr or "(" in expr or ")" in expr:
-        return False
+def _is_repeatable_accu_value(expr: str) -> bool:
+    expr = expr.strip()
+    if expr in {"true", "false", "null", "undefined", "HOLE", "this"}:
+        return True
+    if re.fullmatch(r"(?:r|arg)\d+", expr):
+        return True
+    if re.fullmatch(r"(?:context_slot|script_context)\[[^\]]+\]", expr):
+        return True
+    if re.fullmatch(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', expr):
+        return True
     return re.fullmatch(
-        r"[A-Za-z_$][A-Za-z0-9_$]*"
-        r"(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]+\])+",
+        r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?n?",
         expr,
-    ) is not None and "[" in expr
+    ) is not None

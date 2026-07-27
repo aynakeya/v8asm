@@ -115,11 +115,21 @@ python3 -m disassembler input.jsc \
 - `metadata.header` 保存动态识别的 cache header；
 - `objects` 是按稳定逻辑地址索引的对象图；
 - `object_order` 保留确定性的输出顺序；
-- 引用、Smi、opcode operand 和 jump target 都是有类型字段。
+- 引用、Smi、opcode operand 和 jump target 都是有类型字段；
+- `source.kind` 和 `source.id` 区分 serializer object、root、read-only heap、
+  startup/read-only/shared object cache 与 attached reference；
+- `resolution` 明确表示对象来自 serialized payload、profile、匹配 snapshot、
+  external identity，还是仍未解析；
+- `type_evidence` 记录类型来自 bytecode layout、literal operand、字符串布局或
+  profile root map。
 
 逻辑地址不是 V8 进程中的 heap pointer。消费者必须跟随 `address` 引用，不能根据地址
 前缀推导对象类型。字段统一使用 `under_score` 命名。完整兼容规则见
 `disassembler/SCHEMA.md`。
+
+当前 profile 没有完整的 V8 `InstanceType` 数值表。解析器只输出已有证据支持的类型；
+对 object cache、attached reference 或 map 未知的对象保留 `unresolved`，不会从 object
+ID、出现频率或调用位置猜测类型。
 
 结构化路径避免 decompiler 再从人类可读文本中猜地址、参数或 jump target。文本格式仍
 保留给人工检查和旧输入，但不再是新功能的主要接口。

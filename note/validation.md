@@ -36,10 +36,24 @@ python3 -m unittest discover -s tests -v
 - 结构化 JSON schema、对象引用和 deterministic order；
 - SFI、ScopeInfo、闭包树和 context slot；
 - opcode translation、控制流恢复和文件级后处理；
-- 方法调用折叠的正向与反向语义测试。
+- 方法调用折叠的正向与反向语义测试；
+- 原始 JavaScript 与恢复结果的可执行语义等价测试，包括 getter 副作用、
+  closure/context shadowing、短路和 `try/catch/finally` completion；
+- root、read-only、object cache 和 attached reference 的来源与类型证据。
 
-2026-07-22 最近一次完整运行结果为 189 个测试通过。这个数字只用于定位基线；新增测试
+2026-07-27 最近一次完整运行结果为 208 个测试通过。这个数字只用于定位基线；新增测试
 后应更新日期和结果，不把测试数量作为功能本身。
+
+语义 fixture 使用当前 Node 24/V8 13.6 生成 cache：
+
+```bash
+node --no-lazy tests/fixtures/generate_cached_data.cjs \
+  tests/semantic_fixtures/<name>.js \
+  tests/semantic_fixtures/<name>.jsc
+```
+
+测试分别在隔离的 Node `vm` 中执行源码和带轻量 runtime 的恢复结果，比较返回值或异常。
+文本更短、寄存器更少或测试不抛异常都不能替代这个比较。
 
 ## 补丁与二进制缓存检查
 

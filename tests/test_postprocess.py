@@ -91,8 +91,7 @@ class SimplifyLinesTests(unittest.TestCase):
         self.assertEqual(
             simplified,
             [
-                "r0 = context_slot[36]",
-                'script_context[36] = ({"zh-CN": "zh-Hans", "zh-Hans": "zh-Hans", "zh-TW": "zh-Hant"}[r0] ?? "Base")',
+                'script_context[36] = ({"zh-CN": "zh-Hans", "zh-Hans": "zh-Hans", "zh-TW": "zh-Hant"}[context_slot[36]] ?? "Base")',
                 "return context_slot[36]",
             ],
         )
@@ -262,7 +261,7 @@ class SimplifyLinesTests(unittest.TestCase):
             ['r13 += String(((r8.ok === false) ? "bad" : "ok"))'],
         )
 
-    def test_drops_duplicate_call_before_assignment(self) -> None:
+    def test_keeps_two_explicit_calls_before_assignment(self) -> None:
         lines = [
             "r13.call(r14)",
             "r3 = r13.call(r14)",
@@ -270,7 +269,22 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertEqual(simplified, ["r3 = r13.call(r14)"])
+        self.assertEqual(simplified, lines)
+
+    def test_accumulator_store_does_not_repeat_effectful_expression(self) -> None:
+        lines = [
+            "ACCU = run()",
+            "r2 = ACCU",
+            "globalThis.result = ACCU",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(
+            simplified,
+            ["r2 = run()", "globalThis.result = r2"],
+        )
+        self.assertEqual("\n".join(simplified).count("run()"), 1)
 
     def test_drops_duplicate_pure_accu_load_before_same_register_value(self) -> None:
         lines = [
@@ -330,7 +344,7 @@ class SimplifyLinesTests(unittest.TestCase):
             ],
         )
 
-    def test_rewrites_bound_method_call_from_register(self) -> None:
+    def test_keeps_shared_bound_method_value_for_multiple_calls(self) -> None:
         lines = [
             "r13 = r14.toUpperCase",
             "r13.call(r14)",
@@ -339,12 +353,7 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertEqual(
-            simplified,
-            [
-                "r3 = r14.toUpperCase()",
-            ],
-        )
+        self.assertEqual(simplified, lines)
 
     def test_folds_adjacent_bound_calls_in_safe_expression_contexts(self) -> None:
         cases = (
@@ -688,9 +697,8 @@ class SimplifyLinesTests(unittest.TestCase):
             simplified,
             [
                 "return _AsyncFunctionResolve(r0, r5)",
-                "r5 = async_reject_exception",
                 "// SetPendingMessage",
-                "return _AsyncFunctionReject(r0, r5)",
+                "return _AsyncFunctionReject(r0, async_reject_exception)",
             ],
         )
 
@@ -743,7 +751,7 @@ class SimplifyLinesTests(unittest.TestCase):
 
         self.assertEqual(simplified, ["return (r1 + String((Number(r3) + 1)))"])
 
-    def test_drops_unused_pure_register_assignment(self) -> None:
+    def test_keeps_unused_property_read_for_getter_side_effects(self) -> None:
         lines = [
             "r2 = arg0.exec",
             "r1 = r2",
@@ -753,9 +761,12 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertEqual(simplified, ["return Number(arg0)"])
+        rendered = "\n".join(simplified)
+        self.assertEqual(rendered.count("arg0.exec"), 1)
+        self.assertIn("r2 = Number", simplified)
+        self.assertIn("return Number(arg0)", simplified)
 
-    def test_drops_overwritten_unused_member_register_assignment(self) -> None:
+    def test_keeps_overwritten_member_read_for_getter_side_effects(self) -> None:
         lines = [
             "r2 = r3.toUpperCase",
             "r1 = String(r3.toUpperCase())",
@@ -768,6 +779,7 @@ class SimplifyLinesTests(unittest.TestCase):
         self.assertEqual(
             simplified,
             [
+                "r2 = r3.toUpperCase",
                 "r1 = String(r3.toUpperCase())",
                 "return r0[2]",
             ],
@@ -783,7 +795,7 @@ class SimplifyLinesTests(unittest.TestCase):
 
         self.assertEqual(simplified, ["return r3.toUpperCase"])
 
-    def test_drops_unused_literal_and_alias_register_assignments(self) -> None:
+    def test_drops_unused_literals_but_keeps_identifier_read(self) -> None:
         lines = [
             "r4 = collect",
             "r5 = null",
@@ -795,7 +807,14 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertEqual(simplified, ['r2 = collect.call(null, "v", ...r0)', "return r2"])
+        self.assertEqual(
+            simplified,
+            [
+                "r4 = collect",
+                'r2 = collect.call(null, "v", ...r0)',
+                "return r2",
+            ],
+        )
 
     def test_keeps_unused_effectful_register_assignment(self) -> None:
         lines = [
@@ -865,7 +884,7 @@ class SimplifyLinesTests(unittest.TestCase):
     def test_compacts_saved_receiver_binary_property_store(self) -> None:
         lines = [
             "ACCU = this.n",
-            "r2 = this.n",
+            "r2 = ACCU",
             "ACCU = r0",
             "ACCU = (r2 + ACCU)",
             "this.n = ACCU",
@@ -886,6 +905,18 @@ class SimplifyLinesTests(unittest.TestCase):
         simplified = simplify_lines(lines, recover_structures=True)
 
         self.assertEqual(simplified, ["r5 = (r1.value + r2.value)"])
+
+    def test_compacts_context_binary_temp_after_redundant_tdz_load(self) -> None:
+        lines = [
+            "r2 = (value + arg0)",
+            "ACCU = value",
+            "value = r2",
+            "return value",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ["value += arg0", "return value"])
 
     def test_compacts_adjacent_binary_temp_property_store(self) -> None:
         lines = [
@@ -983,7 +1014,8 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertIn("r5 = (r1.value + r2.value)", simplified)
+        self.assertIn("r5 = (r1.value + r4.value)", simplified)
+        self.assertEqual("\n".join(simplified).count("r1.value"), 2)
         self.assertNotIn("r5 = (r4 + r4.value)", simplified)
 
     def test_single_use_inline_does_not_replace_compound_assignment_target(self) -> None:
@@ -996,6 +1028,16 @@ class SimplifyLinesTests(unittest.TestCase):
         simplified = simplify_lines(lines, recover_structures=True)
 
         self.assertEqual(simplified, ["r9 = 2", "r9 += 1", "return r9"])
+
+    def test_single_use_inline_preserves_javascript_escape_sequences(self) -> None:
+        lines = [
+            r'r0 = "\u001b"',
+            "return r0",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, [r'return "\u001b"'])
 
     def test_keeps_accu_load_that_flows_out_of_block(self) -> None:
         lines = [
@@ -1024,6 +1066,18 @@ class SimplifyLinesTests(unittest.TestCase):
         simplified = simplify_lines(lines, recover_structures=True)
 
         self.assertEqual(simplified, ["r0 += arg2", "return (r0 * 2)"])
+
+    def test_compacts_accu_binary_after_dead_saved_value(self) -> None:
+        lines = [
+            "ACCU = error",
+            "ACCU = (r0 + ACCU)",
+            "r7 = r0",
+            "r0 = ACCU",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ["r0 += error"])
 
     def test_recovers_accu_conditional_binary_return(self) -> None:
         lines = [
@@ -1072,6 +1126,74 @@ class SimplifyLinesTests(unittest.TestCase):
         simplified = simplify_lines(lines, recover_structures=True)
 
         self.assertEqual(simplified, ["return { increment, read }"])
+
+    def test_object_builder_keeps_register_needed_after_alias(self) -> None:
+        lines = [
+            "r5 = { base: 10, add: undefined }",
+            "r5.add = add",
+            "r1 = r5",
+            "ACCU = r2",
+            "ACCU = r1[ACCU]",
+            "r5 = ACCU",
+            "return r5",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual(simplified, ["return { base: 10, add }[r2]"])
+
+    def test_object_alias_does_not_duplicate_object_literal(self) -> None:
+        lines = [
+            "ACCU = { observedValue: undefined }",
+            "r3 = ACCU",
+            "r4 = r3",
+            'ACCU = DefineAccessorPropertyUnchecked(r4, "observedValue", getter, null, 0)',
+            "r0 = r4",
+            "ACCU = r3.observedValue",
+            "ACCU = r0.observedValue",
+            "return ACCU",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+        rendered = "\n".join(simplified)
+
+        self.assertEqual(rendered.count("{ observedValue: undefined }"), 1)
+        self.assertIn(
+            'DefineAccessorPropertyUnchecked(r3, "observedValue", getter, null, 0)',
+            rendered,
+        )
+        self.assertIn("r3.observedValue", rendered)
+
+    def test_property_store_does_not_repeat_effectful_accumulator(self) -> None:
+        lines = [
+            "ACCU = source.value",
+            "target.saved = ACCU",
+            "return target",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+        rendered = "\n".join(simplified)
+
+        self.assertEqual(rendered.count("source.value"), 1)
+        self.assertEqual(
+            simplified,
+            [
+                "target.saved = source.value",
+                "return target",
+            ],
+        )
+
+    def test_consecutive_equal_property_reads_remain_distinct(self) -> None:
+        lines = [
+            "ACCU = source.value",
+            "ACCU = source.value",
+            "r1 = ACCU",
+            "return r1",
+        ]
+
+        simplified = simplify_lines(lines, recover_structures=True)
+
+        self.assertEqual("\n".join(simplified).count("source.value"), 2)
 
     def test_keeps_out_of_order_object_property_initializers(self) -> None:
         lines = [
@@ -1286,7 +1408,7 @@ class SimplifyLinesTests(unittest.TestCase):
             "ACCU = 0",
             "r0 = 0",
             "ACCU = arg0.name",
-            "r1 = arg0.name",
+            "r1 = ACCU",
             "return r1",
         ]
 
@@ -1304,7 +1426,7 @@ class SimplifyLinesTests(unittest.TestCase):
 
         self.assertEqual(simplified, ["fn.call(arg0)", "return undefined"])
 
-    def test_substitutes_accu_in_keyed_property_read(self) -> None:
+    def test_preserves_keyed_property_read_order(self) -> None:
         lines = [
             "ACCU = 0",
             "ACCU = arg0[ACCU]",
@@ -1319,7 +1441,10 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertEqual(simplified, ["return (arg0[0] + arg0[arg1])"])
+        self.assertEqual(
+            simplified,
+            ["return (arg0[0] + arg0[arg1])"],
+        )
 
     def test_keeps_keyed_property_accu_when_next_condition_reads_it(self) -> None:
         lines = [
@@ -1333,8 +1458,8 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertIn("ACCU = r2[0]", simplified)
         self.assertIn("r2 = r2[0]", simplified)
+        self.assertIn("if (!(isNullish(r2))) {", simplified)
 
     def test_compacts_keyed_property_read_with_saved_key_register(self) -> None:
         lines = [

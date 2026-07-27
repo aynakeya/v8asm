@@ -61,6 +61,9 @@ class FakeContext:
     def parameter_name(self, _bytecode, index):
         return f"arg{index}"
 
+    def literal_load(self, _bytecode, item):
+        return "0" if item.mnemonic == "LdaZero" else None
+
 
 class NormalizationTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -171,6 +174,34 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(
             [item.mnemonic for item in normalized.instructions],
             ["Ldar", "Star0", "Return"],
+        )
+        self.assertEqual(len(normalized.lexical_declarations), 1)
+        declaration = normalized.lexical_declarations[0]
+        self.assertEqual((declaration.name, declaration.initializer), ("value", "arg0"))
+
+    def test_function_context_local_is_distinct_from_parameter(self) -> None:
+        scope = SimpleNamespace(
+            address=0x2000,
+            scope_type="FUNCTION_SCOPE",
+            context_slot_names={2: "value"},
+        )
+        instructions = [
+            instruction(0, "CreateFunctionContext", "[0]", "[1]"),
+            instruction(3, "PushContext", "r0"),
+            instruction(5, "LdaTheHole"),
+            instruction(6, "StaCurrentContextSlot", "[2]"),
+            instruction(8, "Ldar", "a0"),
+            instruction(10, "StaCurrentContextSlot", "[2]"),
+            instruction(12, "LdaCurrentContextSlot", "[2]"),
+            instruction(14, "Return"),
+        ]
+        normalized = normalize_source_instructions(
+            FakeContext(scope=scope), self.bytecode, instructions
+        )
+
+        self.assertEqual(
+            [item.mnemonic for item in normalized.instructions],
+            ["LdaCurrentContextSlot", "Return"],
         )
         self.assertEqual(len(normalized.lexical_declarations), 1)
         declaration = normalized.lexical_declarations[0]

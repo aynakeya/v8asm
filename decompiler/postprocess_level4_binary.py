@@ -174,6 +174,27 @@ def _compact_adjacent_binary_temp_registers(lines: List[str]) -> List[str]:
     out: List[str] = []
     i = 0
     while i < len(lines):
+        if i + 2 < len(lines):
+            s0 = lines[i].strip()
+            s1 = lines[i + 1].strip()
+            s2 = lines[i + 2].strip()
+            m_temp = re.match(
+                r"^(r\d+)\s*=\s*\(([A-Za-z_$][A-Za-z0-9_$]*)"
+                r"\s+([+*\-/%])\s+(.+)\)$",
+                s0,
+            )
+            if m_temp:
+                temp, target, operator, right = m_temp.groups()
+                if (
+                    s1 == f"ACCU = {target}"
+                    and s2 == f"{target} = {temp}"
+                    and not _register_has_later_use(lines, i + 3, temp)
+                ):
+                    indent = _extract_indent(lines[i + 2])
+                    out.append(f"{indent}{target} {operator}= {right.strip()}")
+                    i += 3
+                    continue
+
         if i + 1 < len(lines):
             s0 = lines[i].strip()
             s1 = lines[i + 1].strip()
@@ -234,6 +255,20 @@ def _compact_adjacent_binary_temp_registers(lines: List[str]) -> List[str]:
         out.append(lines[i])
         i += 1
     return out
+
+
+def _register_has_later_use(lines: List[str], start: int, register: str) -> bool:
+    for line in lines[start:]:
+        stripped = line.strip()
+        assignment = re.match(rf"^{re.escape(register)}\s*=", stripped)
+        if assignment:
+            return re.search(
+                rf"\b{re.escape(register)}\b",
+                stripped.split("=", 1)[1],
+            ) is not None
+        if re.search(rf"\b{re.escape(register)}\b", stripped):
+            return True
+    return False
 
 
 def _compact_accu_compare_if(lines: List[str]) -> List[str]:

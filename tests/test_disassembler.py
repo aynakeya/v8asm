@@ -18,9 +18,10 @@ from disassembler.disassembler import (
     parse_disassembly_file,
 )
 from disassembler.profiles import load_profiles
-from disassembler.serializer import ObjectStreamParser
+from disassembler.serializer import ObjectStreamParser, Reference
 from disassembler.snapshot import ReadOnlySnapshot
 from disassembler.structured import disassembly_to_dict
+from disassembler.structured_builder import StructuredGraphBuilder
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -165,6 +166,43 @@ def array_boilerplate_signatures(
 
 
 class OfflineDisassemblerTests(unittest.TestCase):
+    def test_structured_references_report_stable_provenance(self) -> None:
+        parsed = parse_disassembly_file(ROOT / "samples" / "main.d8.jsc")
+        builder = StructuredGraphBuilder(parsed)
+
+        serialized = builder._reference(Reference("object", object_index=0))
+        self.assertEqual(serialized["source"]["kind"], "serialized_object")
+        self.assertEqual(serialized["source"]["id"], "serialized_object:0")
+        self.assertEqual(serialized["resolution"], "serialized_object")
+        self.assertIn("type_evidence", serialized)
+
+        root = builder._reference(Reference("root", (4,)))
+        self.assertEqual(root["source"]["kind"], "root")
+        self.assertEqual(root["source"]["id"], "root:4")
+        self.assertEqual(root["resolution"], "profile_metadata")
+        self.assertEqual(root["literal"], "undefined")
+
+        offset, value = next(iter(parsed.profile.read_only_strings.items()))
+        read_only = builder._reference(Reference("read_only", (0, offset)))
+        self.assertEqual(read_only["source"]["kind"], "read_only_heap")
+        self.assertEqual(read_only["source"]["id"], f"read_only_heap:0:{offset}")
+        self.assertEqual(read_only["resolution"], "profile_metadata")
+        self.assertEqual(read_only["target_type"], "String")
+        self.assertEqual(builder.records[read_only["address"]]["value"], value)
+
+        for reference_kind, source_kind in (
+            ("startup_cache", "startup_object_cache"),
+            ("read_only_cache", "read_only_object_cache"),
+            ("shared_cache", "shared_heap_object_cache"),
+            ("attached", "attached_reference"),
+        ):
+            with self.subTest(reference_kind=reference_kind):
+                reference = builder._reference(Reference(reference_kind, (7,)))
+                self.assertEqual(reference["source"]["kind"], source_kind)
+                self.assertEqual(reference["source"]["id"], f"{source_kind}:7")
+                self.assertEqual(reference["resolution"], "unresolved")
+                self.assertNotIn("target_type", reference)
+
     def test_structured_output_preserves_addressed_object_graph(self) -> None:
         parsed = parse_disassembly_file(ROOT / "samples" / "main.d8.jsc")
         document = disassembly_to_dict(parsed)
@@ -187,11 +225,19 @@ class OfflineDisassemblerTests(unittest.TestCase):
         for address, record in objects.items():
             self.assertRegex(address, r"^0x[0-9a-f]{12}$")
             self.assertEqual(record["address"], address)
+            self.assertIn("provenance", record)
+            self.assertIn("type_evidence", record)
 
         bytecodes = [
             record for record in objects.values() if record["type"] == "BytecodeArray"
         ]
         self.assertEqual(len(bytecodes), 4)
+        self.assertTrue(
+            all(
+                record["type_evidence"]["kind"] == "bytecode_array_layout"
+                for record in bytecodes
+            )
+        )
         add = next(
             record
             for record in bytecodes

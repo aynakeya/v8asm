@@ -158,5 +158,5 @@ def _rewrite_immediate_accu_consumer(line: str, replacement: str) -> str | None:
     if "ACCU" not in rhs:
         return None
     indent = _extract_indent(line)
-    rhs = re.sub(r"\bACCU\b", replacement, rhs)
+    rhs = re.sub(r"\bACCU\b", lambda _match: replacement, rhs)
     return f"{indent}ACCU = {rhs}"

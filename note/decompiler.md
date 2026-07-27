@@ -29,6 +29,21 @@ python3 -m decompiler /tmp/input.disasm.json --linear
 `--linear` 是诊断模式，不做高层控制流和文件级后处理。`--runtime` 会附加一个轻量
 JavaScript 辅助运行时，便于尝试执行伪代码，但不保证输出等价于可直接运行的原程序。
 
+## 正确性门禁
+
+`tests/test_semantic_equivalence.py` 会对同一个 fixture 分别执行原始 JavaScript 和
+反编译结果，并比较正常返回值或异常结果。当前覆盖：
+
+- 算术和短路求值；
+- 方法 receiver、参数和 getter 的求值次数与顺序；
+- 闭包状态、slot shadowing 和多层 context depth；
+- 普通 `try/catch`；
+- return、throw、catch 与 finally completion 的组合。
+
+这些测试使用 Node `vm` 和 `--runtime` 辅助函数，只证明覆盖到的语言子集。新增 rewrite
+若可能移动调用、属性读取、异常边界或 context 访问，必须先增加能观察副作用的 fixture，
+不能只比较输出文本。
+
 ## 恢复流程
 
 当前处理管线分为五层：
@@ -98,14 +113,19 @@ snapshot，仍需给 disassembler 传入 checksum 匹配的 snapshot。若应用
 字符串数组做 push/shift/splice shuffle，静态数组只是 shuffle 前状态，不能直接把
 索引调用替换成最终明文。
 
-对混淆器解码函数，只有在数组内容、索引偏移和所有重排步骤都可静态证明时，才应
-折叠为字符串常量。否则保留函数调用，并可在后续分析中标注索引关系。
+字符串 decoder 识别、shuffle 模拟和业务含义标注不属于忠实 decompiler。它们应放在
+独立 analyzer 中消费反编译 IR 或结构化对象图。decompiler 保留原始调用和数组访问，
+不因函数形状像混淆器就替换字符串。
 
 ## Context 和闭包
 
 结构化输入会把 `SharedFunctionInfo`、`BytecodeArray` 和 `ScopeInfo` 直接关联。decompiler
 利用 `CreateClosure` 的 constant-pool 引用建立词法函数树，并用 profile 中的
 ScopeInfo layout 解析已知 context local。
+
+当前 context 模型会按显式 depth 建立逐层 ScopeInfo 对应，记录 slot 的定义函数、
+bytecode offset 和捕获来源，并在函数头输出 `Captures`。同名 slot 由所属 scope 区分，
+来源不唯一时保留稳定的 synthetic 名称。
 
 仍无法保证恢复源码中的原始变量名：
 
@@ -115,8 +135,20 @@ ScopeInfo layout 解析已知 context local。
 - 跨函数数据流不一定能在局部 CFG 中证明。
 
 此时 `context_slot(...)`、`script_context[...]` 或 `ensureDefined(...)` 是有意保留的
-低层证据，不应随意改名。后续改进应围绕明确的 lexical parent 和 slot 来源图，而不是
-仅根据使用位置命名。
+低层证据，不应随意改名，更不能仅根据使用位置命名。
+
+## 异常控制流
+
+handler table 是恢复异常语义的唯一入口，不能把 handler 区段当普通线性代码。当前实现
+支持普通 `try/catch`，以及满足完整证据链的 catch + finally completion：
+
+- 外层 handler 覆盖内层 catch 区域；
+- exception、completion token、pending message 和 result register 能对应；
+- 正常与 catch 路径都保存 return completion 后跳入同一 finalizer；
+- 尾部存在匹配的 rethrow/return dispatch。
+
+只有整套结构匹配时才输出 `try/catch/finally`。若外层在内层 try 前还有可能抛出的有效
+语句，则保留嵌套结构，避免把这些异常错误地交给 catch。
 
 ## 控制流与安全边界
 
@@ -156,12 +188,12 @@ python3 -m decompiler /tmp/atom.current.disasm.json \
   > atom.compiled.dist.decompiled.current.js
 ```
 
-2026-07-22 的这次输入产生 797 个 `BytecodeArray`，反编译输出 27,549 行、796 个
+2026-07-27 的这次输入产生 797 个 `BytecodeArray`，反编译输出 28,353 行、796 个
 `function` 声明。质量扫描结果为：
 
 ```text
 raw_goto：0
-goto_comments：44
+goto_comments：45
 unknown_comments：0
 undefined_fallbacks：0
 ```

@@ -198,6 +198,12 @@ class InstructionTranslator:
             return ident
         return f"globalThis[{name}]"
 
+    def _scope_expr(self, instr: Instruction) -> str:
+        scope = self.context.scope_for_instruction(self.bytecode, instr)
+        if scope is not None and scope.scope_type:
+            return json.dumps(scope.scope_type)
+        return json.dumps("UNKNOWN_SCOPE")
+
     def _format_context_slot(self, context: str, slot: str, depth: str) -> str:
         context_expr = self._reg_name(context)
         slot_expr = self._imm(slot, slot)
@@ -300,8 +306,7 @@ class InstructionTranslator:
         return "ACCU = arguments"
 
     def _op_CreateBlockContext(self, instr: Instruction) -> str:
-        scope = self._const_token(instr.args[0]) if instr.args else "<ScopeInfo>"
-        return f"ACCU = create_block_context({scope})"
+        return f"ACCU = create_block_context({self._scope_expr(instr)})"
 
     def _op_LdaGlobal(self, instr: Instruction) -> str:
         if not instr.args:
@@ -835,16 +840,14 @@ class InstructionTranslator:
         return f"context = {source}"
 
     def _op_CreateFunctionContext(self, instr: Instruction) -> str:
-        scope = self._const_token(instr.args[0]) if instr.args else "<ScopeInfo>"
         slots = self._imm(instr.args[1], "?") if len(instr.args) > 1 else "?"
-        return f"ACCU = create_function_context({scope}, {slots})"
+        return f"ACCU = create_function_context({self._scope_expr(instr)}, {slots})"
 
     def _op_CreateCatchContext(self, instr: Instruction) -> str:
         if not instr.args:
-            return "ACCU = create_catch_context(ACCU, <ScopeInfo>)"
+            return 'ACCU = create_catch_context(ACCU, "UNKNOWN_SCOPE")'
         exc = self._reg_name(instr.args[0])
-        scope = self._const_token(instr.args[1]) if len(instr.args) > 1 else "<ScopeInfo>"
-        return f"ACCU = create_catch_context({exc}, {scope})"
+        return f"ACCU = create_catch_context({exc}, {self._scope_expr(instr)})"
 
     def _op_TestReferenceEqual(self, instr: Instruction) -> str:
         if not instr.args:

@@ -175,7 +175,7 @@ def _replace_accu_reads_until_store(lines: List[str], value: str) -> List[str] |
         stripped = line.strip()
         if re.match(r"^ACCU\s*=", stripped):
             return None
-        out.append(re.sub(r"\bACCU\b", value, line))
+        out.append(re.sub(r"\bACCU\b", lambda _match: value, line))
     return out
 
 
