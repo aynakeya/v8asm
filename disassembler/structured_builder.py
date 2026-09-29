@@ -129,6 +129,7 @@ class StructuredGraphBuilder:
         metadata: dict[str, Any] = {
             "v8_version": profile.version,
             "runtime_variant": runtime_variant,
+            "literal_flags": profile.literal_flags,
             "tagged_size": self.parsed.tagged_size,
             "address_kind": "synthetic_serializer_object",
             "serialized_object_count": len(self.parsed.objects),
@@ -265,6 +266,9 @@ class StructuredGraphBuilder:
                 else None
             ),
         )
+        scope = self.records.get(record["scope_info_address"], {})
+        if "function_kind" in scope:
+            record["function_kind"] = scope["function_kind"]
 
     def _value(self, value: int | Reference) -> dict[str, Any]:
         if isinstance(value, int):
@@ -358,6 +362,31 @@ class StructuredGraphBuilder:
                         "reference_kind": reference.kind,
                     },
                 )
+        elif (
+            root_name is not None
+            and root_name.replace("_", "").lower() in {
+                "emptyobjectboilerplatedescription", "emptyfixedarray"
+            }
+            and address is not None
+        ):
+            is_array = root_name.replace("_", "").lower() == "emptyfixedarray"
+            target_type = "FixedArray" if is_array else "ObjectBoilerplateDescription"
+            contents = {"length": 0, "elements": []} if is_array else {
+                "capacity": 0, "backing_store_size": 0, "flags": 0, "entries": []
+            }
+            result.update(
+                target_type=target_type,
+                type_evidence={"kind": "profile_root_name"},
+                resolution="profile_metadata",
+                description=f"<{target_type}>",
+            )
+            self._put(address, {
+                "type": target_type,
+                "type_evidence": {"kind": "profile_root_name"},
+                **contents,
+                "external": True, "provenance": result["source"],
+                "reference_kind": reference.kind,
+            })
         elif address is not None:
             target_type = "RootObject" if reference.kind == "root" else "ReadOnlyObject"
             description = root_name or target_type

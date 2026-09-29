@@ -1675,6 +1675,11 @@
     "CreateIterResultObject",
     "CreateAsyncFromSyncIterator"
   ],
+  "literal_flags": {
+    "define_keyed_dont_enum": 1,
+    "define_keyed_set_function_name": 2,
+    "object_literal_null_prototype": 16
+  },
   "object_boilerplate_layout": {
     "backing_store_size_in_tail": true,
     "backing_store_size_slot": null,
@@ -3966,15 +3971,60 @@
   },
   "scope_info_layout": {
     "context_extension_slot_bit": 26,
+    "empty_scope_bit": 29,
     "flags_encoding": "smi",
+    "function_kind_mask": 31,
+    "function_kind_names": [
+      "NormalFunction",
+      "Module",
+      "AsyncModule",
+      "BaseConstructor",
+      "DefaultBaseConstructor",
+      "DefaultDerivedConstructor",
+      "DerivedConstructor",
+      "GetterFunction",
+      "StaticGetterFunction",
+      "SetterFunction",
+      "StaticSetterFunction",
+      "ArrowFunction",
+      "AsyncArrowFunction",
+      "AsyncFunction",
+      "AsyncConciseMethod",
+      "StaticAsyncConciseMethod",
+      "AsyncConciseGeneratorMethod",
+      "StaticAsyncConciseGeneratorMethod",
+      "AsyncGeneratorFunction",
+      "GeneratorFunction",
+      "ConciseGeneratorMethod",
+      "StaticConciseGeneratorMethod",
+      "ConciseMethod",
+      "StaticConciseMethod",
+      "ClassMembersInitializerFunction",
+      "ClassStaticInitializerFunction",
+      "Invalid"
+    ],
+    "function_kind_shift": 17,
     "function_variable_mask": 3,
     "function_variable_shift": 12,
     "inferred_function_name_bit": 14,
+    "local_initialization_mask": 1,
+    "local_initialization_shift": 4,
     "max_inlined_local_names": 75,
     "min_context_extended_slots": 3,
     "min_context_slots": 2,
     "module_count_before_locals": false,
     "module_scope_value": 3,
+    "needs_initialization_value": 0,
+    "outer_scope_info_bit": 22,
+    "position_info_tail_nonempty_scopes": [
+      0
+    ],
+    "position_info_tail_scopes": [
+      2,
+      4,
+      1,
+      3
+    ],
     "saved_class_variable_bit": 10,
     "scope_type_mask": 15,
     "scope_type_names": [

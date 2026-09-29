@@ -9,23 +9,23 @@
 人类阅读使用文本输出：
 
 ```bash
-python3 -m disassembler input.jsc > /tmp/input.disasm.txt
+uv run python -m disassembler input.jsc > /tmp/input.disasm.txt
 ```
 
 传给 Python decompiler 时优先使用结构化 JSON：
 
 ```bash
-python3 -m disassembler input.jsc \
+uv run python -m disassembler input.jsc \
   --format json > /tmp/input.disasm.json
 
-python3 -m decompiler /tmp/input.disasm.json
+uv run python -m decompiler /tmp/input.disasm.json
 ```
 
 自定义 Electron 或 Node runtime 的版本哈希可能不在标准 profile 中。已经确认其对象
 布局与某个精确 V8 tag 一致时，可以显式指定版本和匹配的 startup snapshot：
 
 ```bash
-python3 -m disassembler input.jsc \
+uv run python -m disassembler input.jsc \
   --version 13.4.114.21 \
   --snapshot-blob v8_context_snapshot.bin \
   --format json > /tmp/input.disasm.json
@@ -55,7 +55,7 @@ profile 位于 `disassembler/profiles/`。生成器通过 `git show <tag>:<path>
 官方 V8 tag 中的源码，不要求切换当前 V8 checkout：
 
 ```bash
-python3 -m disassembler.generate_profiles \
+uv run python -m disassembler.generate_profiles \
   --v8-repo /home/aynakeya/workspace/tmp/v8test/v8 \
   --output-dir disassembler/profiles
 ```
@@ -68,6 +68,7 @@ python3 -m disassembler.generate_profiles \
 - runtime、intrinsic 和 root 名称；
 - static-root map、静态字符串及 snapshot space 信息；
 - header 是否包含 read-only snapshot checksum。
+- 对象字面量和计算属性定义的语义 flag 掩码。
 
 以下少量输入仍由生成器代码维护，而不是从单个源码宏中自动推导：
 
@@ -98,7 +99,7 @@ profile 存在只表示解析器掌握该 tag 的静态布局，不等于所有 
 runtime 的确切 variant 时才手动覆盖：
 
 ```bash
-python3 -m disassembler input.jsc \
+uv run python -m disassembler input.jsc \
   --version 13.2.152.41 \
   --runtime-variant leaptiering
 ```
@@ -112,6 +113,9 @@ python3 -m disassembler input.jsc \
 
 - `metadata.v8_version` 明确记录实际使用的 profile 版本；
 - `metadata.runtime_variant` 记录 runtime-ID 表；
+- `metadata.literal_flags` 保存源码生成的字面量 flag，供 decompiler 区分跨版本语义；
+- `ScopeInfo` / `SharedFunctionInfo.function_kind` 保存从源码布局解码的函数类型，区分普通函数、访问器与对象方法；
+- `ScopeInfo.context_locals[].needs_initialization` 和 `outer_scope_info` 保留初始化状态与外层词法引用；
 - `metadata.header` 保存动态识别的 cache header；
 - `objects` 是按稳定逻辑地址索引的对象图；
 - `object_order` 保留确定性的输出顺序；
@@ -125,7 +129,7 @@ python3 -m disassembler input.jsc \
 
 逻辑地址不是 V8 进程中的 heap pointer。消费者必须跟随 `address` 引用，不能根据地址
 前缀推导对象类型。字段统一使用 `under_score` 命名。完整兼容规则见
-`disassembler/SCHEMA.md`。
+[JSON schema](disassembly-schema.md)。
 
 当前 profile 没有完整的 V8 `InstanceType` 数值表。解析器只输出已有证据支持的类型；
 对 object cache、attached reference 或 map 未知的对象保留 `unresolved`，不会从 object
@@ -190,14 +194,14 @@ runtime。V8 接受输入后脚本会输出 normalized cache；只有该 cache �
 
 若应用禁用 `NODE_OPTIONS`，可在 Electron 主进程 `--inspect-brk` 暂停后通过调试器
 加载脚本，或在复制出的应用 loader 中、`new vm.Script(...)` 之前显式 `require`。
-具体 Windows 命令、ASAR 完整性限制和成功判据见 `disassembler/README.md`。
+具体 Windows 命令、ASAR 完整性限制和成功判据见[缓存捕获](capture-cached-data.md)。
 
 ## 直接解析原始负载
 
 已从匹配 runtime 获得无 header serializer 数据时，使用：
 
 ```bash
-python3 -m disassembler 0000.payload.bin \
+uv run python -m disassembler 0000.payload.bin \
   --version 13.2.152.41 \
   --payload-offset 0 \
   --format json > /tmp/input.disasm.json
@@ -206,7 +210,7 @@ python3 -m disassembler 0000.payload.bin \
 payload 位于更大容器中的已知偏移也可以显式给出：
 
 ```bash
-python3 -m disassembler wrapped.bin \
+uv run python -m disassembler wrapped.bin \
   --version 13.2.152.41 \
   --payload-offset 0x20
 ```

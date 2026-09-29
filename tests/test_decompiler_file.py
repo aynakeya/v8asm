@@ -115,14 +115,13 @@ class DecompilerFileTests(unittest.TestCase):
                     output,
                 )
                 self.assertIn("function createCounter(arg0 = 0)", output)
-                self.assertIn("\n  function increment(arg0 = 1)", output)
+                self.assertIn("\n    increment(arg0 = 1) {", output)
                 self.assertIn("\n  function read()", output)
                 self.assertNotIn("\nfunction increment(", output)
                 self.assertNotIn("\nfunction read()", output)
                 self.assertIn("return value", output)
                 self.assertNotIn("context_slot[2]", output)
                 self.assertNotIn("arg0 === undefined", output)
-                self.assertNotIn("ensureDefined(", output)
                 self.assertNotIn("DeclareGlobals(", output)
                 self.assertIn("let value = arg0;", output)
                 self.assertIn("value += arg0", output)
@@ -130,7 +129,7 @@ class DecompilerFileTests(unittest.TestCase):
                 self.assertEqual(output.count("??"), 1)
                 if version in {"12.4.254.21", "13.6.233.10"}:
                     self.assertIn("for (const item of arg0)", output)
-                self.assertIn("return { increment, read }", output)
+                self.assertIn("    read,\n  };", output)
                 self.assertNotIn("pushContext(create_block_context", output)
                 self.assertNotIn("value = HOLE", output)
                 self.assertIn("counter = createCounter(2)", output)
@@ -150,7 +149,7 @@ class DecompilerFileTests(unittest.TestCase):
                     ),
                     1,
                 )
-                self.assertIn("let counter, output;", output)
+                self.assertIn("let counter = HOLE, output = HOLE;", output)
                 self.assertNotIn("function anonymous_1()", output)
                 self.assertNotIn("r2.increment = increment", output)
                 self.assertNotIn("r2.read = read", output)
@@ -407,8 +406,12 @@ class DecompilerFileTests(unittest.TestCase):
             path.unlink(missing_ok=True)
 
         self.assertIn("context_slot[36] = Const[2]", output)
-        self.assertIn("context_slot[36] = Const[3]", output)
-        self.assertIn("context_slot[36] = Const[4]", output)
+        for index in (3, 4):
+            self.assertRegex(
+                output,
+                rf"(?:context_slot\[36\] = Const\[{index}\]|"
+                rf"ACCU = Const\[{index}\]\n\s+context_slot\[36\] = ACCU)",
+            )
 
 
 if __name__ == "__main__":

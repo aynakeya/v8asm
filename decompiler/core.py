@@ -11,8 +11,10 @@ from .normalization import normalize_source_instructions
 from .objects import V8HeapObject
 from .objects.bytecode import V8BytecodeArray
 from .parser import parse_objects
-from .postprocess import simplify_lines
-from .postprocess_file import postprocess_source_file
+from .recovery.propagation import simplify_lines
+from .recovery.file import postprocess_source_file
+from .recovery.destructuring import recover_object_rest
+from .recovery.literals import recover_object_literals
 from .runtime import runtime_prelude
 from .structured import load_structured_objects
 from .structurer import decompile_to_statements
@@ -58,13 +60,15 @@ def _sanitize_identifier(name: str, fallback: str) -> str:
     return cleaned
 
 
-def _format_register_locals(bytecode: V8BytecodeArray) -> List[str]:
-    lines = ["  let ACCU = undefined;"]
-    register_count = bytecode.register_count or 0
-    if register_count <= 0:
-        return lines
-    registers = ", ".join(f"r{index}" for index in range(register_count))
-    lines.append(f"  let {registers};")
+def _format_register_locals(bytecode: V8BytecodeArray, body: List[str]) -> List[str]:
+    used = set(re.findall(r"\b(?:ACCU|r\d+)\b", "\n".join(body)))
+    lines = ["  let ACCU;"] if "ACCU" in used else []
+    registers = ", ".join(
+        f"r{index}" for index in range(bytecode.register_count or 0)
+        if f"r{index}" in used
+    )
+    if registers:
+        lines.append(f"  let {registers};")
     return lines
 
 
@@ -200,13 +204,21 @@ def decompile_bytecode(
         )
         body_lines = _render_linear(translator, original_instructions)
 
+    nested_functions = list(nested_functions or ())
+    if not linear and not notes:
+        kinds = {
+            context.get_function_name(function): function.func_kind
+            for child in context.child_functions(bytecode)
+            if (function := context.get_function_for_bytecode(child)) is not None
+        }
+        body_lines = recover_object_rest(body_lines)
+        body_lines, nested_functions = recover_object_literals(body_lines, nested_functions, kinds)
+
     body: List[str] = [metadata]
     body.extend(_format_captures(context, bytecode))
     if as_script:
-        context_names = context.script_context_names(bytecode)
-        if context_names:
-            body.append(f"  let {', '.join(context_names)};")
-    body.extend(_format_register_locals(bytecode))
+        lexical_declarations = context.script_context_declarations(bytecode) + lexical_declarations
+    body.extend(_format_register_locals(bytecode, body_lines))
     if lexical_declarations:
         declarations = ", ".join(
             (
@@ -218,7 +230,8 @@ def decompile_bytecode(
         )
         body.append(f"  let {declarations};")
     body.extend(notes)
-    body.extend(_format_constant_pool(context, bytecode))
+    if linear or notes:
+        body.extend(_format_constant_pool(context, bytecode))
     for nested in nested_functions or ():
         body.append("")
         body.extend(_indent_lines(nested.splitlines()))
@@ -275,14 +288,14 @@ def decompile_objects(
     context = DecompilerContext(object_list)
 
     outputs: List[str] = []
-    if runtime:
-        outputs.append(runtime_prelude().rstrip())
     for obj in object_list:
         if isinstance(obj, V8BytecodeArray) and not context.is_nested_function(obj):
             outputs.append(_decompile_function_tree(context, obj, linear))
     output = "\n\n".join(outputs)
     if not linear:
         output = postprocess_source_file(output)
+    if runtime:
+        output = runtime_prelude().rstrip() + "\n\n" + output
     return output
 
 

@@ -198,7 +198,7 @@ payload_length：379616
 RO checksum 都与 `.jsc` 对应。Python 路径不初始化 V8，可直接解析：
 
 ```bash
-python3 -m disassembler example2/atom.compiled.dist.jsc \
+uv run python -m disassembler example2/atom.compiled.dist.jsc \
   --version 13.4.114.21 \
   --snapshot-blob example2/v8_context_snapshot.bin \
   --format json > /tmp/atom.disasm.json

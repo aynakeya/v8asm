@@ -152,13 +152,20 @@ def _context_load_name(
         slot = _index(instruction.args[0])
         depth = 0
     elif instruction.mnemonic in depth_loads and len(instruction.args) >= 3:
+        if instruction.args[0].strip() not in {"<context>", "context"}:
+            return None
         slot = _index(instruction.args[1])
         depth = _index(instruction.args[2])
     else:
         return None
     if slot is None or depth is None:
         return None
-    return context.context_slot_name(bytecode, slot, depth)
+    binding = context.context_slot_binding(bytecode, slot, depth)
+    if binding is None or binding.name not in context.prologue_initialized_names(
+        binding.defining_bytecode_address
+    ):
+        return None
+    return binding.name
 
 
 def _is_redundant_hole_check(
@@ -357,7 +364,7 @@ def _remove_parameter_body_context(
         body_start += 2
 
     declarations = tuple(
-        LexicalDeclaration(name, declaration_initializers.get(slot))
+        LexicalDeclaration(name, declaration_initializers.get(slot, "HOLE"))
         for slot, name in sorted(declaration_names.items())
     )
     return (
@@ -417,6 +424,9 @@ def _remove_function_context_prologue(
     index = create_index + 2
     while index + 1 < len(instructions):
         hole, store = instructions[index : index + 2]
+        if hole.mnemonic == "CreateClosure" and _star_register(store) is not None:
+            index += 2
+            continue
         if (
             hole.mnemonic != "LdaTheHole"
             or store.mnemonic != "StaCurrentContextSlot"
@@ -431,6 +441,7 @@ def _remove_function_context_prologue(
         index += 2
 
     direct_parameter_slots: set[int] = set()
+    function_slots: set[int] = set()
     initializers: dict[int, str] = {}
     scan = index
     while scan < len(instructions):
@@ -450,6 +461,17 @@ def _remove_function_context_prologue(
             or (slot := _index(store.args[0])) not in expected_slots
         ):
             break
+        if load.mnemonic == "CreateClosure" and slot not in hole_slots:
+            function = context.constant_object_for_instruction(bytecode, load)
+            if (
+                not isinstance(function, V8SharedFunctionInfo)
+                or context.get_function_name(function) != context.scope_slot_name(scope, slot)
+            ):
+                break
+            function_slots.add(slot)
+            removed.update((scan, scan + 1))
+            scan += 2
+            continue
         initializer = _simple_context_initializer(context, bytecode, load)
         if initializer is None:
             break
@@ -466,14 +488,14 @@ def _remove_function_context_prologue(
         removed.update((scan, scan + 1))
         scan += 2
 
-    if expected_slots != hole_slots | direct_parameter_slots:
+    if expected_slots != hole_slots | direct_parameter_slots | function_slots:
         return list(instructions), ()
 
     declarations = tuple(
         LexicalDeclaration(
             context.scope_slot_name(scope, slot)
             or f"context_{scope.address:012x}_{slot}",
-            initializers.get(slot),
+            initializers.get(slot, "HOLE"),
         )
         for slot in sorted(hole_slots)
     )
@@ -484,6 +506,24 @@ def _remove_function_context_prologue(
             if instruction_index not in removed
         ],
         declarations,
+    )
+
+
+def prologue_initialized_names(
+    context: DecompilerContext, bytecode: V8BytecodeArray
+) -> frozenset[str]:
+    instructions = [Instruction.from_codeline(raw) for raw in bytecode.instructions]
+    parameters = context.parameter_initializers(bytecode)
+    rewritten = _rewrite_default_parameter_initializers(instructions, parameters)
+    rewritten, function_declarations = _remove_function_context_prologue(
+        context, bytecode, rewritten
+    )
+    _, body_declarations = _remove_parameter_body_context(
+        context, bytecode, rewritten, parameters
+    )
+    return frozenset(
+        declaration.name for declaration in (*function_declarations, *body_declarations)
+        if declaration.initializer is not None and declaration.initializer != "HOLE"
     )
 
 
@@ -509,6 +549,51 @@ def normalize_source_instructions(
         context, bytecode, without_context
     )
     return NormalizedInstructions(
-        normalized,
+        _recover_global_typeof(context, bytecode, normalized),
         function_declarations + declarations,
     )
+
+
+def _recover_global_typeof(
+    context: DecompilerContext,
+    bytecode: V8BytecodeArray,
+    instructions: Sequence[Instruction],
+) -> List[Instruction]:
+    if not any(item.mnemonic == "LdaGlobalInsideTypeof" for item in instructions):
+        return list(instructions)
+    boundaries = {parse_jump_target(item) for item in instructions}
+    for handler in bytecode.handler_entries:
+        boundaries.update((handler.start, handler.end, handler.handler))
+    for item in instructions:
+        if item.mnemonic.startswith("SwitchOn"):
+            operand = {"SwitchOnSmiNoFeedback": 0, "SwitchOnGeneratorState": 1}.get(item.mnemonic)
+            if operand is None or len(item.args) <= operand + 1:
+                raise ValueError("cannot prove global typeof entry boundaries")
+            start, count = _index(item.args[operand]), _index(item.args[operand + 1])
+            pool = context.constant_pool_entries(bytecode)
+            if start is None or count is None or min(start, count) < 0 or start + count > len(pool):
+                raise ValueError("global typeof has an unresolved switch predecessor")
+            for entry in pool[start:start + count]:
+                if not isinstance(entry.raw, V8Smi):
+                    raise ValueError("global typeof has an unresolved switch target")
+                boundaries.add(item.offset + entry.raw.value)
+    output: List[Instruction] = []
+    index = 0
+    while index < len(instructions):
+        load = instructions[index]
+        if load.mnemonic != "LdaGlobalInsideTypeof":
+            output.append(load)
+            index += 1
+            continue
+        test = instructions[index + 1] if index + 1 < len(instructions) else None
+        if (test is None or test.mnemonic not in {"TypeOf", "TestTypeOf"}
+            or test.offset in boundaries):
+            raise ValueError("global typeof is not a single-entry instruction pair")
+        # Reading an unresolvable global is allowed only as an operand of typeof.
+        # Preserve that Reference operation instead of first loading its value.
+        output.append(Instruction(
+            load.offset, "TypeOfGlobal" if test.mnemonic == "TypeOf" else "TestTypeOfGlobal",
+            [load.args[0], *test.args], load.raw_line,
+        ))
+        index += 2
+    return output

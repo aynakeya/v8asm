@@ -166,6 +166,10 @@ def _populate_object(
                 "SharedFunctionInfo.name_value must be a string or null"
             )
         obj.name_value = name_value
+        kind = record.get("function_kind")
+        if kind is not None and not isinstance(kind, str):
+            raise StructuredDisassemblyError("SharedFunctionInfo.function_kind must be a string")
+        obj.func_kind = kind
         obj.formal_parameter_count = _integer(record, "formal_parameter_count")
         bytecode_address = record.get("bytecode_address")
         if bytecode_address is not None:
@@ -212,6 +216,11 @@ def _populate_object(
         obj.scope_type = scope_type
         obj.context_local_count = _integer(record, "context_local_count")
         obj.context_header_length = _integer(record, "context_header_length")
+        outer_scope = record.get("outer_scope_info")
+        if outer_scope is not None:
+            decoded_outer = _value(outer_scope)
+            if isinstance(decoded_outer, V8Address):
+                obj.outer_scope_info = decoded_outer
         locals_ = record.get("context_locals", [])
         if not isinstance(locals_, list):
             raise StructuredDisassemblyError("ScopeInfo.context_locals must be a list")
@@ -222,6 +231,11 @@ def _populate_object(
             decoded = _value(name) if name is not None else "<unknown>"
             obj.context_slots.append(decoded)
             obj.context_slot_names[_integer(local, "context_slot")] = decoded
+            initialization = local.get("needs_initialization")
+            if initialization is not None:
+                if not isinstance(initialization, bool):
+                    raise StructuredDisassemblyError("ScopeInfo local needs_initialization must be a boolean")
+                obj.context_slot_initialization[_integer(local, "context_slot")] = initialization
 
 
 def load_structured_objects(document: Any) -> list[V8HeapObject]:
@@ -243,6 +257,22 @@ def load_structured_objects(document: Any) -> list[V8HeapObject]:
             "object_order must contain every object address exactly once"
         )
 
+    metadata = document.get("metadata", {})
+    if not isinstance(metadata, dict):
+        raise StructuredDisassemblyError("metadata must be an object")
+    literal_flags = metadata.get("literal_flags", {})
+    if not isinstance(literal_flags, dict) or not all(
+        isinstance(key, str) and isinstance(value, int) and value >= 0
+        for key, value in literal_flags.items()
+    ):
+        raise StructuredDisassemblyError("literal_flags must contain non-negative integers")
+    if literal_flags and not {
+        "define_keyed_set_function_name",
+        "define_keyed_dont_enum",
+        "object_literal_null_prototype",
+    } <= literal_flags.keys():
+        raise StructuredDisassemblyError("literal_flags is missing required masks")
+
     objects: list[V8HeapObject] = []
     for key in order:
         if not isinstance(key, str):
@@ -257,5 +287,7 @@ def load_structured_objects(document: Any) -> list[V8HeapObject]:
             raise StructuredDisassemblyError(f"object {key} has no type")
         obj = parse_object(_address(key, "object address"), object_type, [])
         _populate_object(obj, record, records)
+        if isinstance(obj, (V8BytecodeArray, V8ObjectBoilerplateDescription)):
+            obj.literal_flags = literal_flags
         objects.append(obj)
     return objects

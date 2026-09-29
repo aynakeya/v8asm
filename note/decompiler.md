@@ -8,12 +8,12 @@ Python decompiler 的目标是把结构化 V8 bytecode 恢复成便于审计的 
 推荐输入为 disassembler 生成的结构化 JSON：
 
 ```bash
-python3 -m disassembler input.jsc \
+uv run python -m disassembler input.jsc \
   --version <精确版本> \
   --snapshot-blob <匹配的-snapshot> \
   --format json > /tmp/input.disasm.json
 
-python3 -m decompiler /tmp/input.disasm.json \
+uv run python -m decompiler /tmp/input.disasm.json \
   > /tmp/input.decompiled.js
 ```
 
@@ -23,7 +23,7 @@ level 1、2、3 只是开发过程中的中间状态，不再构成公开能力�
 需要逐条核对 bytecode 与 translator 输出时使用：
 
 ```bash
-python3 -m decompiler /tmp/input.disasm.json --linear
+uv run python -m decompiler /tmp/input.disasm.json --linear
 ```
 
 `--linear` 是诊断模式，不做高层控制流和文件级后处理。`--runtime` 会附加一个轻量
@@ -39,10 +39,29 @@ JavaScript 辅助运行时，便于尝试执行伪代码，但不保证输出等
 - 闭包状态、slot shadowing 和多层 context depth；
 - 普通 `try/catch`；
 - return、throw、catch 与 finally completion 的组合。
+- 可选链的计算属性键、getter、可选方法调用与 nullish fallback 的执行顺序；
+- 默认参数、rest/spread、`arguments.length` 和 unmapped arguments 与形参的独立性。
+- 对象解构/rest/spread 的 getter 顺序、Symbol 保留/排除、计算属性转换和函数命名；
+- `__proto__` 自有数据属性与真正的 null prototype 的区分。
+- 闭包、寄存器局部与脚本级绑定的 TDZ，显式初始化为 `undefined` 的区别；
+- `typeof` 未定义全局变量不抛错，但属性 getter 自己抛出的异常必须保留；
+- Number/BigInt 的前后置自增自减、数值转换顺序、负零和复合赋值结果；
+- 严格与非严格 `delete`，包括计算键、Symbol、不可配置属性和 Proxy trap。
 
 这些测试使用 Node `vm` 和 `--runtime` 辅助函数，只证明覆盖到的语言子集。新增 rewrite
 若可能移动调用、属性读取、异常边界或 context 访问，必须先增加能观察副作用的 fixture，
 不能只比较输出文本。
+
+特性清单、fixture 生成方法和待补项目见
+[语义 fixture 说明](semantic-fixtures.md)。计算属性值同时存入寄存器与
+ACCU 时必须复用已读取的值，不能重复调用 key 表达式或 getter。
+`CreateUnmappedArguments` 使用严格模式 helper 创建真正的独立 arguments 对象，
+不能简单替换为数组，也不能复用可能与形参联动的非严格模式 arguments。
+
+## 外部代码
+
+不合入 username1419/v8asm 的 class rewrite。后续 class 恢复应使用 SFI、属性元数据
+和作用域证据，不能通过方法名后缀或文本位置猜测；属性读取与调用必须保持独立语义。
 
 ## 恢复流程
 
@@ -54,8 +73,20 @@ JavaScript 辅助运行时，便于尝试执行伪代码，但不保证输出等
 4. 把 opcode 翻译成带寄存器和 `ACCU` 的保守伪代码；
 5. 在函数内和文件级执行有边界的表达式、调用、对象、数组和闭包后处理。
 
-仓库中仍有 `postprocess_level4*.py` 这类历史文件名。它们只是内部模块名，不表示 CLI
-仍存在多个 level。
+源码恢复规则统一放在 `decompiler/recovery/`，不再保留带数字 level 的内部模块或兼容入口：
+
+- `propagation.py`：局部寄存器别名传播；
+- `pipeline.py`：按顺序组合控制流、表达式和局部清理规则；
+- `calls.py`、`objects.py`、`arrays.py` 等：各自负责一种可证明的指令形态；
+- `expressions.py`：相邻 ACCU 表达式合并和死结果清理，保留调用与 getter 的副作用；
+- `common.py`：共享标识符识别和局部存活检查；分支、未恢复的 jump/switch 是传播边界；
+- `destructuring.py`：完整匹配 null 检查、逐项读取和 rest 排除列表；
+- `literals.py`：在单个父函数内恢复对象、getter/setter 和计算属性方法；
+- `file.py`：文件级名称整理，不负责跨函数拼接对象方法。
+
+`core.py` 只编排对象读取、单函数恢复和函数树输出。恢复嵌套方法时传入该父函数实际的
+子函数与类型信息，不在整个输出文件中搜索同名函数。默认输出不重复打印整份常量池，
+只声明仍然使用的临时寄存器；`--linear` 保留逐指令诊断和常量池信息。
 
 ## 当前可恢复内容
 
@@ -72,6 +103,48 @@ JavaScript 辅助运行时，便于尝试执行伪代码，但不保证输出等
 
 这些都是模式受限的语义恢复，不是通用 JavaScript 反编译证明。每个 rewrite 都应有
 正向测试和拒绝误折叠的反向测试。
+
+## 对象解构与复制
+
+`CloneObject` 恢复为原生对象 spread；null-prototype 分支由 profile 中的 flag 决定。
+不含 spread 的 `CreateObjectLiteral` 同样读取 null-prototype flag；共享空 boilerplate
+自身的零 flag 不能覆盖指令的创建 flag。嵌套对象则读取各自 boilerplate 的 flag。
+rest/copy helper 只复制自有、可枚举的字符串与 Symbol 属性，按原顺序读取 getter。
+排除属性在读取其值之前过滤，目标用数据属性定义，避免 `__proto__` setter 改变原型。
+
+`ToName` 根据真实 operand 形态区分旧版寄存器输出和新版 ACCU 输出，属性键转换交给
+JavaScript 的计算属性语义。计算属性的函数命名和可枚举 flag 来自精确 V8 源码；
+缺少 metadata 的文本输入保留低层调用，不根据大版本或方法名猜测。
+
+完整匹配时可以直接输出原生 JavaScript，例如：
+
+```javascript
+r2 = {
+  get alphaValue() { return mark(3); },
+  [r0]: 7,
+  ["__proto__"]: 13,
+};
+;({ [r3]: r4, [r1]: r5, ...r6 } = r2);
+r7 = { ...r2, betaValue: mark(17), extraValue: 19 };
+```
+
+解构前的分号防止前一条表达式因 JavaScript 自动分号插入规则而变成函数调用。只有
+排除键、求值顺序和临时值存活范围都匹配时才折叠；键仍有其他用途则保留 `ToName`。
+对象构造不能跨越未知语句或对象逃逸，也不能重复求值键或 getter。
+
+`DefineNamedOwnProperty` / `DefineKeyedOwnProperty` 与普通属性赋值分开处理。前者
+必须定义自有数据属性，不能错误触发原型链上的 setter；未能折叠时保留
+`define_literal_property`。`["__proto__"]` 也不能输出为改变原型的 `__proto__: ...`。
+
+getter/setter 和 concise method 的类型从 `ScopeInfo` 标志解码；位移、掩码和枚举
+顺序均由所选 V8 tag 的源码生成。只内联该父函数内单次引用、没有递归或兄弟函数引用的
+已知类型函数；普通函数不能为了外观改成不可构造的方法。缺失类型信息时不猜测。
+
+`object-rest-spread` 的完整恢复结果可在没有 `--runtime` 的情况下直接执行，测试同时
+检查其副作用和结果。这个结论只针对该已覆盖样例，不代表任意 `.jsc` 都能恢复成可执行
+源码。临时变量的原始名字若已丢失，仍保留 `rN`，不根据用途编造名称。
+
+这不表示所有对象相关指令、Proxy trap 或异常路径都已完成，具体覆盖见 fixture 清单。
 
 ## 方法调用折叠
 
@@ -108,6 +181,10 @@ decompiler 能消费结构化对象图中的 `FixedArray` 和 `TrustedFixedArray
 元素用于 constant pool、函数声明数组和 literal 恢复。对应 standalone 回归测试不
 依赖原生 `v8asm` 输出。
 
+profile 明确命名的 `EmptyFixedArray` 和 `EmptyObjectBoilerplateDescription` 会作为
+已知空对象解码，而不是未解析的 root 占位符；这也支持 `{ submenu: [] }` 等嵌套字面量。
+每次创建的 JS 数组仍是独立对象，不能把共享的 V8 boilerplate 当作共享的运行时数组。
+
 但“数组对象已恢复”和“数组中每个字符串都可见”是两件事。元素若指向 read-only
 snapshot，仍需给 disassembler 传入 checksum 匹配的 snapshot。若应用启动时还会对
 字符串数组做 push/shift/splice shuffle，静态数组只是 shuffle 前状态，不能直接把
@@ -134,8 +211,42 @@ bytecode offset 和捕获来源，并在函数头输出 `Captures`。同名 slot
 - 外层 context 可能来自 snapshot 或未支持对象；
 - 跨函数数据流不一定能在局部 CFG 中证明。
 
-此时 `context_slot(...)`、`script_context[...]` 或 `ensureDefined(...)` 是有意保留的
+此时 `context_slot(...)`、`script_context[...]` 或 `checked_lexical(...)` 是有意保留的
 低层证据，不应随意改名，更不能仅根据使用位置命名。
+
+`ScopeInfo` 还提供变量的 `needs_initialization` 和 `outer_scope_info` 引用。位域和
+可变尾部布局均从精确源码生成；旧版可选 PositionInfo 与新版固定头部不能混用。
+没有 `CreateClosure` 父边的全局函数可以沿明确的外层引用解析脚本绑定，但不能因此
+把它改成嵌套函数声明。
+
+未初始化的 lexical binding 保持 `HOLE`，读取时由
+`checked_lexical(value, name)` 检查实际值并抛出 ReferenceError。
+不能仅因为 slot 名称与检查字符串相同就删除 TDZ 检查，也不能把 `HOLE` 当成
+`undefined`。只有简单函数入口初始化已被证明时才省略冗余检查。
+旧 JSON 未提供脚本变量初始化状态时保留 `unresolved_initialization`，不猜默认值。
+
+全局 `typeof` 必须保留对 Reference 的特殊处理：相邻的
+`LdaGlobalInsideTypeof` 与 `TypeOf` / `TestTypeOf` 只有在单入口且不跨 handler 边界时
+才合并。普通 jump、switch 常量表和 generator dispatch 都参与入口检查；不通过
+捕获 ReferenceError 模拟，因为这会误吞用户 getter 抛出的异常。
+
+目前的 context 模型仍不是逐指令的作用域状态机。多个 block/catch scope、循环每轮
+重新绑定和 `PushContext` / `PopContext` 分支合流尚需专门验证，不能把已有闭包 fixture
+的通过扩大解释成任意作用域结构都正确。
+
+## 数值与删除
+
+`ToNumeric` 不能替换为 `Number`：它保留 BigInt，并且只执行一次对象到原始值转换。
+当前 helper 按 number hint 处理 `Symbol.toPrimitive`，否则依次尝试 `valueOf` 和
+`toString`；`Inc` / `Dec` 使用原生 `++` / `--`，不能替换为可能拼接字符串的 `+ 1`，
+也不能给 BigInt 加 Number 类型的 `1`。
+
+表达式合并必须同时保留更新后的 ACCU 和赋值目标。临时结果仍被使用时不删除；
+复合赋值使缓存的别名失效，不能把 `ACCU += 2` 的左值替换成之前读入的寄存器或常量。
+
+`DeleteProperty*` 的 register operand 是对象，ACCU 是属性键。非严格模式恢复为
+原生 `delete`；严格模式通过 `delete_property_strict` 保留删除失败时的 TypeError，
+不能使用会改变原始值对象处理方式的 `Reflect.deleteProperty` 直接替代。
 
 ## 异常控制流
 
@@ -162,13 +273,17 @@ unknown_comments     未识别 opcode 注释
 undefined_fallbacks  对象打印失败占位符
 ```
 
+未知 opcode 明确输出 `WARNING: unsupported bytecode <名称> <操作数> @<偏移>`，
+不能用没有 opcode 名称的 structured instruction 注释掩盖。语义 fixture 出现 WARNING
+即失败，即使最终 JSON 恰好相同也不算通过。
+
 `raw_goto` 和未知 opcode 应默认保持为零。注释中的 goto 表示仍有可读性缺口，但不等同
 于生成了可执行的非法 JavaScript 跳转。任何为“清零指标”而删除证据的 rewrite 都是
 错误修复。
 
-## Atom 当前效果
+## Atom 示例
 
-当前基准输入：
+本地示例输入（不随仓库分发）：
 
 ```text
 JSC：example2/atom.compiled.dist.jsc
@@ -179,27 +294,17 @@ snapshot：example2/v8_context_snapshot.bin
 生成命令：
 
 ```bash
-python3 -m disassembler example2/atom.compiled.dist.jsc \
+uv run python -m disassembler example2/atom.compiled.dist.jsc \
   --version 13.4.114.21 \
   --snapshot-blob example2/v8_context_snapshot.bin \
   --format json > /tmp/atom.current.disasm.json
 
-python3 -m decompiler /tmp/atom.current.disasm.json \
+uv run python -m decompiler /tmp/atom.current.disasm.json \
   > atom.compiled.dist.decompiled.current.js
 ```
 
-2026-07-27 的这次输入产生 797 个 `BytecodeArray`，反编译输出 28,353 行、796 个
-`function` 声明。质量扫描结果为：
-
-```text
-raw_goto：0
-goto_comments：45
-unknown_comments：0
-undefined_fallbacks：0
-```
-
-这些数字只描述上述输入和日期，不是固定验收值。样本、profile 或恢复规则变化后应重新
-运行分析脚本，不能继续引用旧的 794、809 或其他历史统计。
+该样例用于人工检查真实输入效果，不代替可执行语义 fixture。每次需要评价效果时，
+重新记录输入、版本、命令和结果；不把历史行数或未知指令计数作为当前正确性的证明。
 
 ## 改进优先级
 

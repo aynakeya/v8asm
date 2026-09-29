@@ -317,7 +317,7 @@ def _context_header_lengths(source: str) -> tuple[int, int]:
 
 
 def parse_scope_info_layout(
-    source: str, globals_source: str, contexts_source: str
+    source: str, globals_source: str, contexts_source: str, function_kind_source: str
 ) -> dict[str, object]:
     flags_match = re.search(
         r"bitfield struct ScopeFlags extends uint(?:31|32)\s*\{(.*?)\n\}",
@@ -344,10 +344,28 @@ def parse_scope_info_layout(
         r"/\*.*?\*/|//[^\n]*", "", flags_match.group(1), flags=re.DOTALL
     )
     shifts: dict[str, int] = {}
+    widths: dict[str, int] = {}
     shift = 0
     for name, width in re.findall(r"(\w+)\s*:[^;:]+:\s*(\d+)\s+bit;", flags_body):
         shifts[name] = shift
+        widths[name] = int(width)
         shift += int(width)
+
+    kind_enum = re.search(
+        r"enum class FunctionKind\s*:\s*uint8_t\s*\{(.*?)\};",
+        function_kind_source, re.DOTALL,
+    )
+    if kind_enum is None:
+        raise ValueError("FunctionKind enum not found")
+    kind_body = re.sub(r"//[^\n]*|/\*.*?\*/", "", kind_enum.group(1), flags=re.DOTALL)
+    kinds = []
+    for entry in kind_body.split(","):
+        entry = entry.strip()
+        if not entry or entry.startswith("kLastFunctionKind ="):
+            continue
+        if not re.fullmatch(r"k\w+", entry):
+            raise ValueError(f"unsupported FunctionKind enum value: {entry}")
+        kinds.append(entry[1:])
 
     class_body = re.sub(
         r"/\*.*?\*/|//[^\n]*", "", class_match.group(1), flags=re.DOTALL
@@ -369,6 +387,42 @@ def parse_scope_info_layout(
     min_context_slots, min_context_extended_slots = _context_header_lengths(
         contexts_source
     )
+    variable_properties = re.search(
+        r"bitfield struct VariableProperties extends uint31\s*\{(.*?)\n\}",
+        source, re.DOTALL,
+    )
+    initialization_enum = re.search(
+        r"extern enum InitializationFlag extends uint32\s*\{(.*?)\}", source, re.DOTALL,
+    )
+    if variable_properties is None or initialization_enum is None:
+        raise ValueError("ScopeInfo variable initialization layout not found")
+    init_names = [name.strip() for name in initialization_enum[1].split(",") if name.strip()]
+    properties = re.sub(r"/\*.*?\*/|//[^\n]*", "", variable_properties[1], flags=re.DOTALL)
+    property_shifts = {}
+    property_widths = {}
+    shift = 0
+    for name, width in re.findall(r"(\w+)\s*:[^;:]+:\s*(\d+)\s+bit;", properties):
+        property_shifts[name] = shift
+        property_widths[name] = int(width)
+        shift += int(width)
+    tail_position = re.search(r"position_info\?\s*\[(.*?)\]\s*:\s*PositionInfo", class_body, re.DOTALL)
+    tail_scopes = []
+    tail_nonempty_scopes = []
+    if tail_position:
+        for condition in tail_position[1].split("||"):
+            condition = re.sub(r"\s+", "", condition)
+            plain = re.fullmatch(r"flags.scope_type==ScopeType::(\w+)", condition)
+            nonempty = re.fullmatch(
+                r"\(flags.is_empty\?false:flags.scope_type==ScopeType::(\w+)\)", condition
+            )
+            if plain:
+                tail_scopes.append(scope_types.index(plain[1]))
+            elif nonempty:
+                tail_nonempty_scopes.append(scope_types.index(nonempty[1]))
+            else:
+                raise ValueError(f"unsupported ScopeInfo position_info condition: {condition}")
+    elif not re.search(r"position_info\s*:\s*PositionInfo", class_body):
+        raise ValueError("ScopeInfo position_info layout not found")
     return {
         "flags_encoding": (
             "smi" if "flags: SmiTagged<ScopeFlags>" in class_body else "uint32"
@@ -382,6 +436,9 @@ def parse_scope_info_layout(
         "scope_type_shift": shifts["scope_type"],
         "scope_type_mask": 0xF,
         "scope_type_names": scope_types,
+        "function_kind_shift": shifts["function_kind"],
+        "function_kind_mask": (1 << widths["function_kind"]) - 1,
+        "function_kind_names": kinds,
         "context_extension_slot_bit": shifts["has_context_extension_slot"],
         "min_context_slots": min_context_slots,
         "min_context_extended_slots": min_context_extended_slots,
@@ -389,6 +446,13 @@ def parse_scope_info_layout(
         "function_variable_shift": shifts["function_variable"],
         "function_variable_mask": 0x3,
         "inferred_function_name_bit": shifts["has_inferred_function_name"],
+        "outer_scope_info_bit": shifts["has_outer_scope_info"],
+        "empty_scope_bit": shifts["is_empty"],
+        "position_info_tail_scopes": tail_scopes,
+        "position_info_tail_nonempty_scopes": tail_nonempty_scopes,
+        "local_initialization_shift": property_shifts["init_flag"],
+        "local_initialization_mask": (1 << property_widths["init_flag"]) - 1,
+        "needs_initialization_value": init_names.index("kNeedsInitialization"),
     }
 
 
@@ -521,6 +585,30 @@ OFFLINE_STRING_END
     )
 
 
+def parse_literal_flags(globals_source: str, ast_source: str) -> dict[str, int]:
+    match = re.search(
+        r"enum class DefineKeyedOwnPropertyInLiteralFlag\s*\{([^}]+)\}",
+        globals_source,
+    )
+    if match is None:
+        raise ValueError("DefineKeyedOwnPropertyInLiteralFlag not found")
+    definitions = match.group(1)
+
+    def bit(source: str, name: str) -> int:
+        match = re.search(rf"\b{name}\s*=\s*1\s*<<\s*(\d+)", source)
+        if match is None:
+            raise ValueError(f"literal flag {name} not found")
+        return 1 << int(match.group(1))
+
+    return {
+        "define_keyed_set_function_name": bit(definitions, "kSetFunctionName"),
+        "define_keyed_dont_enum": (
+            bit(definitions, "kDontEnum") if "kDontEnum" in definitions else 0
+        ),
+        "object_literal_null_prototype": bit(ast_source, "kHasNullPrototype"),
+    }
+
+
 def build_profile(repo: Path, version: str) -> dict[str, object]:
     bytecodes_source = git_show(repo, version, "src/interpreter/bytecodes.h")
     serializer_source = git_show(repo, version, "src/snapshot/serializer-deserializer.h")
@@ -532,8 +620,10 @@ def build_profile(repo: Path, version: str) -> dict[str, object]:
     roots_source = git_show(repo, version, "src/roots/roots.h")
     static_roots_source = git_show_optional(repo, version, "src/roots/static-roots.h")
     globals_source = git_show(repo, version, "src/common/globals.h")
+    ast_source = git_show(repo, version, "src/ast/ast.h")
     scope_info_source = git_show(repo, version, "src/objects/scope-info.tq")
     contexts_source = git_show(repo, version, "src/objects/contexts.h")
+    function_kind_source = git_show(repo, version, "src/objects/function-kind.h")
     shared_function_info_source = git_show(
         repo, version, "src/objects/shared-function-info.tq"
     )
@@ -567,6 +657,7 @@ def build_profile(repo: Path, version: str) -> dict[str, object]:
         "has_ro_snapshot_checksum": "kReadOnlySnapshotChecksumOffset" in code_serializer_source,
         "serializer_tags": tags,
         "snapshot_spaces": tags["Backref"],
+        "literal_flags": parse_literal_flags(globals_source, ast_source),
         "bytecode_array_layout": parse_bytecode_array_layout(bytecode_array_source),
         "shared_function_info_layout": parse_shared_function_info_layout(
             shared_function_info_source
@@ -575,7 +666,7 @@ def build_profile(repo: Path, version: str) -> dict[str, object]:
             literal_objects_source
         ),
         "scope_info_layout": parse_scope_info_layout(
-            scope_info_source, globals_source, contexts_source
+            scope_info_source, globals_source, contexts_source, function_kind_source
         ),
         "runtime_default_variant": default_runtime_variant,
         "runtime_variants": {

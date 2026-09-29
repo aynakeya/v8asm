@@ -45,6 +45,7 @@ class V8ObjectBoilerplateDescription(V8HeapObject):
         self.backing_store_size: Optional[int] = None
         self.flags: Optional[int] = None
         self.entries: list[Any] = []
+        self.literal_flags: dict[str, int] = {}
 
     def parse(self):
         in_elements = False
@@ -79,6 +80,8 @@ class V8ScopeInfo(V8HeapObject):
         self.context_header_length: Optional[int] = None
         self.context_slots: list[Any] = []
         self.context_slot_names: dict[int, Any] = {}
+        self.context_slot_initialization: dict[int, bool] = {}
+        self.outer_scope_info: Optional[V8Address] = None
 
     def parse(self):
         in_context_slots = False

@@ -226,7 +226,7 @@ check_decompile_quality() {
   local unknown_count
   local undefined_fallback_count
   raw_goto_count="$(count_egrep '^[[:space:]]*(if \(.+\)[[:space:]]+)?goto[[:space:]]+offset_' "$file")"
-  unknown_count="$(count_egrep '^[[:space:]]*//[[:space:]]*0x[0-9a-fA-F]+[[:space:]]+@' "$file")"
+  unknown_count="$(count_egrep '^[[:space:]]*(\[[[:space:]]*[0-9]+\][[:space:]]*)?//[[:space:]]*(WARNING:|0x[0-9a-fA-F]+[[:space:]]+@)' "$file")"
   undefined_fallback_count="$(count_egrep '<undefined: segmentfault' "$file")"
 
   if (( raw_goto_count > VERSION_MATRIX_MAX_RAW_GOTO )); then
@@ -337,7 +337,7 @@ for bin in "${v8asm_bins[@]}"; do
   jsc="$work/$case_base.jsc"
   dis="$work/$case_base.disasm.txt"
   dis_err="$work/$case_base.disasm.err"
-  dec="$work/$case_base.dec.l4.js"
+  dec="$work/$case_base.decompiled.js"
   dec_err="$work/$case_base.decompile.err"
 
   set +e
@@ -483,11 +483,11 @@ for node_version in "${node_versions[@]}"; do
       fi
     fi
     if [[ "$force_status" == "ok" ]]; then
-      decompile="$(decompile_status "$work/$case_base.force.disasm.txt" "$work/$case_base.force.dec.l4.js" "$work/$case_base.force.decompile.err")"
+      decompile="$(decompile_status "$work/$case_base.force.disasm.txt" "$work/$case_base.force.decompiled.js" "$work/$case_base.force.decompile.err")"
       check_signal_status "bytenode $node_actual $label force decompile" "$decompile"
       check_crash_output "bytenode $node_actual $label force decompile" "$work/$case_base.force.decompile.err"
       if [[ "$decompile" == "ok" ]]; then
-        force_quality="$(check_decompile_quality "bytenode $node_actual vs $label force decompile" "$work/$case_base.force.dec.l4.js")"
+        force_quality="$(check_decompile_quality "bytenode $node_actual vs $label force decompile" "$work/$case_base.force.decompiled.js")"
       else
         force_quality="n/a"
       fi

@@ -1,7 +1,26 @@
 # V8 开发环境、补丁与构建规则
 
-本文记录原生 `v8asm` 的唯一推荐构建流程。目标是保证 V8 tag、依赖、patch、
-GN 参数和生成的 startup snapshot 可以互相对应，同时复用已有编译缓存。
+Python 工具使用项目根目录的 `uv` 环境；原生 `v8asm` 使用下述官方构建流程。
+原生构建需要保证 V8 tag、依赖、patch、GN 参数和生成的 startup snapshot 互相对应，
+同时复用已有编译缓存。
+
+## Python 环境
+
+在项目根目录执行：
+
+```bash
+uv sync --locked
+uv run python -m disassembler --help
+uv run python -m decompiler --help
+uv run python -m checkversion --help
+```
+
+`pyproject.toml` 声明 Python 最低版本为 3.10，`.python-version` 固定开发环境为 3.12。
+当前仅使用标准库，保留已有模块入口，不安装第三方运行或测试依赖。`uv.lock` 纳入版本
+控制，`.venv/` 不提交。无需手动激活环境，文档中的 Python 命令可加 `uv run` 前缀。
+
+语义测试需要 `PATH` 中有 Node.js；缺少 Node 时相关测试会跳过。新增 cache fixture
+仍需使用对应的 Node/V8 版本，uv 不管理 Node、Electron 或原生 V8 的构建缓存。
 
 ## 目录和环境
 
@@ -157,7 +176,7 @@ Chromium 或应用提供的 snapshot。`v8_context_snapshot.bin` 不得放进 bi
 检查命令：
 
 ```bash
-python3 tests/decomp_rounds/check_bin_cache.py
+uv run python tests/decomp_rounds/check_bin_cache.py
 ```
 
 该脚本会检查 metadata 命令是否干净、snapshot 版本提示、可见 `out/` hash 对照，
@@ -197,8 +216,8 @@ tests/decomp_rounds/build_v8asm_matrix.sh \
 小改动先做静态检查：
 
 ```bash
-python3 tests/decomp_rounds/check_patch_text.py
-python3 tests/decomp_rounds/audit_patch_coverage.py
+uv run python tests/decomp_rounds/check_patch_text.py
+uv run python tests/decomp_rounds/audit_patch_coverage.py
 ```
 
 然后在干净的精确 tag 上做 3-way 检查：

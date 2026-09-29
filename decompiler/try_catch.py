@@ -7,7 +7,7 @@ from .context import DecompilerContext
 from .instruction import Instruction
 from .objects import V8Address
 from .objects.bytecode import V8BytecodeArray
-from .postprocess import simplify_lines
+from .recovery.propagation import simplify_lines
 from .structurer import decompile_to_statements
 from .translator import InstructionTranslator
 from .utils import parse_jump_target

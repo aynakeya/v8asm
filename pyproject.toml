@@ -1,0 +1,11 @@
+[project]
+name = "v8asm"
+version = "0.1.0"
+description = "Offline V8 bytecode disassembler and JavaScript decompiler"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = []
+
+[tool.uv]
+package = false

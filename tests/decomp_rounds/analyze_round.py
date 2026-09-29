@@ -106,7 +106,10 @@ def score_text(text: str) -> dict[str, int]:
         "reg_refs": len(re.findall(r"\br\d+\b", text)),
         "goto_comments": len(re.findall(r"//\s*goto\s+offset_", text)),
         "raw_goto": count_raw_gotos(text),
-        "unknown_comments": len(re.findall(r"//\s*0x[0-9a-f]+\s+@", text)),
+        "unknown_comments": len(re.findall(
+            r"^\s*(?:\[\s*\d+\]\s*)?//\s*(?:WARNING:|0x[0-9a-fA-F]+\s+@)",
+            text, flags=re.M,
+        )),
         "undefined_fallbacks": len(re.findall(r"<undefined: segmentfault", text)),
         "holes": len(re.findall(r"\bHOLE\b", text)),
         "functions": len(re.findall(r"^\s*function\s+", text, flags=re.M)),
@@ -194,8 +197,8 @@ def parse_constant_pool_entries(text: str) -> dict[tuple[int, int], ConstantPool
 
 
 def infer_placeholder_name_hints(case_dir: Path, case: str) -> list[PlaceholderNameHint]:
-    v8asm_dec = case_dir / f"{case}.v8asm.dec.l4.js"
-    bytenode_dec = case_dir / f"{case}.bytenode.dec.l4.js"
+    v8asm_dec = case_dir / f"{case}.v8asm.decompiled.js"
+    bytenode_dec = case_dir / f"{case}.bytenode.decompiled.js"
     if not v8asm_dec.exists() or not bytenode_dec.exists():
         return []
 
@@ -365,7 +368,7 @@ def main() -> int:
         for mode in ("v8asm", "bytenode"):
             header = read_mode_header_diagnostics(case_dir, case, mode)
             unresolved = read_mode_unresolved_diagnostics(case_dir, case, mode)
-            dec = case_dir / f"{case}.{mode}.dec.l4.js"
+            dec = case_dir / f"{case}.{mode}.decompiled.js"
             if not dec.exists():
                 failure_count += 1
                 print(

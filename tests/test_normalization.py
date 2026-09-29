@@ -8,7 +8,8 @@ from decompiler.normalization import (
     find_default_parameter_initializers,
     normalize_source_instructions,
 )
-from decompiler.objects import V8BytecodeArray
+from decompiler.objects import V8BytecodeArray, V8Smi
+from decompiler.objects.bytecode import HandlerEntry
 
 
 def instruction(
@@ -26,16 +27,26 @@ class FakeContext:
         initializers=(),
         constant='"value"',
         scope=None,
+        initialized=(),
     ) -> None:
         self.initializers = list(initializers)
         self.constant = constant
         self.scope = scope
+        self.initialized = frozenset(initialized)
 
     def parameter_initializers(self, _bytecode):
         return list(self.initializers)
 
     def context_slot_name(self, _bytecode, slot, depth=0):
         return "value" if (slot, depth) == (2, 0) else None
+
+    def context_slot_binding(self, _bytecode, slot, depth=0):
+        if (slot, depth) == (2, 0):
+            return SimpleNamespace(name="value", defining_bytecode_address=0x1000)
+        return None
+
+    def prologue_initialized_names(self, _address):
+        return self.initialized
 
     def constant_pool_entries(self, _bytecode):
         return [SimpleNamespace(display=self.constant)]
@@ -120,31 +131,47 @@ class NormalizationTests(unittest.TestCase):
         )
         self.assertEqual(normalized.instructions[0].args, ["a0"])
 
-    def test_hole_check_requires_matching_scope_and_constant_names(self) -> None:
+    def test_hole_check_requires_initialization_proof(self) -> None:
         instructions = [
             instruction(0, "LdaCurrentContextSlot", "[2]"),
             instruction(2, "ThrowReferenceErrorIfHole", "[0]"),
             instruction(4, "Return"),
         ]
         normalized = normalize_source_instructions(
-            FakeContext(), self.bytecode, instructions
+            FakeContext(initialized={"value"}), self.bytecode, instructions
         )
         self.assertEqual(
             [item.mnemonic for item in normalized.instructions],
             ["LdaCurrentContextSlot", "Return"],
         )
 
-        mismatched = normalize_source_instructions(
-            FakeContext(constant='"other"'), self.bytecode, instructions
-        )
-        self.assertEqual(
-            [item.mnemonic for item in mismatched.instructions],
-            [
-                "LdaCurrentContextSlot",
-                "ThrowReferenceErrorIfHole",
-                "Return",
-            ],
-        )
+        for context in (FakeContext(), FakeContext(constant='"other"', initialized={"value"})):
+            with self.subTest(context=context):
+                normalized = normalize_source_instructions(context, self.bytecode, instructions)
+                self.assertEqual(normalized.instructions, instructions)
+
+    def test_global_typeof_cannot_absorb_other_entry_points(self) -> None:
+        class SwitchContext(FakeContext):
+            def constant_pool_entries(self, _bytecode):
+                return [SimpleNamespace(raw=V8Smi(4), display="4")]
+
+        pair = [instruction(2, "LdaGlobalInsideTypeof", "[0]", "[0]"), instruction(4, "TypeOf", "[2]")]
+        for predecessor in (
+            instruction(0, "Jump", "[4]", jump_target=4),
+            instruction(0, "SwitchOnSmiNoFeedback", "[0]", "[1]", "[0]"),
+            instruction(0, "SwitchOnGeneratorState", "r0", "[0]", "[1]"),
+        ):
+            with self.subTest(predecessor=predecessor.mnemonic):
+                with self.assertRaisesRegex(ValueError, "single-entry"):
+                    normalize_source_instructions(SwitchContext(), self.bytecode, [predecessor, *pair])
+
+        self.bytecode.handler_entries = [HandlerEntry(2, 4, 9, 0, 0)]
+        with self.assertRaisesRegex(ValueError, "single-entry"):
+            normalize_source_instructions(FakeContext(), self.bytecode, pair)
+
+        self.bytecode.handler_entries = []
+        normalized = normalize_source_instructions(FakeContext(), self.bytecode, pair)
+        self.assertEqual([item.mnemonic for item in normalized.instructions], ["TypeOfGlobal"])
 
     def test_parameter_body_context_becomes_initialized_lexical_declaration(
         self,

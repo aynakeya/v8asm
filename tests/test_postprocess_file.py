@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-from decompiler.postprocess_file import (
+from decompiler.recovery.file import (
     compact_file_register_concat_returns,
     normalize_unique_string_function_names,
     postprocess_source_file,
@@ -97,35 +97,6 @@ class PostprocessFileTests(unittest.TestCase):
         recovered = recover_context_slot_closure_names(text)
 
         self.assertIn("return context_slot[2](3)", recovered)
-
-    def test_recovers_context_slot_after_ensure_defined(self) -> None:
-        text = "\n".join(
-            [
-                "function run(arg0) {",
-                '  ensureDefined("Pair")',
-                "  r1 = new context_slot[3](...arg0)",
-                "  return r1.sum()",
-                "}",
-            ]
-        )
-
-        recovered = recover_context_slot_closure_names(text)
-
-        self.assertIn("r1 = new Pair(...arg0)", recovered)
-
-    def test_ensure_defined_requires_identifier_name(self) -> None:
-        text = "\n".join(
-            [
-                "function run(arg0) {",
-                '  ensureDefined("<undefined: segmentfault>")',
-                "  return context_slot[3](...arg0)",
-                "}",
-            ]
-        )
-
-        recovered = recover_context_slot_closure_names(text)
-
-        self.assertIn("return context_slot[3](...arg0)", recovered)
 
     def test_normalizes_unique_v8_string_function_names(self) -> None:
         text = "\n".join(

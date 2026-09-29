@@ -92,6 +92,7 @@ class V8BytecodeArray(V8HeapObject):
         self.handler_entries: List[HandlerEntry] = []
         self.constant_pool_address: Optional[int] = None
         self.file_offset: Optional[int] = None
+        self.literal_flags: dict[str, int] = {}
 
     def parse(self):
         in_handler_table = False

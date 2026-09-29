@@ -27,7 +27,7 @@ if str(ROOT) not in sys.path:
 from decompiler.context import DecompilerContext  # noqa: E402
 from decompiler.core import decompile_bytecode  # noqa: E402
 from decompiler.objects.bytecode import V8BytecodeArray  # noqa: E402
-from decompiler.postprocess_file import postprocess_source_file  # noqa: E402
+from decompiler.recovery.file import postprocess_source_file  # noqa: E402
 from decompiler.structured import load_structured_objects  # noqa: E402
 from disassembler.disassembler import parse_disassembly_file  # noqa: E402
 from disassembler.structured import disassembly_to_dict  # noqa: E402

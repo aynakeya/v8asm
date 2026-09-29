@@ -24,6 +24,7 @@ from analyze_round import (
     unresolved_object_chunk_offsets,
     unresolved_object_suffixes,
 )
+from check_electron_version_matrix import count_quality
 
 
 class AnalyzeRoundTests(unittest.TestCase):
@@ -98,6 +99,21 @@ function sample() {
 
         self.assertEqual(score["goto_comments"], 1)
         self.assertEqual(score["raw_goto"], 2)
+
+    def test_quality_counts_missing_instructions_and_recovery_failures(self) -> None:
+        text = '''function sample() {
+  // 0xABCD @ 4 : ff UnknownOpcode
+  // WARNING: unsupported bytecode UnknownOpcode r0 @7
+  [  12] // WARNING: unsupported bytecode UnknownOpcode r1 @12
+  // WARNING: decompile error (ValueError), fallback to linear output
+  const message = "// WARNING: ordinary string";
+  // Bytecode 0x1234 params=1
+}'''
+        self.assertEqual(score_text(text)["unknown_comments"], 4)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.decompiled.js"
+            path.write_text(text, encoding="utf-8")
+            self.assertEqual(count_quality(path), (0, 4, 0))
 
     def test_extracts_unique_unresolved_object_addresses(self) -> None:
         text = (
@@ -194,7 +210,7 @@ function run(arg0) {
         with tempfile.TemporaryDirectory() as tmp:
             case_dir = Path(tmp) / "sample"
             case_dir.mkdir()
-            (case_dir / "sample.v8asm.dec.l4.js").write_text(
+            (case_dir / "sample.v8asm.decompiled.js").write_text(
                 """
 function run(arg0) {
   // Constant pool:
@@ -203,7 +219,7 @@ function run(arg0) {
 """,
                 encoding="utf-8",
             )
-            (case_dir / "sample.bytenode.dec.l4.js").write_text(
+            (case_dir / "sample.bytenode.decompiled.js").write_text(
                 """
 function run(arg0) {
   // Constant pool:
@@ -225,7 +241,7 @@ function run(arg0) {
         with tempfile.TemporaryDirectory() as tmp:
             case_dir = Path(tmp) / "sample"
             case_dir.mkdir()
-            (case_dir / "sample.v8asm.dec.l4.js").write_text(
+            (case_dir / "sample.v8asm.decompiled.js").write_text(
                 """
 function wrapper() {
   // Constant pool:
@@ -238,7 +254,7 @@ function allFeatures() {
 """,
                 encoding="utf-8",
             )
-            (case_dir / "sample.bytenode.dec.l4.js").write_text(
+            (case_dir / "sample.bytenode.decompiled.js").write_text(
                 """
 function wrapper() {
   // Constant pool:

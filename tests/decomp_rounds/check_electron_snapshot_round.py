@@ -161,7 +161,7 @@ def main() -> int:
     ):
         dis_txt = out_dir / f"{label}.disasm.txt"
         dis_err = out_dir / f"{label}.disasm.err"
-        dec_js = out_dir / f"{label}.dec.l4.js"
+        dec_js = out_dir / f"{label}.decompiled.js"
         dec_err = out_dir / f"{label}.decompile.err"
         check_out = out_dir / f"{label}.checkversion.out"
         check_err = out_dir / f"{label}.checkversion.err"

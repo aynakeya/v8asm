@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -91,7 +92,7 @@ def count_quality(path: Path) -> tuple[int, int, int]:
             stripped.startswith("if (") and " goto offset_" in stripped
         ):
             raw += 1
-        if stripped.startswith("// 0x") and " @ " in stripped:
+        if re.match(r"(?:\[\s*\d+\]\s*)?//\s*(?:WARNING:|0x[0-9a-fA-F]+\s+@)", stripped):
             unknown += 1
         if "<undefined: segmentfault" in line:
             undef += 1
@@ -248,7 +249,7 @@ def main() -> int:
                 check_err = work / "checkversion.err"
                 dis_txt = work / "disasm.txt"
                 dis_err = work / "disasm.err"
-                dec_js = work / "decompiled.l4.js"
+                dec_js = work / "decompiled.js"
                 dec_err = work / "decompile.err"
 
                 check_proc = run(

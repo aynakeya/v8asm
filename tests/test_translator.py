@@ -33,7 +33,7 @@ class TranslatorOpcodeTests(unittest.TestCase):
     def test_define_named_own_property(self) -> None:
         self.assertEqual(
             self.translate("DefineNamedOwnProperty", ["r2", "[1]", "[3]"]),
-            "r2.value = ACCU",
+            'define_literal_property(r2, "value", ACCU, false, true)',
         )
 
     def test_operand_scale_suffix_reuses_base_opcode_translation(self) -> None:
@@ -57,7 +57,7 @@ class TranslatorOpcodeTests(unittest.TestCase):
     def test_define_keyed_own_property(self) -> None:
         self.assertEqual(
             self.translate("DefineKeyedOwnProperty", ["<this>", "r0", "#0", "[0]"]),
-            "this[r0] = ACCU",
+            "define_literal_property(this, r0, ACCU, false, true)",
         )
 
     def test_set_keyed_property_uses_operand_key_and_accumulator_value(self) -> None:

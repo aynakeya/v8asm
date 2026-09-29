@@ -5,8 +5,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-from decompiler.postprocess import _compact_compound_assignments, simplify_lines
-from decompiler.postprocess_level4_calls import (
+from decompiler.recovery.propagation import simplify_lines
+from decompiler.recovery.common import _compact_compound_assignments
+from decompiler.recovery.calls import (
     _fold_adjacent_bound_method_calls,
     _rewrite_direct_bound_method_calls,
 )
@@ -211,7 +212,7 @@ class SimplifyLinesTests(unittest.TestCase):
             [
                 '"seed"',
                 "r3 = r4",
-                "r3 += r4.value",
+                "r3 += r3.value",
                 "return r3",
             ],
         )

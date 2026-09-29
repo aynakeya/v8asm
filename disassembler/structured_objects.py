@@ -280,6 +280,9 @@ class StructuredObjectEncoder:
                 (info_slot + local_index) * tagged_size,
                 tagged_size,
             )
+            if local["info"] is not None:
+                init_flag = (local["info"] >> layout.local_initialization_shift) & layout.local_initialization_mask
+                local["needs_initialization"] = init_flag == layout.needs_initialization_value
         record.update(
             flags=flags,
             scope_type=scope_type,
@@ -291,3 +294,20 @@ class StructuredObjectEncoder:
             context_local_names_inlined=inlined,
             context_local_names_container=names_container,
         )
+        kind = (flags >> layout.function_kind_shift) & layout.function_kind_mask
+        if kind < len(layout.function_kind_names):
+            record["function_kind"] = layout.function_kind_names[kind]
+        if flags & (1 << layout.outer_scope_info_bit):
+            outer_slot = info_slot + context_count
+            if flags & (1 << layout.saved_class_variable_bit):
+                outer_slot += 1
+            if (flags >> layout.function_variable_shift) & layout.function_variable_mask:
+                outer_slot += 2
+            if flags & (1 << layout.inferred_function_name_bit):
+                outer_slot += 1
+            if scope_type_value in layout.position_info_tail_scopes or (
+                scope_type_value in layout.position_info_tail_nonempty_scopes
+                and not flags & (1 << layout.empty_scope_bit)
+            ):
+                outer_slot += 2
+            record["outer_scope_info"] = self.encode_reference(obj.references.get(outer_slot * tagged_size))

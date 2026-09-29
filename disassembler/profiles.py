@@ -48,6 +48,9 @@ class ScopeInfoLayout:
     scope_type_shift: int
     scope_type_mask: int
     scope_type_names: tuple[str, ...]
+    function_kind_shift: int
+    function_kind_mask: int
+    function_kind_names: tuple[str, ...]
     context_extension_slot_bit: int
     min_context_slots: int
     min_context_extended_slots: int
@@ -55,6 +58,13 @@ class ScopeInfoLayout:
     function_variable_shift: int
     function_variable_mask: int
     inferred_function_name_bit: int
+    outer_scope_info_bit: int
+    empty_scope_bit: int
+    position_info_tail_scopes: tuple[int, ...]
+    position_info_tail_nonempty_scopes: tuple[int, ...]
+    local_initialization_shift: int
+    local_initialization_mask: int
+    needs_initialization_value: int
 
 
 @dataclass(frozen=True)
@@ -65,6 +75,7 @@ class Profile:
     has_ro_snapshot_checksum: bool
     snapshot_spaces: int
     serializer_tags: dict[str, int]
+    literal_flags: dict[str, int]
     bytecode_array_layout: BytecodeArrayLayout
     shared_function_info_layout: SharedFunctionInfoLayout
     object_boilerplate_layout: ObjectBoilerplateLayout
@@ -134,6 +145,7 @@ def load_profiles() -> ProfileSet:
             has_ro_snapshot_checksum=item["has_ro_snapshot_checksum"],
             snapshot_spaces=item["snapshot_spaces"],
             serializer_tags=item["serializer_tags"],
+            literal_flags=item["literal_flags"],
             bytecode_array_layout=BytecodeArrayLayout(**item["bytecode_array_layout"]),
             shared_function_info_layout=SharedFunctionInfoLayout(
                 function_data_slots=tuple(
@@ -151,6 +163,15 @@ def load_profiles() -> ProfileSet:
                     **item["scope_info_layout"],
                     "scope_type_names": tuple(
                         item["scope_info_layout"]["scope_type_names"]
+                    ),
+                    "function_kind_names": tuple(
+                        item["scope_info_layout"]["function_kind_names"]
+                    ),
+                    "position_info_tail_scopes": tuple(
+                        item["scope_info_layout"]["position_info_tail_scopes"]
+                    ),
+                    "position_info_tail_nonempty_scopes": tuple(
+                        item["scope_info_layout"]["position_info_tail_nonempty_scopes"]
                     ),
                 }
             ),

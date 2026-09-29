@@ -21,10 +21,17 @@ Electron release 通过，不表示同 numeric V8 的所有应用 snapshot 都�
 
 ## Python 单元测试
 
-对 parser、结构化 schema 和 decompiler 的默认门禁：
+先在根目录运行 `uv sync --locked`。日常修改只运行对应模块的测试，例如：
 
 ```bash
-python3 -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests -p test_disassembler.py
+uv run python -m unittest discover -s tests -p test_semantic_equivalence.py
+```
+
+跨模块的大型修改或准备提交时，可运行完整 Python 测试：
+
+```bash
+uv run python -m unittest discover -s tests -v
 ```
 
 关键测试范围包括：
@@ -38,13 +45,10 @@ python3 -m unittest discover -s tests -v
 - opcode translation、控制流恢复和文件级后处理；
 - 方法调用折叠的正向与反向语义测试；
 - 原始 JavaScript 与恢复结果的可执行语义等价测试，包括 getter 副作用、
-  closure/context shadowing、短路和 `try/catch/finally` completion；
+  closure/context shadowing、TDZ、typeof、数值转换、delete、短路和 `try/catch/finally` completion；
 - root、read-only、object cache 和 attached reference 的来源与类型证据。
 
-2026-07-27 最近一次完整运行结果为 208 个测试通过。这个数字只用于定位基线；新增测试
-后应更新日期和结果，不把测试数量作为功能本身。
-
-语义 fixture 使用当前 Node 24/V8 13.6 生成 cache：
+语义 fixture 使用指定的 Node/V8 版本生成 cache：
 
 ```bash
 node --no-lazy tests/fixtures/generate_cached_data.cjs \
@@ -55,14 +59,29 @@ node --no-lazy tests/fixtures/generate_cached_data.cjs \
 测试分别在隔离的 Node `vm` 中执行源码和带轻量 runtime 的恢复结果，比较返回值或异常。
 文本更短、寄存器更少或测试不抛异常都不能替代这个比较。
 
+fixture 的特性范围、生成版本和待补缺口见
+[语义 fixture 说明](semantic-fixtures.md)。普通源码 fixture 不依赖
+被忽略的本地 `bin_cache`；必须使用外部 snapshot 的测试应明确记录获取方式和版本。
+
+### 何时运行矩阵
+
+- 普通表达式和 opcode 修复：相关单元测试与语义 fixture。
+- 共享后处理、闭包或 CFG 改动：再跑 `test_decompiler_file.py`，其中已有 V8
+  10.2、11.3、12.4、13.6 的缓存回归，不需要重编 V8。
+- profile、serializer、snapshot 或 patch 改动：按影响范围选择 Node/Electron
+  版本矩阵；发布或声明完整兼容时才扩展为完整矩阵。
+
+缓存能够解析、输出结构断言通过、执行语义等价是不同证据。多版本结构测试不能冒充
+所有 JS 特性在这些版本上都执行等价；新增关键特性稳定后再补对应版本的语义样本。
+
 ## 补丁与二进制缓存检查
 
 不切换 V8 branch 的轻量检查：
 
 ```bash
-python3 tests/decomp_rounds/check_patch_text.py
-python3 tests/decomp_rounds/audit_patch_coverage.py
-python3 tests/decomp_rounds/check_bin_cache.py
+uv run python tests/decomp_rounds/check_patch_text.py
+uv run python tests/decomp_rounds/audit_patch_coverage.py
+uv run python tests/decomp_rounds/check_bin_cache.py
 ```
 
 职责分别是：
@@ -129,8 +148,8 @@ bytenode 必须在表中对应 Node 下实际生成，不能拿一个 Node 版�
 真实 Electron 门禁：
 
 ```bash
-python3 tests/decomp_rounds/check_electron_snapshot_round.py
-python3 tests/decomp_rounds/check_electron_version_matrix.py
+uv run python tests/decomp_rounds/check_electron_snapshot_round.py
+uv run python tests/decomp_rounds/check_electron_version_matrix.py
 ```
 
 版本矩阵会从每个 Electron binary 读取 `process.versions.v8`，只选择 exact numeric V8
@@ -147,19 +166,20 @@ decompiler 质量必须一起记录。
 缺少 release 时复用本地下载缓存：
 
 ```bash
-python3 tests/decomp_rounds/fetch_electron_releases.py 34.3.0
-python3 tests/decomp_rounds/check_electron_version_matrix.py
+uv run python tests/decomp_rounds/fetch_electron_releases.py 34.3.0
+uv run python tests/decomp_rounds/check_electron_version_matrix.py
 ```
 
 不要删除已有 zip 或解压目录。官方 stable 覆盖审计使用：
 
 ```bash
-python3 tests/decomp_rounds/audit_electron_release_coverage.py
+uv run python tests/decomp_rounds/audit_electron_release_coverage.py
 ```
 
-## 当前官方 Electron 样本覆盖
+## 已定义的 Electron 验证行
 
-以下行有 exact Linux x64 Electron release 作为外部样本：
+以下配置使用 exact Linux x64 Electron release 作为外部样本。是否通过以当前代码的
+运行结果为准，不把版本表当作持续有效的测试报告：
 
 | Electron | V8 | 对应 patch |
 | --- | --- | --- |
@@ -203,6 +223,8 @@ BytecodeArray 数量异常下降
 
 默认 `raw_goto` 和 `unknown_comments` 上限为零。需要临时提高阈值时，必须在验证记录中
 写明具体样本和原因，不能把宽松阈值提交成新的默认标准。
+`unknown_comments` 同时识别旧版原始指令注释和当前 `WARNING`，包括带 offset 的 linear
+输出及整函数恢复失败；不能因诊断格式变化而漏报。
 
 对于目标应用，最终门禁应使用应用实际接受的 cache。磁盘 `.jsc` 无法解析但应用能加载
 时，先按 [python-disassembler.md](python-disassembler.md) 捕获 `vm.Script` 输入和

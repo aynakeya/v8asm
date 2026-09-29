@@ -139,7 +139,7 @@ for js in "$CASE_DIR"/*.js; do
     in_jsc="$casedir/$base.$mode.jsc"
     dis_txt="$casedir/$base.$mode.disasm.txt"
     dis_err="$casedir/$base.$mode.disasm.err"
-    dec_js="$casedir/$base.$mode.dec.l4.js"
+    dec_js="$casedir/$base.$mode.decompiled.js"
 
     if [[ ! -f "$in_jsc" ]]; then
       echo "// input jsc not found: $in_jsc" >"$dec_js"
@@ -179,5 +179,5 @@ for js in "$CASE_DIR"/*.js; do
   done
 done
 
-python3 "$ROUND_DIR/analyze_round.py" "$OUT_DIR" >"$ROUND_DIR/summary.md"
-echo "Done. Summary: $ROUND_DIR/summary.md"
+python3 "$ROUND_DIR/analyze_round.py" "$OUT_DIR" >"$OUT_DIR/summary.md"
+echo "Done. Summary: $OUT_DIR/summary.md"

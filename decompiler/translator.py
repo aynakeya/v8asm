@@ -4,7 +4,7 @@ import json
 import re
 from typing import Dict, List, Optional, Tuple
 
-from .objects import V8Address, V8SharedFunctionInfo
+from .objects import V8Address, V8ObjectBoilerplateDescription, V8SharedFunctionInfo
 from .objects.bytecode import V8BytecodeArray
 
 from .context import ConstantPoolEntry, DecompilerContext
@@ -93,7 +93,8 @@ class InstructionTranslator:
             reg_id = int(instr.mnemonic[4:])
             return f"ACCU = {self._reg_name(f'r{reg_id}')}"
 
-        return f"// {instr.raw_line.strip()}"
+        operands = ", ".join(instr.args)
+        return f"// WARNING: unsupported bytecode {instr.mnemonic} {operands} @{instr.offset}"
 
     def branch_condition(self, instr: Instruction) -> Optional[Tuple[str, bool]]:
         if instr.mnemonic in {"JumpIfForInDone", "JumpIfForInDoneConstant"}:
@@ -281,9 +282,20 @@ class InstructionTranslator:
         if len(instr.args) < 1:
             return "ACCU = create_object_literal({})"
         const_repr = self._const_token(instr.args[0])
-        flags = self._imm(instr.args[1], "[0]") if len(instr.args) > 1 else "0"
-        slot = instr.args[2] if len(instr.args) > 2 else "#0"
+        slot = instr.args[1] if len(instr.args) > 1 else "[0]"
+        flags = _parse_number_token(instr.args[2]) if len(instr.args) > 2 else 0
         if const_repr.startswith("{"):
+            layout = self.bytecode.literal_flags
+            if layout and flags & layout["object_literal_null_prototype"]:
+                boilerplate = self.context.constant_object_for_instruction(self.bytecode, instr)
+                if not (
+                    isinstance(boilerplate, V8ObjectBoilerplateDescription)
+                    and boilerplate.flags
+                    and boilerplate.flags & layout["object_literal_null_prototype"]
+                ):
+                    # The canonical empty boilerplate has no prototype flags.
+                    contents = const_repr[1:-1].strip()
+                    const_repr = "{ __proto__: null" + (f", {contents}" if contents else "") + " }"
             return f"ACCU = {const_repr}"
         return f"ACCU = create_object_literal({const_repr}) /* flags={flags}, slot={slot} */"
 
@@ -304,6 +316,9 @@ class InstructionTranslator:
 
     def _op_CreateMappedArguments(self, instr: Instruction) -> str:
         return "ACCU = arguments"
+
+    def _op_CreateUnmappedArguments(self, instr: Instruction) -> str:
+        return "ACCU = create_unmapped_arguments(...arguments)"
 
     def _op_CreateBlockContext(self, instr: Instruction) -> str:
         return f"ACCU = create_block_context({self._scope_expr(instr)})"
@@ -438,7 +453,9 @@ class InstructionTranslator:
         args = self._drop_feedback(instr.args, 3)
         if len(args) < 2:
             return "<own-property> = ACCU"
-        return f"{self._format_property_access(args[0], args[1])} = ACCU"
+        receiver = self._reg_name(args[0])
+        key = self._const_token(args[1])
+        return f"define_literal_property({receiver}, {key}, ACCU, false, true)"
 
     def _op_DefineKeyedOwnProperty(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 4)
@@ -446,7 +463,21 @@ class InstructionTranslator:
             return "<own-keyed-property> = ACCU"
         receiver = self._reg_name(args[0])
         key = self._reg_name(args[1])
-        return f"{receiver}[{key}] = ACCU"
+        return f"define_literal_property({receiver}, {key}, ACCU, false, true)"
+
+    def _op_DefineKeyedOwnPropertyInLiteral(self, instr: Instruction) -> str:
+        receiver = self._reg_name(instr.args[0])
+        key = self._reg_name(instr.args[1])
+        flags = _parse_number_token(instr.args[2])
+        layout = self.bytecode.literal_flags
+        if flags and not layout:
+            return f"DefineKeyedOwnPropertyInLiteral({receiver}, {key}, ACCU, {flags}) /* unresolved flag layout */"
+        set_name = bool(flags & layout["define_keyed_set_function_name"]) if flags else False
+        enumerable = not (flags & layout["define_keyed_dont_enum"]) if flags else True
+        return (
+            f"define_literal_property({receiver}, {key}, ACCU, "
+            f"{json.dumps(set_name)}, {json.dumps(enumerable)})"
+        )
 
     def _op_StaInArrayLiteral(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 3)
@@ -466,6 +497,10 @@ class InstructionTranslator:
         if not instr.args:
             return "ACCU = CallRuntime(?)"
         runtime_name = instr.args[0].strip("[]")
+        if runtime_name in {
+            "_CopyDataProperties", "_CopyDataPropertiesWithExcludedPropertiesOnStack"
+        }:
+            runtime_name = runtime_name[1:]
         arg_regs: List[str] = []
         if len(instr.args) > 1:
             arg_regs = self._expand_range(instr.args[1])
@@ -557,9 +592,13 @@ class InstructionTranslator:
         return f"ACCU = {callee}.call({arg_text})"
 
     def _op_CloneObject(self, instr: Instruction) -> str:
-        source = self._reg_name(instr.args[0]) if instr.args else "ACCU"
-        flags = instr.args[1] if len(instr.args) > 1 else "#0"
-        return f"ACCU = clone_object({source}) /* flags={flags} */"
+        source = self._reg_name(instr.args[0])
+        flags = _parse_number_token(instr.args[1])
+        if not self.bytecode.literal_flags:
+            return f"ACCU = clone_object({source}, {flags}) /* unresolved flag layout */"
+        null_prototype = self.bytecode.literal_flags["object_literal_null_prototype"]
+        prototype = "__proto__: null, " if flags & null_prototype else ""
+        return f"ACCU = {{ {prototype}...{source} }}"
 
     def _op_Construct(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 3)
@@ -591,10 +630,10 @@ class InstructionTranslator:
         return f"ACCU = (ACCU + {value})"
 
     def _op_Inc(self, instr: Instruction) -> str:
-        return "ACCU = (ACCU + 1)"
+        return "ACCU = ++ACCU"
 
     def _op_Dec(self, instr: Instruction) -> str:
-        return "ACCU = (ACCU - 1)"
+        return "ACCU = --ACCU"
 
     def _op_Sub(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 1)
@@ -908,6 +947,14 @@ class InstructionTranslator:
         value = self._reg_name(instr.args[0])
         return f"ACCU = ({value} instanceof ACCU)"
 
+    def _op_TestIn(self, instr: Instruction) -> str:
+        key = self._reg_name(instr.args[0])
+        return f"ACCU = ({key} in ACCU)"
+
+    def _op_ToName(self, instr: Instruction) -> str:
+        target = self._reg_name(instr.args[0]) if instr.args else "ACCU"
+        return f"{target} = ToName(ACCU)"
+
     def _op_SetPendingMessage(self, instr: Instruction) -> str:
         return "// SetPendingMessage"
 
@@ -922,7 +969,19 @@ class InstructionTranslator:
             return "// ThrowReferenceErrorIfHole"
         idx = _parse_bracket_number(instr.args[0])
         target = self._const(idx) if idx is not None else instr.args[0]
-        return f"ensureDefined({target})"
+        return f"ACCU = checked_lexical(ACCU, {target})"
+
+    def _op_TypeOf(self, instr: Instruction) -> str:
+        return "ACCU = typeof ACCU"
+
+    def _op_TypeOfGlobal(self, instr: Instruction) -> str:
+        return f"ACCU = typeof {self._format_global_access(instr.args[0])}"
+
+    def _op_TestTypeOfGlobal(self, instr: Instruction) -> str:
+        literal_id = _parse_number_token(instr.args[1])
+        literal = TYPEOF_LITERAL_FLAGS.get(literal_id, f"type_{literal_id}")
+        reference = self._format_global_access(instr.args[0])
+        return f"ACCU = (typeof {reference} === {json.dumps(literal)})"
 
     def _op_ToBoolean(self, instr: Instruction) -> str:
         return "ACCU = truthy(ACCU)"
@@ -934,7 +993,7 @@ class InstructionTranslator:
         return "ACCU = !truthy(ACCU)"
 
     def _op_ToNumeric(self, instr: Instruction) -> str:
-        return "ACCU = Number(ACCU)"
+        return "ACCU = to_numeric(ACCU)"
 
     def _op_ToObject(self, instr: Instruction) -> str:
         source = self._reg_name(instr.args[0]) if instr.args else "ACCU"
@@ -944,8 +1003,12 @@ class InstructionTranslator:
         return "ACCU = String(ACCU)"
 
     def _op_DeletePropertySloppy(self, instr: Instruction) -> str:
-        key = self._reg_name(instr.args[0]) if instr.args else "ACCU"
-        return f"ACCU = delete ACCU[{key}]"
+        receiver = self._reg_name(instr.args[0])
+        return f"ACCU = delete {receiver}[ACCU]"
+
+    def _op_DeletePropertyStrict(self, instr: Instruction) -> str:
+        receiver = self._reg_name(instr.args[0])
+        return f"ACCU = delete_property_strict({receiver}, ACCU)"
 
     def _op_ForInEnumerate(self, instr: Instruction) -> str:
         source = self._reg_name(instr.args[0]) if instr.args else "ACCU"

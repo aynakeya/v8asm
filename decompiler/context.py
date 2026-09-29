@@ -19,7 +19,9 @@ from .objects import (
 from .instruction import Instruction
 from .normalization import (
     DefaultParameterInitializer,
+    LexicalDeclaration,
     find_default_parameter_initializers,
+    prologue_initialized_names,
 )
 from .value_formatter import ValueFormatter
 
@@ -61,6 +63,7 @@ class DecompilerContext:
         self.function_creation_offsets: Dict[int, int] = {}
         self.function_names: Dict[int, str] = {}
         self.context_bindings: Dict[tuple[int, int], ContextBinding] = {}
+        self.bytecode_initialized_names: Dict[int, frozenset[str]] = {}
         self.bytecode_parameter_names: Dict[int, Dict[int, str]] = {}
         self.bytecode_parameter_defaults: Dict[int, Dict[int, str]] = {}
         self.bytecode_parameter_initializers: Dict[
@@ -396,6 +399,12 @@ class DecompilerContext:
     ) -> Optional[str]:
         return self._literal_load(bytecode, instruction)
 
+    def prologue_initialized_names(self, bytecode_address: int) -> frozenset[str]:
+        if bytecode_address not in self.bytecode_initialized_names:
+            bytecode = self.get_object(bytecode_address)
+            self.bytecode_initialized_names[bytecode_address] = prologue_initialized_names(self, bytecode)
+        return self.bytecode_initialized_names[bytecode_address]
+
     def scope_for_instruction(
         self, bytecode: V8BytecodeArray, instruction: Instruction
     ) -> Optional[V8ScopeInfo]:
@@ -429,16 +438,22 @@ class DecompilerContext:
             for scope in self.bytecode_scopes.get(bytecode.address, ())
         )
 
-    def script_context_names(self, bytecode: V8BytecodeArray) -> List[str]:
-        names: List[str] = []
+    def script_context_declarations(self, bytecode: V8BytecodeArray) -> List[LexicalDeclaration]:
+        declarations: List[LexicalDeclaration] = []
         for scope in self.bytecode_scopes.get(bytecode.address, ()):
             if scope.scope_type != "SCRIPT_SCOPE":
                 continue
             for slot in sorted(scope.context_slot_names):
                 name = self.scope_slot_name(scope, slot)
-                if name and IDENT_RE.match(name) and name not in names:
-                    names.append(name)
-        return names
+                if name and IDENT_RE.match(name):
+                    needs_initialization = scope.context_slot_initialization.get(slot)
+                    initializer = (
+                        "HOLE" if needs_initialization else "undefined"
+                    ) if needs_initialization is not None else f"unresolved_initialization({json.dumps(name)})"
+                    declaration = LexicalDeclaration(name, initializer)
+                    if declaration not in declarations:
+                        declarations.append(declaration)
+        return declarations
 
     def constant_pool_entries(self, bytecode: V8BytecodeArray) -> List[ConstantPoolEntry]:
         pool = self.bytecode_constant_pools.get(bytecode.address)
@@ -524,6 +539,17 @@ class DecompilerContext:
                 break
             parent_address = self.function_parent.get(current.address)
             parent = self.get_object(parent_address) if parent_address else None
+            if parent is None:
+                function = self.get_function_for_bytecode(current)
+                scope = self.get_object(function.scope_info.address) if function and function.scope_info else None
+                seen = {item.address for item in chain}
+                while isinstance(scope, V8ScopeInfo) and scope.outer_scope_info:
+                    scope = self.get_object(scope.outer_scope_info.address)
+                    if not isinstance(scope, V8ScopeInfo) or scope.address in seen:
+                        break
+                    seen.add(scope.address)
+                    if scope.context_slot_names:
+                        chain.append(scope)
             current = parent if isinstance(parent, V8BytecodeArray) else None
         return chain
 

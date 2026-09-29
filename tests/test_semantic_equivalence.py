@@ -67,9 +67,10 @@ def decompile_fixture(name: str) -> str:
 
 
 class SemanticEquivalenceTests(unittest.TestCase):
-    def assert_fixture_equivalent(self, name: str) -> None:
+    def assert_fixture_equivalent(self, name: str, cache_name: str | None = None) -> None:
         source = (FIXTURES / f"{name}.js").read_text(encoding="utf-8")
-        recovered = decompile_fixture(name)
+        recovered = decompile_fixture(cache_name or name)
+        self.assertNotIn("// WARNING:", recovered)
         self.assertEqual(
             observe_javascript(recovered),
             observe_javascript(source),
@@ -85,8 +86,47 @@ class SemanticEquivalenceTests(unittest.TestCase):
     def test_arithmetic_baseline(self) -> None:
         self.assert_fixture_equivalent("arithmetic")
 
+    def test_numeric_conversion_and_updates(self) -> None:
+        for cache in ("numeric-conversion", "numeric-conversion-10.2.154.26"):
+            with self.subTest(cache=cache):
+                self.assert_fixture_equivalent("numeric-conversion", cache)
+
+    def test_delete_property_modes_and_keys(self) -> None:
+        for cache in ("delete-property", "delete-property-10.2.154.26"):
+            with self.subTest(cache=cache):
+                self.assert_fixture_equivalent("delete-property", cache)
+
     def test_short_circuit_evaluation(self) -> None:
         self.assert_fixture_equivalent("short-circuit")
+
+    def test_optional_chain_and_nullish_evaluation(self) -> None:
+        self.assert_fixture_equivalent("optional-nullish")
+
+    def test_default_rest_and_spread_arguments(self) -> None:
+        self.assert_fixture_equivalent("default-rest-spread")
+
+    def test_object_rest_and_spread_properties(self) -> None:
+        for cache_name in (
+            "object-rest-spread",
+            "object-rest-spread-10.2.154.26",
+            "object-rest-spread-11.3.244.8",
+            "object-rest-spread-12.4.254.21",
+        ):
+            with self.subTest(cache=cache_name):
+                self.assert_fixture_equivalent("object-rest-spread", cache_name)
+
+    def test_literal_definition_order_and_function_kinds(self) -> None:
+        self.assert_fixture_equivalent("literal-effects")
+
+    def test_object_syntax_is_recovered_without_runtime_helpers(self) -> None:
+        parsed = parse_disassembly_file(FIXTURES / "object-rest-spread.jsc")
+        recovered = decompile_objects(load_structured_objects(disassembly_to_dict(parsed)))
+        self.assertIn("get alphaValue() {", recovered)
+        self.assertIn("...r6 } = r2", recovered)
+        self.assertIn("[r0](arg0) {", recovered)
+        for noise in ("ACCU", "ToName(", "define_literal_property(", "CopyDataProperties", "HOLE", "pushContext("):
+            self.assertNotIn(noise, recovered)
+        self.assertEqual(observe_javascript(recovered), observe_javascript((FIXTURES / "object-rest-spread.js").read_text()))
 
     def test_try_catch_finally_completion(self) -> None:
         self.assert_fixture_equivalent("try-finally")
@@ -104,6 +144,14 @@ class SemanticEquivalenceTests(unittest.TestCase):
     def test_context_depth_and_shadowing(self) -> None:
         self.assert_fixture_equivalent("context-depth")
 
+    def test_lexical_initialization_and_closure_tdz(self) -> None:
+        for cache_name in (
+            "lexical-initialization", "lexical-initialization-10.2.154.26",
+            "lexical-initialization-11.3.244.8", "lexical-initialization-12.4.254.21",
+        ):
+            with self.subTest(cache=cache_name):
+                self.assert_fixture_equivalent("lexical-initialization", cache_name)
+
     def test_context_binding_provenance_is_explicit(self) -> None:
         recovered = decompile_fixture("context-depth")
         self.assertIn(
@@ -112,7 +160,7 @@ class SemanticEquivalenceTests(unittest.TestCase):
             recovered,
         )
         self.assertIn("function middle(arg0)", recovered)
-        self.assertIn("let value;", recovered)
+        self.assertIn("let value = HOLE;", recovered)
 
 
 if __name__ == "__main__":

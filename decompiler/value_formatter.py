@@ -97,6 +97,8 @@ class ValueFormatter:
                 plain = json.loads(key)
             except json.JSONDecodeError:
                 return key
+            if plain == "__proto__":
+                return f"[{key}]"
             if plain.isidentifier():
                 return plain
         return key
@@ -105,6 +107,10 @@ class ValueFormatter:
         self, boilerplate: V8ObjectBoilerplateDescription
     ) -> str:
         parts = []
+        if boilerplate.flags and boilerplate.literal_flags and (
+            boilerplate.flags & boilerplate.literal_flags["object_literal_null_prototype"]
+        ):
+            parts.append("__proto__: null")
         entries = boilerplate.entries
         for index in range(0, len(entries), 2):
             key = entries[index]
