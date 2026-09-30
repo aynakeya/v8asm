@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List
 
-from .common import _extract_indent, _find_block_end, code_tokens, is_live_after
+from .common import _extract_indent, _find_block_end, code_tokens, expression_statement, is_live_after
 
 
 def _coalesce_accu_store_aliases(lines: List[str]) -> List[str]:
@@ -187,7 +187,7 @@ def _convert_unused_accu_assign_to_expr(lines: List[str]) -> List[str]:
             continue
 
         if not is_live_after(out, i + 1, "ACCU"):
-            out[i] = f"{indent}{expr}"
+            out[i] = f"{indent}{expression_statement(expr)}"
     return out
 
 

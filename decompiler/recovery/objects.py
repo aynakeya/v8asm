@@ -58,6 +58,8 @@ def _split_field(value: str) -> Optional[tuple[str, str]]:
 
 def _normalize_key(value: str) -> Optional[str]:
     value = value.strip()
+    if re.fullmatch(r"0|[1-9]\d*", value):
+        return value
     if IDENT_RE.fullmatch(value):
         return value
     if value.startswith('"') and value.endswith('"'):

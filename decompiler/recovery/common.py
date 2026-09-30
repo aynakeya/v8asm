@@ -17,6 +17,13 @@ def uses_identifier(text: str, name: str) -> bool:
     return re.search(rf"(?<![\w$.]){re.escape(name)}(?![\w$])", code_tokens(text)) is not None
 
 
+def expression_statement(value: str) -> str:
+    if value.startswith("{"):
+        value = f"({value})"
+    # These tokens can continue the preceding expression across a newline.
+    return f";{value};" if value.startswith(("(", "[", "/", "+", "-", "`")) else value
+
+
 def is_live_after(lines: list[str], start: int, name: str) -> bool:
     for line in lines[start:]:
         stripped = line.strip()

@@ -25,6 +25,8 @@ JSON 自动保留这些信息。未知 opcode 的 WARNING 会直接使语义测�
 | `default-rest-spread` | 默认值只对 undefined 生效；rest/spread、receiver、实参数量；unmapped arguments 不与形参联动 |
 | `object-rest-spread` | 计算键转换、getter 次数/顺序、Symbol 保留与排除、函数命名、`__proto__` 自有属性、null prototype、null/undefined/字符串 spread |
 | `literal-effects` | 对象复制和计算键的顺序、绕过原型 setter 的自有属性定义、getter/setter 名称与描述符、方法与普通函数的可构造性区别、嵌套空数组的独立身份、空/非空及嵌套对象的 null prototype |
+| `expression-statements` | 未使用的对象 spread、连续表达式和算术表达式仍执行副作用，语句边界不变成连续调用 |
+| `object-members` | 字符串/数字方法名、普通函数与方法的构造行为、计算键和 Symbol getter/setter、调用型键的辅助实现、重复成员与数据属性覆盖 |
 | `closures`、`context-depth` | 闭包状态、同名绑定、context 层级 |
 | `lexical-initialization` | 闭包、寄存器与脚本级 TDZ、重复调用的独立状态、显式 undefined、typeof 未定义全局变量与 getter 异常 |
 | `try-catch`、`try-finally` | 异常与 return/throw/finally completion |
@@ -51,7 +53,8 @@ uv run python -m unittest discover -s tests -p test_semantic_equivalence.py
 | 22.17.0 | `12.4.254.21-node.26` | `-12.4.254.21.jsc` |
 
 修改该源码时用表中对应 Node 重新生成三份版本缓存，不用当前 Node 冒充其他版本。
-`numeric-conversion` 与 `delete-property` 另有 Node 18.20.8 生成的 10.2 cache，覆盖
+`numeric-conversion`、`delete-property`、`expression-statements` 与 `object-members`
+另有 Node 18.20.8 生成的 10.2 cache，覆盖
 新旧 opcode 形态，不需要为这类修改重新构建原生 V8。
 测试在当前 Node 的隔离 `vm` 中对比各版本 cache 的恢复结果与同一源码；这是离线
 decompiler 的跨版本语义回归，不是 Electron snapshot 兼容性证明。

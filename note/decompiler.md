@@ -131,6 +131,8 @@ r7 = { ...r2, betaValue: mark(17), extraValue: 19 };
 解构前的分号防止前一条表达式因 JavaScript 自动分号插入规则而变成函数调用。只有
 排除键、求值顺序和临时值存活范围都匹配时才折叠；键仍有其他用途则保留 `ToName`。
 对象构造不能跨越未知语句或对象逃逸，也不能重复求值键或 getter。
+丢弃 ACCU 结果时也会处理独立表达式的语句边界，例如 `;({ ...r3 });`，避免与上一行
+调用合并；结果没有被使用并不意味着可以删除调用、类型转换或 getter 的副作用。
 
 `DefineNamedOwnProperty` / `DefineKeyedOwnProperty` 与普通属性赋值分开处理。前者
 必须定义自有数据属性，不能错误触发原型链上的 setter；未能折叠时保留
@@ -139,6 +141,14 @@ r7 = { ...r2, betaValue: mark(17), extraValue: 19 };
 getter/setter 和 concise method 的类型从 `ScopeInfo` 标志解码；位移、掩码和枚举
 顺序均由所选 V8 tag 的源码生成。只内联该父函数内单次引用、没有递归或兄弟函数引用的
 已知类型函数；普通函数不能为了外观改成不可构造的方法。缺失类型信息时不猜测。
+方法恢复依据 FunctionKind，不要求属性键与生成的函数标识符相同，因此字符串键和
+数字键不会退化成普通函数。不能内联的已知方法以独立的原生 method 值保留身份和
+不可构造性，避免把 `new method(...)` 的异常路径改成成功构造。
+
+计算属性 getter/setter 支持直接恢复为原生语法；键中包含调用等中间步骤、无法安全
+合并时，保留 `DefineGetterPropertyUnchecked` / `DefineSetterPropertyUnchecked`
+辅助调用。辅助实现只更新指定的访问器部分，保留另一半，且不跨越中间语句移动键转换。
+普通数据属性覆盖访问器、重复成员及 spread 后的访问器也有执行对照。
 
 `object-rest-spread` 的完整恢复结果可在没有 `--runtime` 的情况下直接执行，测试同时
 检查其副作用和结果。这个结论只针对该已覆盖样例，不代表任意 `.jsc` 都能恢复成可执行

@@ -205,12 +205,13 @@ def decompile_bytecode(
         body_lines = _render_linear(translator, original_instructions)
 
     nested_functions = list(nested_functions or ())
+    nested_owners = {
+        context.get_function_name(function): function
+        for child in context.child_functions(bytecode)
+        if (function := context.get_function_for_bytecode(child)) is not None
+    }
     if not linear and not notes:
-        kinds = {
-            context.get_function_name(function): function.func_kind
-            for child in context.child_functions(bytecode)
-            if (function := context.get_function_for_bytecode(child)) is not None
-        }
+        kinds = {name: function.func_kind for name, function in nested_owners.items()}
         body_lines = recover_object_rest(body_lines)
         body_lines, nested_functions = recover_object_literals(body_lines, nested_functions, kinds)
 
@@ -233,6 +234,24 @@ def decompile_bytecode(
     if linear or notes:
         body.extend(_format_constant_pool(context, bytecode))
     for nested in nested_functions or ():
+        declaration = re.match(r"function ([\w$]+)\((.*)\) \{", nested)
+        function = nested_owners.get(declaration[1]) if declaration else None
+        if not linear and function and function.func_kind in {
+            "ConciseMethod", "GetterFunction", "SetterFunction"
+        }:
+            # An unmerged method is still not a constructor. Keep its callable
+            # identity and original name instead of emitting a normal function.
+            name = function.name_value
+            if name is None:
+                name = "" if function.name is None else declaration[1]
+            key = json.dumps(name)
+            nested = "\n".join([
+                f"const {declaration[1]} = {{",
+                f"  [{key}]({declaration[2]}) {{",
+                *_indent_lines(nested.splitlines()[1:-1]),
+                "  }",
+                f"}}[{key}];",
+            ])
         body.append("")
         body.extend(_indent_lines(nested.splitlines()))
     body.extend(body_lines)

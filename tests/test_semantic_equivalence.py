@@ -118,6 +118,16 @@ class SemanticEquivalenceTests(unittest.TestCase):
     def test_literal_definition_order_and_function_kinds(self) -> None:
         self.assert_fixture_equivalent("literal-effects")
 
+    def test_discarded_expression_statement_boundaries(self) -> None:
+        for cache in ("expression-statements", "expression-statements-10.2.154.26"):
+            with self.subTest(cache=cache):
+                self.assert_fixture_equivalent("expression-statements", cache)
+
+    def test_object_methods_and_computed_accessors(self) -> None:
+        for cache in ("object-members", "object-members-10.2.154.26"):
+            with self.subTest(cache=cache):
+                self.assert_fixture_equivalent("object-members", cache)
+
     def test_object_syntax_is_recovered_without_runtime_helpers(self) -> None:
         parsed = parse_disassembly_file(FIXTURES / "object-rest-spread.jsc")
         recovered = decompile_objects(load_structured_objects(disassembly_to_dict(parsed)))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from .common import _extract_indent, is_live_after
+from .common import _extract_indent, expression_statement, is_live_after
 from .cleanup import _is_pure_expression
 
 
@@ -38,7 +38,7 @@ def compact_accumulator_expressions(lines: list[str]) -> list[str]:
                 index = cursor + 1
                 continue
             literal_store = re.fullmatch(
-                r'(define_literal_property\(r\d+, (?:r\d+|"(?:\\.|[^"\\])*"), )ACCU(, (?:true|false), true\))',
+                r'(define_literal_property\(r\d+, (?:r\d+|\d+|"(?:\\.|[^"\\])*"), )ACCU(, (?:true|false), true\))',
                 lines[cursor].strip(),
             )
             if literal_store and not is_live_after(lines, cursor + 1, "ACCU"):
@@ -48,8 +48,7 @@ def compact_accumulator_expressions(lines: list[str]) -> list[str]:
         if not is_live_after(lines, cursor, "ACCU"):
             # A dead result is not a dead evaluation (getters and calls can throw).
             if not _is_pure_expression(value):
-                expression = f"({value})" if value.startswith("{") else value
-                output.append(f"{indent}{expression}")
+                output.append(f"{indent}{expression_statement(value)}")
         else:
             output.append(f"{indent}ACCU = {value}")
         index = cursor

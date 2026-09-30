@@ -53,7 +53,7 @@ def recover_object_literals(
         return "\n".join([f"{prefix}{key}({params}) {{", *content, "}"])
 
     def data_field(key: str, value: str, set_name: bool = False) -> str | None:
-        concise = method(value, key, "ConciseMethod") if set_name or key == value else None
+        concise = method(value, key, "ConciseMethod")
         if concise is not None:
             return concise
         if set_name:
@@ -100,7 +100,7 @@ def recover_object_literals(
                 store_index += 1
                 statement = lines[store_index].strip()
             own = re.fullmatch(r"define_literal_property\((.*)\)", statement)
-            accessor = re.fullmatch(r"DefineAccessorPropertyUnchecked\((.*)\)", statement)
+            accessor = re.fullmatch(r"Define(Accessor|Getter|Setter)PropertyUnchecked\((.*)\)", statement)
             spread = re.fullmatch(r"CopyDataProperties\((.*)\)", statement)
             if own:
                 args = _split_top_level(own[1], ",")
@@ -131,24 +131,44 @@ def recover_object_literals(
                     fields.append(field)
                     if position is not None:
                         positions.pop(parsed[position].key)
-            elif accessor and key_register is None:
-                args = _split_top_level(accessor[1], ",")
-                if len(args) != 5 or args[0] != register or args[4] != "0":
+            elif accessor:
+                mode = accessor[1]
+                args = _split_top_level(accessor[2], ",")
+                if len(args) != (5 if mode == "Accessor" else 4) or args[0] != register or args[-1] != "0":
                     break
-                _, key, getter, setter, _ = args
-                name = _normalize_key(key)
-                position = positions.get(name)
-                if position is None or parsed[position].value != "undefined":
+                key = args[1]
+                if uses_identifier(key, register):
                     break
+                getter, setter = "null", "null"
+                if mode == "Accessor":
+                    getter, setter = args[2:4]
+                elif mode == "Getter":
+                    getter = args[2]
+                else:
+                    setter = args[2]
                 if any(fn != "null" and (fn not in eligible or function_kinds.get(fn) != kind)
                        for fn, kind in ((getter, "GetterFunction"), (setter, "SetterFunction"))):
                     break
-                key = name if name and re.fullmatch(r"[A-Za-z_$][\w$]*", name) else f"[{key}]"
+                if key_register:
+                    if (key != key_register or uses_identifier(key_expression, register)
+                        or is_live_after(lines, store_index + 1, key_register)
+                        or (getter != "null" and setter != "null")):
+                        break
+                    key = f"[{key_expression}]"
+                    position = None
+                else:
+                    name = _normalize_key(key) if key.startswith('"') else None
+                    position = positions.get(name)
+                    key = name if name and re.fullmatch(r"[A-Za-z_$][\w$]*", name) else f"[{key}]"
                 accessors = [method(fn, key, kind) for fn, kind in ((getter, "GetterFunction"), (setter, "SetterFunction")) if fn != "null"]
                 if not accessors:
                     break
-                fields[position] = ",\n".join(accessors)
-                positions.pop(name)
+                if position is not None and parsed[position].value == "undefined":
+                    fields[position] = ",\n".join(accessors)
+                else:
+                    fields.extend(accessors)
+                if position is not None:
+                    positions.pop(name)
             elif spread and key_register is None:
                 args = _split_top_level(spread[1], ",")
                 if len(args) != 2 or args[0] != register or uses_identifier(args[1], register):

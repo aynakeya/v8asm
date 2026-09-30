@@ -62,25 +62,34 @@ function checked_lexical(value, name) {
 function ThrowIteratorResultNotAnObject(v) {
   throw new TypeError("Iterator result is not an object: " + String(v));
 }
-function DefineAccessorPropertyUnchecked(receiver, key, getter, setter) {
-  Object.defineProperty(receiver, key, {
-    get: getter === null ? undefined : getter,
-    set: setter === null ? undefined : setter,
-    enumerable: true,
-    configurable: true,
-  });
-  return receiver;
+function DefineAccessorPropertyUnchecked(receiver, key, getter, setter, attributes) {
+  const descriptor = {
+    enumerable: !(attributes & 2),
+    configurable: !(attributes & 4),
+  };
+  if (getter !== null) descriptor.get = getter;
+  if (setter !== null) descriptor.set = setter;
+  Object.defineProperty(receiver, key, descriptor);
+}
+function DefineGetterPropertyUnchecked(receiver, key, getter, attributes) {
+  if (getter.name === "") set_function_name(getter, key, "get ");
+  DefineAccessorPropertyUnchecked(receiver, key, getter, null, attributes);
+}
+function DefineSetterPropertyUnchecked(receiver, key, setter, attributes) {
+  if (setter.name === "") set_function_name(setter, key, "set ");
+  DefineAccessorPropertyUnchecked(receiver, key, null, setter, attributes);
 }
 function ToName(value) {
   return Reflect.ownKeys({ [value]: 0 })[0];
 }
+function set_function_name(fn, key, prefix = "") {
+  const name = typeof key === "symbol"
+    ? (key.description === undefined ? "" : "[" + key.description + "]")
+    : String(key);
+  Object.defineProperty(fn, "name", { value: prefix + name, configurable: true });
+}
 function define_literal_property(target, key, value, setName, enumerable) {
-  if (setName) {
-    const name = typeof key === "symbol"
-      ? (key.description === undefined ? "" : "[" + key.description + "]")
-      : key;
-    Object.defineProperty(value, "name", { value: name, configurable: true });
-  }
+  if (setName) set_function_name(value, key);
   Object.defineProperty(target, key, {
     value, writable: true, enumerable, configurable: true,
   });
