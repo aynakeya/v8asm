@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any, TYPE_CHECKING
 
 from .objects import (
@@ -8,6 +9,8 @@ from .objects import (
     V8ArrayBoilerplateDescription,
     V8BytecodeArray,
     V8FixedArray,
+    V8HeapNumber,
+    V8Hole,
     V8ObjectBoilerplateDescription,
     V8ScopeInfo,
     V8SharedFunctionInfo,
@@ -26,11 +29,21 @@ class ValueFormatter:
     def format(self, raw: Any) -> str:
         if isinstance(raw, V8Smi):
             return str(raw.value)
+        if isinstance(raw, V8Hole):
+            return "HOLE"
+        if isinstance(raw, float):
+            if math.isnan(raw):
+                return "(0 / 0)"
+            if math.isinf(raw):
+                return "(1 / 0)" if raw > 0 else "(-1 / 0)"
+            return repr(raw)
 
         if isinstance(raw, V8Address):
             target = self.context.get_object(raw.address)
             if isinstance(target, V8String):
                 return json.dumps(target.value)
+            if isinstance(target, V8HeapNumber) and target.value is not None:
+                return self.format(target.value)
             if isinstance(target, V8SharedFunctionInfo):
                 return self.context.get_function_name(target)
             if isinstance(target, V8ArrayBoilerplateDescription):
@@ -61,9 +74,11 @@ class ValueFormatter:
             return "undefined"
         return str(raw)
 
-    def _format_fixed_array(self, array: V8FixedArray) -> str:
-        parts = [self.format(element) for element in array.elements]
-        return "[" + ", ".join(parts) + "]"
+    def _format_fixed_array(self, array: V8FixedArray, *, holes: bool = False) -> str:
+        parts = ["" if holes and isinstance(element, V8Hole) else self.format(element)
+                 for element in array.elements]
+        trailing = "," if parts and parts[-1] == "" else ""
+        return "[" + ", ".join(parts) + trailing + "]"
 
     def _format_array_boilerplate(
         self, boilerplate: V8ArrayBoilerplateDescription
@@ -74,7 +89,7 @@ class ValueFormatter:
             boilerplate.constant_elements.address
         )
         if isinstance(constant, V8FixedArray):
-            return self._format_fixed_array(constant)
+            return self._format_fixed_array(constant, holes=True)
         return f"<ArrayBoilerplate {boilerplate.elements_kind}>"
 
     @staticmethod

@@ -73,6 +73,11 @@ uv run python -m disassembler.generate_profiles \
 使用源码目录时必须由调用者确认其来源；记录的哈希可与已提交产物比较，生成器不把
 目录名字当成版本证明。修改来源或生成规则后重新生成，不直接编辑 layout JSON。
 
+数值对象的 `number_layout` 同样由标准 profile 命令生成，读取各 tag 的
+`heap-object.tq`、`primitive-heap-object.tq`、`fixed-array.tq`、`heap-number.tq` 与
+`globals.h`。不同 map 大小、tagged 宽度和 sentinel 不由 fixture 内的对象编号推断。
+`numeric-literals` 已加入四个 Node runtime 的清单，复用同一生成入口。
+
 root 变体只补充这一组元数据，不宣称整个 Node/Electron 的 flags、serializer 和
 对象布局都与标准 V8 相同。必须用真实 runtime cache 验证。运行时显式使用完整版本：
 

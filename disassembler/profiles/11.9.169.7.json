@@ -1726,6 +1726,13 @@
     "define_keyed_set_function_name": 1,
     "object_literal_null_prototype": 16
   },
+  "number_layout": {
+    "fixed_double_data_slot": 2,
+    "fixed_double_length_slot": 1,
+    "heap_number_value_slot": 1,
+    "hole_nan_bits": "0xfff7fffffff7ffff",
+    "undefined_nan_bits": null
+  },
   "object_boilerplate_layout": {
     "backing_store_size_in_tail": true,
     "backing_store_size_slot": null,

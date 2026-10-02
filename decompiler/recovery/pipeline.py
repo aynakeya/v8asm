@@ -54,7 +54,6 @@ from .logical import (
     recover_nullish_assignments,
     recover_or_fallback_assignments,
     recover_or_fallback_returns,
-    rewrite_accu_condition_after_duplicate_store,
     rewrite_accu_condition_after_reg_store,
 )
 from .optional import recover_optional_chains
@@ -85,7 +84,6 @@ def recover_js_structures(lines: List[str]) -> List[str]:
     current = recover_nullish_assignments(current)
     current = recover_undefined_default_assignments(current)
     current = recover_or_fallback_assignments(current)
-    current = rewrite_accu_condition_after_duplicate_store(current)
     current = rewrite_accu_condition_after_reg_store(current)
     current = inline_accu_equality_condition_loads(current)
     current = inline_accu_condition_loads(current)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import List
 
-from .common import _extract_indent, _find_block_end
+from .common import _extract_indent, _find_block_end, is_live_after
 
 
 def _body_reads_accu_before_reassign(lines: List[str], start: int, end: int) -> bool:
@@ -89,6 +89,8 @@ def _try_recover_nullish_assignment(
         replacement.append(f"{indent}{destination} ??= {rhs}")
     else:
         replacement = [f"{indent}{destination} = ({lhs} ?? {rhs})"]
+    if is_live_after(lines, else_end + 2, "ACCU"):
+        replacement.append(f"{indent}ACCU = {destination}")
     return replacement, else_end + 2
 
 
@@ -199,39 +201,12 @@ def rewrite_accu_condition_after_reg_store(lines: List[str]) -> List[str]:
     for idx in range(len(out) - 1):
         s0 = out[idx].strip()
         s1 = out[idx + 1].strip()
-        m_store = re.match(r"^(r\d+)\s*=\s*(.+)$", s0)
+        m_store = re.fullmatch(r"(r\d+)\s*=\s*ACCU", s0)
         m_if = _match_accu_truthy_if(s1, allow_wrapped_negation=False)
         if not m_store or m_if is None:
             continue
-        expr = m_store.group(2).strip()
-        if "ACCU" in expr:
-            continue
         indent = _extract_indent(out[idx + 1])
         out[idx + 1] = _format_truthy_if(indent, m_if, m_store.group(1))
-    return out
-
-
-def rewrite_accu_condition_after_duplicate_store(lines: List[str]) -> List[str]:
-    out: List[str] = []
-    i = 0
-    while i < len(lines):
-        if i + 2 < len(lines):
-            s0 = lines[i].strip()
-            s1 = lines[i + 1].strip()
-            s2 = lines[i + 2].strip()
-            m_accu = re.match(r"^ACCU\s*=\s*(.+)$", s0)
-            m_store = re.match(r"^(r\d+)\s*=\s*(.+)$", s1)
-            m_if = _match_accu_truthy_if(s2, allow_wrapped_negation=True)
-            if m_accu and m_store and m_if is not None:
-                expr = m_accu.group(1).strip()
-                if expr == m_store.group(2).strip() and "ACCU" not in expr:
-                    out.append(lines[i + 1])
-                    indent = _extract_indent(lines[i + 2])
-                    out.append(_format_truthy_if(indent, m_if, m_store.group(1)))
-                    i += 3
-                    continue
-        out.append(lines[i])
-        i += 1
     return out
 
 

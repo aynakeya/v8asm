@@ -186,13 +186,11 @@ class ObjectStreamParser:
         fixed_repeat = tags.get("FixedRepeat", tags.get("FixedRepeatRoot"))
         if fixed_repeat is not None and fixed_repeat <= tag < fixed_repeat + 16:
             count = tag - fixed_repeat + 2
-            root = self.reader.byte()
-            return count, Reference("repeated_root", (root, count))
+            return self._repeat(obj, slot, count, "FixedRepeatRoot" in tags)
         variable_repeat = tags.get("VariableRepeat", tags.get("VariableRepeatRoot"))
         if variable_repeat is not None and tag == variable_repeat:
             count = self.reader.uint30() + 18
-            root = self.reader.byte()
-            return count, Reference("repeated_root", (root, count))
+            return self._repeat(obj, slot, count, "VariableRepeatRoot" in tags)
         if tag == tags["Nop"]:
             return 0, None
         if tag == tags.get("RegisterPendingForwardRef"):
@@ -263,6 +261,21 @@ class ObjectStreamParser:
     def _add_hot(self, reference: Reference) -> None:
         self.hot_objects[self.hot_index] = reference
         self.hot_index = (self.hot_index + 1) & 7
+
+    def _repeat(
+        self, obj: SerializedObject | None, slot: int, count: int, root_only: bool
+    ) -> tuple[int, None]:
+        if obj is None or slot + count > obj.size // self.tagged_size:
+            raise ParseError("repeated reference exceeds owning object")
+        if root_only:
+            reference = Reference("root", (self.reader.byte(),))
+        else:
+            consumed, reference = self._reference(self.reader.byte(), None, 0)
+            if consumed != 1 or reference is None:
+                raise ParseError("repeat requires a single object reference")
+        for index in range(count):
+            obj.references[(slot + index) * self.tagged_size] = reference
+        return count, None
 
     def _raw(
         self, obj: SerializedObject | None, slot: int, slots: int

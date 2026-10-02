@@ -97,6 +97,35 @@ Node 24.7.0 无 snapshot 的结果与错误 snapshot 的拒绝结果另存为对
 详见 [Taskboard 报告](application-fixture.md)。没有创建 tag、修改版本号或发布产物。
 生成配方与可重复使用的入口统一记录在[生成资产](generated-assets.md)。
 
+### 2026-10-02 数值与稀疏数组
+
+上一轮基线已提交为 `c18ee0a`。本轮继续修复数值对象、serializer 重复引用和
+分支 ACCU 语义，不构建 V8、不更改其源码或编译缓存：
+
+- 全量运行 238 项，236 项在沙箱内通过；两项 checkversion 多进程测试因本地 socket
+  限制中断，随后仅对这两项在沙箱外重跑，均通过。无跳过；
+- `numeric-literals` 在 Node 18.20.8、20.20.2、22.17.0、24.7.0 的真实 cache 上
+  均与源码行为一致；生成信息、源码/cache 校验值已记录到 manifest；
+- 官方 Electron 35.7.5 / V8 13.4.114.21-electron.0 同样编译并执行该样例，加载
+  checksum 匹配的 context snapshot，4 字节 tagged 形态行为一致，WARNING 为零；
+- 数值布局从 14 个精确 V8 tag 重新生成；测试拒绝越界/缺失数值数据、重复引用越界、
+  缺少数值字段的旧 JSON 和无法确认构建开关的 undefined-NaN 编码；
+- Taskboard 重新运行仍为完整 0/11、隔离 7/11。codec 的数组错误已消失，但模板与
+  BigInt 未实现，不把错误位置后移记成场景通过。
+
+本机原 `.venv` 指向已不存在的 `/usr/bin/python3.12`。本轮采用临时 uv 环境和系统
+Python 3.14.4，保留 `.python-version` 与原 `.venv`，没有悄悄修改项目 Python 约定。
+复现临时验证环境可给 uv 命令加以下前缀：
+
+```bash
+UV_PROJECT_ENVIRONMENT=/tmp/v8asm-venv-314 \
+  uv --cache-dir /tmp/v8asm-uv-cache run --python /usr/bin/python3 --locked --offline \
+  python -m unittest discover -s tests -p test_semantic_equivalence.py -k numeric_literals
+```
+
+损失精度的文本 printer 不作为新数值功能的输入依据；需要重新生成 `--format json`。
+JavaScript 运行时对 NaN 的表示允许规范化，不宣称任意 NaN payload 经执行仍逐位相同。
+
 ### 何时运行矩阵
 
 - 普通表达式和 opcode 修复：相关单元测试与语义 fixture。

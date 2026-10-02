@@ -29,6 +29,16 @@ class V8Smi:
     def __str__(self):
         return self.__repr__()
 
+
+class V8Hole:
+    """An absent array element, not JavaScript undefined."""
+
+
+class V8HeapNumber(V8HeapObject):
+    def __init__(self, address: int, i_type: str, lines: List[str]):
+        super().__init__(address, i_type, lines)
+        self.value: float | None = None
+
 T = TypeVar('T')
 
 class V8Address(Generic[T]):

@@ -17,6 +17,7 @@ JSON 自动保留这些信息。未知 opcode 的 WARNING 会直接使语义测�
 | --- | --- |
 | `arithmetic` | 算术表达式 |
 | `numeric-conversion` | Number/BigInt 前后置更新、转换 hint 与顺序、负零、非法 primitive、复合赋值的结果值 |
+| `numeric-literals` | HeapNumber、稠密/稀疏 double array、极小/极大有限数、正负 Infinity、负零、显式 undefined 与空洞、末尾/连续空洞、重复引用、多次创建的独立性 |
 | `conversion-boundaries` | 字符串转换、一元加/取负的 Number/BigInt/Symbol 边界、负零、转换 hint 与副作用顺序、零参数构造调用 |
 | `iterable-spread` | 独立数组复制、稀疏数组物化、Set、Unicode 迭代、iterator/next/done/value getter 顺序与异常、无额外 IteratorClose |
 | `delete-property` | 严格/非严格删除，计算键与 Symbol、不可配置属性、原始值、null、Proxy 拒绝删除 |
@@ -50,7 +51,7 @@ uv run python -m unittest discover -s tests -p test_semantic_equivalence.py
 ```
 
 `object-rest-spread`、`lexical-initialization` 以及上述新增的
-`conversion-boundaries`、`iterable-spread`、`context-lifetimes`、`exception-completions`、`class-members`
+`conversion-boundaries`、`numeric-literals`、`iterable-spread`、`context-lifetimes`、`exception-completions`、`class-members`
 各有三份跨大版本 cache，均来自各自同一个 `.js` 文件：
 
 | Node | 实际 V8 | cache 文件后缀 |
@@ -89,6 +90,12 @@ decompiler 的跨版本语义回归，不是 Electron snapshot 兼容性证明�
 本组中少量内置属性名通过字符串拼接构造，使 fixture 本身不依赖外部 RO 字符串；
 解析器没有为这些测试添加字符串猜测或地址特判。
 数值转换 fixture 使用非内置数字字符串，避免把无法读取 RO 常量与转换指令语义混为一谈。
+`numeric-literals` 的空洞观察标记使用非内置字符串；判断依据是索引是否存在，
+不是标记文本。JSON 观察前先记录类型、数值字符串和负零标志，避免 JSON 把这些差异吞掉。
+
+`test_disassembler.py` 另验证 IEEE-754 位模式的无损 JSON 表示、截断数值数据与长度越界
+拒绝，以及新旧 serializer 的固定/变长重复引用。构建开关未确认的实验性
+undefined-NaN 编码明确报错，不将其猜成 undefined 或普通 NaN。
 
 `tests/test_translator.py` 另外执行验证 `ToObject` 的目标寄存器、ACCU 保持不变及
 null/undefined 异常；还覆盖普通、Wide、ExtraWide switch 表中的空槽与默认分支。

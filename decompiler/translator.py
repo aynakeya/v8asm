@@ -4,7 +4,7 @@ import json
 import re
 from typing import Dict, List, Optional, Tuple
 
-from .objects import V8Address, V8ObjectBoilerplateDescription, V8SharedFunctionInfo
+from .objects import V8Address, V8HeapNumber, V8ObjectBoilerplateDescription, V8SharedFunctionInfo
 from .objects.bytecode import V8BytecodeArray
 
 from .context import ConstantPoolEntry, DecompilerContext
@@ -122,6 +122,9 @@ class InstructionTranslator:
     def _const(self, idx: int) -> str:
         entry = self.constants.get(idx)
         if entry:
+            target = self.context.get_object(entry.raw.address) if isinstance(entry.raw, V8Address) else None
+            if isinstance(entry.raw, float) or (isinstance(target, V8HeapNumber) and target.value is not None):
+                return entry.display
             return self._display_to_expr(entry.display)
         return f"Const[{idx}]"
 

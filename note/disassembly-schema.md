@@ -88,6 +88,25 @@ Smi 表示为 `{"kind": "smi", "value": 3}`。引用示例：
 
 未知 cache/attached 引用保持 `unresolved`，不能猜 V8 instance type 或应用名称。
 
+## 数值常量
+
+`HeapNumber.value` 与 `FixedDoubleArray.elements[]` 中的数值使用
+`{"kind": "float64", "bits": "0x8000000000000000"}`。`bits` 是 IEEE-754 binary64 的
+64 位整数表示，上例为负零；它不是 JSON 浮点数。解析器保留 NaN 的原始位模式，
+输出文件可以用严格 JSON 编码器读取。JavaScript 源码恢复保留 Number 语义，不承诺
+任意 NaN payload 在宿主引擎运算或类型转换后仍逐位一致。
+
+`FixedDoubleArray` 还包含 `length`；空槽使用 `{"kind": "hole"}`，不是 undefined。
+普通 `FixedArray` 的 hole root 引用保留 `literal: "HOLE"` 与 root 来源信息。
+已确认的数值 root 可携带 `NaN`、`Infinity`、`-Infinity`、`-0` literal。
+
+缺少元素数据的旧 FixedDoubleArray JSON 应重新生成，不能把它当作空数组。
+新数值路径要求完整 JSON；原生文本 printer 可能已舍入数值，不能作为无损恢复输入。
+
+对象 `type_evidence.kind: "bytecode_literal_map"` 表示该对象与同一 payload 中一个
+已由 literal operand 证明类型的对象共享 map；`witness_object_index` 指明证据来源。
+它不同于 profile 的 root 名称匹配，也不通过对象大小或相邻地址猜类型。
+
 ## 指令和词法关系
 
 `BytecodeArray` 包含标量元数据、`constant_pool_address`、handler 条目和结构化指令。

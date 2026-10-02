@@ -82,7 +82,7 @@ vm 执行限时 2 秒，Python 子进程限时 8 秒，串行运行。
 
 ## 匹配 Electron 的实测
 
-2026-10-01 使用本地已有的官方 Electron **35.7.5**，实际 V8 为
+2026-10-02 使用本地已有的官方 Electron **35.7.5**，实际 V8 为
 **13.4.114.21-electron.0**。同一个 executable 编译 cache、执行原源码和恢复代码：
 
 ```bash
@@ -90,7 +90,7 @@ ELECTRON_DIR=/home/aynakeya/workspace/tmp/v8test/electron-cache/v35.7.5-linux-x6
 ELECTRON_RUN_AS_NODE=1 uv run python tests/run_application_fixture.py \
   --node "$ELECTRON_DIR/electron" \
   --snapshot-blob "$ELECTRON_DIR/v8_context_snapshot.bin" \
-  --out tests/decomp_rounds/out/taskboard-electron-35-candidate
+  --out tests/decomp_rounds/out/taskboard-electron-35-numeric-literals
 ```
 
 这份 cache 的 read-only checksum 为 `0x4e6b3214`，与 `v8_context_snapshot.bin`
@@ -106,7 +106,7 @@ ELECTRON_RUN_AS_NODE=1 uv run python tests/run_application_fixture.py \
 | 语法错误 | advanced_classes | `this = r6` 等非法赋值；派生构造、super、字段初始化仍未恢复 |
 | 运行错误 | generators | `CreateJSGeneratorObject` 未定义，yield 状态机尚未恢复 |
 | 运行错误 | async | `AsyncFunctionEnter` 未定义，await/resume 尚未恢复 |
-| 运行错误 | codec | `ArrayBoilerplate_5` 未定义；对应稀疏 double array，另有 `GetTemplateObject` WARNING |
+| 运行错误 | codec | 数值/稀疏数组已恢复；`GetTemplateObject` 仍有 WARNING，读取模板的 `raw[0]` 失败，BigInt 常量也尚未解码 |
 
 Node **24.7.0 / 13.6.233.10-node.26** 的无 snapshot 对照也已运行。该输入中的
 `.push`、`.toLowerCase` 等来自 RO heap，缺少对应 snapshot 时保留占位符，不能把
@@ -130,6 +130,12 @@ Node **24.7.0 / 13.6.233.10-node.26** 的无 snapshot 对照也已运行。该�
 5. 修复两处后处理误删：`...ACCU` 未被识别为读取，以及短路分支之外仍使用的比较结果。
    另修复 Node 20.20.2 root 回移引起的 `next`/`resolve` 错位，使用官方源码生成的
    精确版本布局。生成入口、版本与产物记录见[生成资产](generated-assets.md)。
+6. 补齐 HeapNumber/FixedDoubleArray 与重复 serializer 引用，区分空洞、undefined、
+   负零和非有限数。独立的 `numeric-literals` fixture 在 V8 10.2/11.3/12.4/13.6
+   的 Node cache 上行为一致；另由此 Electron 编译、加载匹配 context snapshot、
+   执行源码和恢复代码，4 字节 tagged 布局也通过。诊断产物在
+   `tests/decomp_rounds/out/numeric-literals-electron-35/`。这个独立成功不代表 codec
+   的模板和 BigInt 已经支持。
 
 对应测试入口：
 
@@ -146,10 +152,9 @@ uv run python -m unittest discover -s tests -p test_application_fixture.py
    bytecode 恢复 super/初始化语义，不能把 `this = ...` 直接删掉。
 2. **P1：generator 与 async。** 分别恢复 suspension/resume/completion，保留
    return/throw/finally 次序；不能添加返回 undefined 的假 helper 来绕过错误。
-3. **P1：稀疏 double array 与模板对象。** 结构化对象图已将该常量标为
-   `FixedDoubleArray`、elements_kind=5，但恢复仍留下未定义 ArrayBoilerplate 名称。
-   需要继续定位解析/formatter 边界，区分空洞、undefined、负零和 NaN，并恢复模板
-   对象的 raw/cooked 数组与身份。不根据此处单一数值硬编码跨版本类型。
+3. **P1：模板对象与 BigInt 常量。** 恢复 raw/cooked 数组、冻结状态、同一调用点的
+   身份及不同调用点的区别。BigInt 必须从源码布局恢复，不经 Number 中转；
+   不根据某一版本中的偏移或对象编号跨版本猜测。
 4. **P2：可读性。** 正确性稳定后，把显式 dispatch 恢复成原生 switch/for-of/try，
    最后考虑变量命名；业务用途猜测和混淆字符串解码仍不属于 fidelity decompiler。
 

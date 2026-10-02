@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -8,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from disassembler.cache import parse_header
@@ -18,7 +20,7 @@ from disassembler.disassembler import (
     parse_disassembly_file,
 )
 from disassembler.profiles import load_profiles
-from disassembler.serializer import ObjectStreamParser, Reference
+from disassembler.serializer import ObjectStreamParser, ParseError, RawChunk, Reference
 from disassembler.snapshot import ReadOnlySnapshot
 from disassembler.structured import disassembly_to_dict
 from disassembler.structured_builder import StructuredGraphBuilder
@@ -27,7 +29,7 @@ from disassembler.structured_builder import StructuredGraphBuilder
 ROOT = Path(__file__).resolve().parents[1]
 from decompiler import decompile_objects
 from decompiler.context import DecompilerContext
-from decompiler.objects import V8Address, V8ArrayBoilerplateDescription, V8FixedArray
+from decompiler.objects import V8Address, V8ArrayBoilerplateDescription, V8FixedArray, V8Hole
 from decompiler.parser import parse_objects
 from decompiler.structured import load_structured_objects
 
@@ -398,6 +400,78 @@ class OfflineDisassemblerTests(unittest.TestCase):
         self.assertEqual(len(objects), 2)
         self.assertEqual(objects[0].references[4].kind, "forward")
         self.assertEqual(objects[0].references[4].object_index, 1)
+
+    def test_repeated_serializer_references_preserve_identity_and_bounds(self) -> None:
+        for version in ("10.2.154.26", "11.3.244.8", "13.6.233.10"):
+            profile = load_profiles().by_version(version)
+            tags = profile.serializer_tags
+            legacy = "FixedRepeat" in tags
+            fixed = tags["FixedRepeat" if legacy else "FixedRepeatRoot"]
+            variable = tags["VariableRepeat" if legacy else "VariableRepeatRoot"]
+            root = tags["RootArrayConstants"]
+            for size in (4, 8):
+                for count in (2, 20):
+                    for nested in (False, True) if legacy else (False,):
+                        with self.subTest(version=version, size=size, count=count, nested=nested):
+                            repeat = bytes([fixed]) if count == 2 else bytes([variable]) + encode_uint30(count - 18)
+                            target = bytes([root + 5]) if legacy else b"\x05"
+                            if nested:
+                                target = bytes([0]) + encode_uint30(1) + bytes([root])
+                            body = repeat + target + bytes([tags["Synchronize"]]) + bytes([tags["Nop"]]) * 4
+                            payload = bytes([0]) + encode_uint30(count + 1) + bytes([root]) + body
+                            objects = ObjectStreamParser(payload, profile, size).parse()
+                            expected = Reference("object", object_index=1) if nested else Reference("root", (5,))
+                            self.assertEqual(objects[0].references, {slot * size: expected for slot in range(1, count + 1)})
+                            truncated_owner = bytes([0]) + encode_uint30(count) + bytes([root]) + body
+                            with self.assertRaisesRegex(ParseError, "repeated reference exceeds"):
+                                ObjectStreamParser(truncated_owner, profile, size).parse()
+
+    def test_numeric_object_values_and_bounds(self) -> None:
+        parsed = parse_disassembly_file(ROOT / "tests/semantic_fixtures/numeric-literals.jsc")
+        document = disassembly_to_dict(parsed)
+        record = next(value for value in document["objects"].values()
+                      if value["type"] == "FixedDoubleArray" and value["length"] == 5)
+        obj = parsed.objects[record["serializer"]["object_index"]]
+        layout = parsed.profile.number_layout
+        start = layout["fixed_double_data_slot"] * parsed.tagged_size
+        bits = ["0x8000000000000000", "0x7ff8000000000001", "0x7ff0000000000000",
+                layout["hole_nan_bits"], "0xfff0000000000000"]
+        image = bytearray(obj.image()[0])
+        image[start:start + 40] = b"".join(int(value, 16).to_bytes(8, "little") for value in bits)
+
+        def with_image(data):
+            objects = list(parsed.objects)
+            objects[obj.index] = replace(obj, raw_chunks=[RawChunk(0, 0, bytes(data))])
+            return disassembly_to_dict(replace(parsed, objects=tuple(objects)))
+
+        changed = with_image(image)
+        encoded = changed["objects"][record["address"]]["elements"]
+        self.assertEqual(encoded[:3], [{"kind": "float64", "bits": value} for value in bits[:3]])
+        self.assertEqual(encoded[3:], [{"kind": "hole"}, {"kind": "float64", "bits": bits[4]}])
+        json.dumps(changed, allow_nan=False)
+        array = next(value for value in load_structured_objects(changed) if value.address == int(record["address"], 16))
+        self.assertEqual(math.copysign(1, array.elements[0]), -1)
+        self.assertTrue(math.isnan(array.elements[1]))
+        self.assertEqual(array.elements[2], math.inf)
+        self.assertIsInstance(array.elements[3], V8Hole)
+        self.assertEqual(array.elements[4], -math.inf)
+        incomplete = json.loads(json.dumps(changed))
+        del incomplete["objects"][record["address"]]["elements"]
+        with self.assertRaisesRegex(ValueError, "no numeric data"):
+            load_structured_objects(incomplete)
+        with self.assertRaisesRegex(ValueError, "structured JSON"):
+            parse_objects(["0x1234: [FixedDoubleArray]", " - length: 1", " 0: 1.25"])
+        ambiguous = bytearray(image)
+        ambiguous[start:start + 8] = int(layout["undefined_nan_bits"], 16).to_bytes(8, "little")
+        with self.assertRaisesRegex(ValueError, "requires confirmed build flags"):
+            with_image(ambiguous)
+        with self.assertRaisesRegex(ValueError, "missing numeric data"):
+            with_image(image[:-1])
+        offset = layout["fixed_double_length_slot"] * parsed.tagged_size
+        shift = 32 if parsed.tagged_size == 8 else 1
+        image[offset:offset + parsed.tagged_size] = (obj.size << shift).to_bytes(parsed.tagged_size, "little")
+        with self.assertRaisesRegex(ValueError, "invalid FixedDoubleArray length"):
+            with_image(image)
 
     def test_decodes_known_13_6_sequence(self) -> None:
         profiles = load_profiles()

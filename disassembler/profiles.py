@@ -76,6 +76,7 @@ class Profile:
     snapshot_spaces: int
     serializer_tags: dict[str, int]
     literal_flags: dict[str, int]
+    number_layout: dict[str, object]
     bytecode_array_layout: BytecodeArrayLayout
     handler_table_layout: dict[str, int]
     shared_function_info_layout: SharedFunctionInfoLayout
@@ -152,6 +153,7 @@ def load_profiles() -> ProfileSet:
             snapshot_spaces=item["snapshot_spaces"],
             serializer_tags=item["serializer_tags"],
             literal_flags=item["literal_flags"],
+            number_layout=item["number_layout"],
             bytecode_array_layout=BytecodeArrayLayout(**item["bytecode_array_layout"]),
             handler_table_layout=item["handler_table_layout"],
             shared_function_info_layout=SharedFunctionInfoLayout(

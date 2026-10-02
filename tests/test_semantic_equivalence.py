@@ -116,6 +116,11 @@ class SemanticEquivalenceTests(unittest.TestCase):
             with self.subTest(version=suffix):
                 self.assert_fixture_equivalent("iterable-spread", "iterable-spread" + suffix)
 
+    def test_numeric_literals_and_sparse_arrays(self) -> None:
+        for suffix in FEATURE_CACHE_SUFFIXES:
+            with self.subTest(version=suffix):
+                self.assert_fixture_equivalent("numeric-literals", "numeric-literals" + suffix)
+
     def test_context_activation_and_closure_lifetimes(self) -> None:
         for suffix in FEATURE_CACHE_SUFFIXES:
             with self.subTest(version=suffix):

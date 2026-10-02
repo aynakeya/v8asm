@@ -65,6 +65,7 @@ uv run python -m disassembler.generate_profiles \
 - bytecode opcode、operand 类型和宽度；
 - serializer tag；
 - `BytecodeArray`、`SharedFunctionInfo`、`ScopeInfo` 和 literal 对象布局；
+- HeapNumber/FixedDoubleArray 的数值字段位置与 hole/实验性 undefined-NaN 位模式；
 - handler table 的 offset/prediction 位域，以及 ClassBoilerplate、descriptor 和 accessor 布局；
 - runtime、intrinsic 和 root 名称；
 - static-root map、静态字符串及 snapshot space 信息；
@@ -157,6 +158,20 @@ ID、出现频率或调用位置猜测类型。
 
 - 数组及字符串实际位于 `.jsc` payload 中时，离线 parser 可以恢复；
 - 元素只引用 startup snapshot 的 read-only 对象时，仍需要匹配 snapshot 才能得到字符串。
+
+结构化 JSON 路径还会恢复 payload 内的 `HeapNumber` 和 `FixedDoubleArray`。
+浮点数使用 64 位十六进制位模式存储，不把 NaN/Infinity 塞进非标准 JSON number，
+也不经过有损的打印精度转换。数组 hole 单独编码，反编译时输出空槽和必要的尾逗号；
+显式 undefined 仍是已存在的元素，不能与 hole 合并。
+
+旧版没有完整 root 名称时，可使用同一 payload 中 literal operand 已证明的对象类型，
+通过完全相同的 map 身份识别嵌套 array/object boilerplate。JSON 记录 witness 对象，
+没有 witness 的未知 map 仍不猜测。此方法不等于旧版 root 表已经全部补齐。
+
+V8 旧 serializer 的 Repeat 后面是对象编码，新版 RepeatRoot 后面才是 root ID；
+解析器分别消费它们，并为每个被重复的槽位保存同一引用，不再只保存首项。
+数值布局和 sentinel 来自精确源码 tag，目前验证为 Linux x64 的 4/8 字节 tagged 形态。
+实验性 undefined-double 的编译开关无法由当前输入确认，遇到其歧义位模式会报错。
 
 原生 `v8asm` 可以作为补充对照，但不是正确性的唯一标准。原生对象 printer 本身也有
 版本差异、截断和崩溃风险。

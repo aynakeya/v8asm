@@ -38,3 +38,8 @@ class V8TrustedFixedArray(V8FixedArray):
     def __repr__(self):
         return (f"<V8TrustedFixedArray: 0x{self.address:012x} "
                 f"len={self.length} elems={len(self.elements)}>")
+
+
+class V8FixedDoubleArray(V8FixedArray):
+    def parse(self):
+        raise ValueError("FixedDoubleArray requires structured JSON for lossless numeric data")

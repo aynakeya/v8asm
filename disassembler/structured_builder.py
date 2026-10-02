@@ -72,6 +72,12 @@ def _root_literal(name: str | None) -> str | None:
     if name is None:
         return None
     normalized = "".join(character for character in name.lower() if character.isalpha())
+    if normalized == "theholevalue":
+        return "HOLE"
+    numbers = {"nanvalue": "NaN", "infinityvalue": "Infinity",
+               "minusinfinityvalue": "-Infinity", "minuszerovalue": "-0"}
+    if normalized in numbers:
+        return numbers[normalized]
     for literal in ("undefined", "null", "true", "false"):
         if normalized in {literal, f"{literal}value"}:
             return literal

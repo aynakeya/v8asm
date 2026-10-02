@@ -1805,7 +1805,7 @@ class SimplifyLinesTests(unittest.TestCase):
             ],
         )
 
-    def test_rewrites_accu_truthy_condition_after_duplicate_store(self) -> None:
+    def test_preserves_separate_calls_before_accu_condition(self) -> None:
         lines = [
             "ACCU = r2.exec(arg0)",
             "r0 = r2.exec(arg0)",
@@ -1819,8 +1819,9 @@ class SimplifyLinesTests(unittest.TestCase):
         self.assertEqual(
             simplified,
             [
+                "ACCU = r2.exec(arg0)",
                 "r0 = r2.exec(arg0)",
-                "if (!truthy(r0)) {",
+                "if (!(truthy(ACCU))) {",
                 '  return ("bad:" + String(arg0))',
                 "}",
             ],

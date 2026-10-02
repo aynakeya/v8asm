@@ -120,6 +120,11 @@ const arg1 = { toString() { events.push("key"); return "selected"; } };
             ['ACCU = "ACCU"', 'return { ACCU: 3 }.ACCU'],
             ["r0 = 1", "ACCU = 0", "ACCU = (r0 === ACCU)",
              "if (truthy(ACCU)) {", "  ACCU = 7", "}", "return ACCU"],
+            ["ACCU = true", "r0 = 0", "if (truthy(ACCU)) {", "  return 7", "}", "return 9"],
+            ["r0 = [false, true]", "ACCU = r0.shift()", "r1 = r0.shift()",
+             "if (!(truthy(ACCU))) {", "  return [ACCU, r1, r0.length]", "}", "return 9"],
+            ["ACCU = undefined", "if (!(isNullish(ACCU))) {", "}", "else {",
+             "  ACCU = 7", "}", "r0 = ACCU", "return [r0, ACCU]"],
         ]
         for lines in cases:
             with self.subTest(lines=lines):

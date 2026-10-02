@@ -687,6 +687,47 @@ def parse_class_boilerplate_layout(source: str, descriptors: str, structs: str, 
     }
 
 
+def parse_number_layout(heap: str, primitive: str, arrays: str, number: str, globals_source: str) -> dict[str, object]:
+    def fields(source, name, parent):
+        source = re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.DOTALL)
+        match = re.search(rf"extern class {name} extends {parent}\s*\{{(.*?)\}}", source, re.DOTALL)
+        if match is None:
+            raise ValueError(f"{name} Torque layout not found")
+        return re.findall(r"(\w+)(?:\[\w+\])?\s*:\s*(\w+)\s*;", match[1])
+
+    heap_fields = fields(heap, "HeapObject", "StrongTagged")
+    primitive_fields = fields(primitive, "PrimitiveHeapObject", "HeapObject")
+    array_fields = fields(arrays, "FixedArrayBase", "HeapObject")
+    double_fields = fields(arrays, "FixedDoubleArray", "FixedArrayBase")
+    number_fields = fields(number, "HeapNumber", "PrimitiveHeapObject")
+    if (heap_fields != [("map", "Map")] or primitive_fields
+        or array_fields != [("length", "Smi")] or number_fields != [("value", "float64")]
+        or len(double_fields) != 1 or double_fields[0][1] not in {"float64_or_hole", "float64_or_undefined_or_hole"}):
+        raise ValueError("unsupported numeric object layout")
+    # Extract the architecture-dependent sentinel definitions, not their numeric values.
+    first = globals_source.index("constexpr uint32_t kHoleNanUpper32")
+    start = globals_source.rfind("#if", 0, first)
+    end = globals_source.index("constexpr uint64_t kHoleNanInt64", first)
+    constants = subprocess.run(
+        ["cpp", "-P", "-x", "c++", "-DV8_ENABLE_EXPERIMENTAL_UNDEFINED_DOUBLE", "-"],
+        input=globals_source[start:end], text=True, capture_output=True, check=True,
+    ).stdout
+    words = {name: int(value, 16) for name, value in re.findall(
+        r"constexpr uint32_t (k\w+Nan(?:Upper|Lower)32)\s*=\s*(0x[\da-fA-F]+)", constants
+    )}
+
+    def bits(name):
+        return f"0x{(words[name + 'Upper32'] << 32) | words[name + 'Lower32']:016x}"
+
+    return {
+        "heap_number_value_slot": len(heap_fields) + len(primitive_fields),
+        "fixed_double_length_slot": len(heap_fields),
+        "fixed_double_data_slot": len(heap_fields) + len(array_fields),
+        "hole_nan_bits": bits("kHoleNan"),
+        "undefined_nan_bits": bits("kUndefinedNan") if "kUndefinedNanUpper32" in words else None,
+    }
+
+
 def build_profile(repo: Path, version: str) -> dict[str, object]:
     bytecodes_source = git_show(repo, version, "src/interpreter/bytecodes.h")
     serializer_source = git_show(repo, version, "src/snapshot/serializer-deserializer.h")
@@ -736,6 +777,13 @@ def build_profile(repo: Path, version: str) -> dict[str, object]:
         "serializer_tags": tags,
         "snapshot_spaces": tags["Backref"],
         "literal_flags": parse_literal_flags(globals_source, ast_source),
+        "number_layout": parse_number_layout(
+            git_show(repo, version, "src/objects/heap-object.tq"),
+            git_show(repo, version, "src/objects/primitive-heap-object.tq"),
+            git_show(repo, version, "src/objects/fixed-array.tq"),
+            git_show(repo, version, "src/objects/heap-number.tq"),
+            globals_source,
+        ),
         "bytecode_array_layout": parse_bytecode_array_layout(bytecode_array_source),
         "handler_table_layout": parse_handler_table_layout(
             git_show(repo, version, "src/codegen/handler-table.h")

@@ -103,6 +103,58 @@
       "source": "iterable-spread.js",
       "source_sha256": "e8dbd6be4da41ca264667f84028d303fdc0bf39b8384a4ef87e3d13705a0a3f2",
       "v8_version": "13.6.233.10-node.26"
+    },
+    "numeric-literals-10.2.154.26.jsc": {
+      "arch": "x64",
+      "cache_sha256": "77524c5c0741d687cf2516869cf974440a41927c1129f5f8629d630b0c0f35db",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "18.20.8",
+      "platform": "linux",
+      "runtime": "node18",
+      "source": "numeric-literals.js",
+      "source_sha256": "c890f7658b52727b60e94e000d555a1eb91007237246b462a8c891d931db74c8",
+      "v8_version": "10.2.154.26-node.39"
+    },
+    "numeric-literals-11.3.244.8.jsc": {
+      "arch": "x64",
+      "cache_sha256": "49c2db8da61c8b7f5592ff0a1010235ac38353999a2399396a62d60054cc8d89",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "20.20.2",
+      "platform": "linux",
+      "runtime": "node20",
+      "source": "numeric-literals.js",
+      "source_sha256": "c890f7658b52727b60e94e000d555a1eb91007237246b462a8c891d931db74c8",
+      "v8_version": "11.3.244.8-node.38"
+    },
+    "numeric-literals-12.4.254.21.jsc": {
+      "arch": "x64",
+      "cache_sha256": "f058da114afcc14ff4172216f31bc9ba35551712fa782e8f5382bd4e45c1d31c",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "22.17.0",
+      "platform": "linux",
+      "runtime": "node22",
+      "source": "numeric-literals.js",
+      "source_sha256": "c890f7658b52727b60e94e000d555a1eb91007237246b462a8c891d931db74c8",
+      "v8_version": "12.4.254.21-node.26"
+    },
+    "numeric-literals.jsc": {
+      "arch": "x64",
+      "cache_sha256": "1016d32686602cf9b72d1b6efa3d510e9a4978f03a87466474b462d8574b164a",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "24.7.0",
+      "platform": "linux",
+      "runtime": "node24",
+      "source": "numeric-literals.js",
+      "source_sha256": "c890f7658b52727b60e94e000d555a1eb91007237246b462a8c891d931db74c8",
+      "v8_version": "13.6.233.10-node.26"
     }
   },
   "compile_flags": [
@@ -121,6 +173,7 @@
         "iterable-spread",
         "lexical-initialization",
         "numeric-conversion",
+        "numeric-literals",
         "object-members",
         "object-rest-spread",
         "switch-routing"
@@ -137,6 +190,7 @@
         "exception-completions",
         "iterable-spread",
         "lexical-initialization",
+        "numeric-literals",
         "object-rest-spread"
       ],
       "node_version": "20.20.2",
@@ -151,6 +205,7 @@
         "exception-completions",
         "iterable-spread",
         "lexical-initialization",
+        "numeric-literals",
         "object-rest-spread"
       ],
       "node_version": "22.17.0",

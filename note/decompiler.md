@@ -47,6 +47,7 @@ JavaScript 辅助运行时，便于尝试执行伪代码，但不保证输出等
 - `typeof` 未定义全局变量不抛错，但属性 getter 自己抛出的异常必须保留；
 - Number/BigInt 的前后置自增自减、数值转换顺序、负零和复合赋值结果；
 - 一元加与取负的转换、Symbol/BigInt 异常边界，以及 iterable 的数组物化与副作用顺序；
+- 结构化数值常量和稀疏数组的空槽、末尾空槽、负零、非有限数以及独立复制；
 - 严格与非严格 `delete`，包括计算键、Symbol、不可配置属性和 Proxy trap。
 - 块/循环/catch 环境的独立生命周期，以及默认参数函数的 body context；
 - 纯 finally、嵌套异常、循环 completion 和 IteratorClose 的 break/throw 路径；
@@ -63,6 +64,8 @@ ACCU 时必须复用已读取的值，不能重复调用 key 表达式或 getter
 `ToNumber`、`Negate` 和 `CreateArrayFromIterable` 分别输出原生一元加、取负和数组
 spread；不使用 `Number()` 接受 BigInt，也不把 iterable 原样返回。清理 ACCU 时必须
 把 `...ACCU` 视为真正读取，并保留短路分支之后仍要使用的比较结果。
+不能把紧邻分支的任意寄存器赋值当作 ACCU 的别名，也不能因为两次调用的文本相同就
+删除其中一次。nullish 折叠后，后续仍使用 ACCU 时要保留其结果值。
 `CreateUnmappedArguments` 使用严格模式 helper 创建真正的独立 arguments 对象，
 不能简单替换为数组，也不能复用可能与形参联动的非严格模式 arguments。
 
@@ -108,7 +111,7 @@ spread；不使用 `Number()` 接受 BigInt，也不把 iterable 原样返回。
 在输入对象和控制流足够完整时，当前实现可以恢复或简化：
 
 - 函数树、参数和可识别的函数名；
-- 常量池字符串、Smi、FixedArray 和 literal boilerplate；
+- 常量池字符串、Smi、HeapNumber、FixedArray/FixedDoubleArray 和 literal boilerplate；
 - 属性读取、赋值、常见调用和构造调用；
 - if/else、短路表达式、循环、switch、try/catch/finally；
 - 对象和数组字面量的常见构建序列；
@@ -118,6 +121,11 @@ spread；不使用 `Number()` 接受 BigInt，也不把 iterable 原样返回。
 
 这些都是模式受限的语义恢复，不是通用 JavaScript 反编译证明。每个 rewrite 都应有
 正向测试和拒绝误折叠的反向测试。
+
+新增 HeapNumber/FixedDoubleArray 精确恢复以结构化 JSON 为输入。数值标量不再被
+清洗为 `fn_1_25` 之类的标识符；尾部空槽保留额外逗号，例如 `[1.25, ,]`。
+旧 JSON 若只有 FixedDoubleArray 类型而没有元素数据，会要求重新反汇编；文本
+FixedDoubleArray 输入也会明确拒绝，避免把已舍入的打印值或缺失字段当成正确数组。
 
 ## 对象解构与复制
 

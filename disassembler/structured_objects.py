@@ -30,6 +30,12 @@ class StructuredObjectEncoder:
         self.arrays = arrays
         self.semantic_types = semantic_types
         self.encode_reference = encode_reference
+        self.literal_maps = {
+            parsed.objects[index].map_reference: (object_type, index)
+            for index, object_type in semantic_types.items()
+            if object_type in {"ArrayBoilerplateDescription", "ObjectBoilerplateDescription"}
+            and parsed.objects[index].map_reference is not None
+        }
 
     def serializer_metadata(self, obj: SerializedObject) -> dict[str, Any]:
         return {
@@ -69,6 +75,9 @@ class StructuredObjectEncoder:
                 "kind": "bytecode_literal_operand",
                 **({"map_name": map_name} if map_name else {}),
             }
+        if obj.map_reference in self.literal_maps:
+            object_type, witness = self.literal_maps[obj.map_reference]
+            return object_type, {"kind": "bytecode_literal_map", "witness_object_index": witness}
         if _decode_string(obj, self.parsed.profile, self.parsed.tagged_size) is not None:
             return "String", {
                 "kind": "serialized_string_layout",
@@ -79,6 +88,8 @@ class StructuredObjectEncoder:
             "arrayboilerplatedescriptionmap": "ArrayBoilerplateDescription",
             "fixedarraymap": "FixedArray",
             "fixedcowarraymap": "FixedArray",
+            "fixeddoublearraymap": "FixedDoubleArray",
+            "heapnumbermap": "HeapNumber",
             "objectboilerplatedescriptionmap": "ObjectBoilerplateDescription",
             "scopeinfomap": "ScopeInfo",
             "sharedfunctioninfomap": "SharedFunctionInfo",
@@ -118,6 +129,8 @@ class StructuredObjectEncoder:
                 copy_on_write=_map_type(obj, self.parsed.profile)
                 == "fixedcowarraymap",
             )
+        elif object_type in {"FixedDoubleArray", "HeapNumber"}:
+            self._populate_numbers(record, obj)
         elif object_type == "ArrayBoilerplateDescription":
             image, present = obj.image()
             elements_kind = _read_smi(
@@ -135,6 +148,35 @@ class StructuredObjectEncoder:
         elif object_type == "ScopeInfo":
             self._populate_scope_info(record, obj)
         return record
+
+    def _populate_numbers(self, record: dict[str, Any], obj: SerializedObject) -> None:
+        layout = self.parsed.profile.number_layout
+        size = self.parsed.tagged_size
+        image, present = obj.image()
+        if record["type"] == "HeapNumber":
+            start = layout["heap_number_value_slot"] * size
+            length = 1
+        else:
+            length = _read_smi(image, present, layout["fixed_double_length_slot"] * size, size)
+            start = layout["fixed_double_data_slot"] * size
+        if length is None or length < 0 or start + length * 8 > obj.size:
+            raise ValueError(f"invalid {record['type']} length in object {obj.index}")
+        if not all(present[start:start + length * 8]):
+            raise ValueError(f"missing numeric data in object {obj.index}")
+        values = []
+        for offset in range(start, start + length * 8, 8):
+            bits = f"0x{int.from_bytes(image[offset:offset + 8], 'little'):016x}"
+            value = {"kind": "float64", "bits": bits}
+            if record["type"] == "FixedDoubleArray":
+                if bits == layout["hole_nan_bits"]:
+                    value = {"kind": "hole"}
+                elif bits == layout["undefined_nan_bits"]:
+                    raise ValueError("FixedDoubleArray undefined-NaN encoding requires confirmed build flags")
+            values.append(value)
+        if record["type"] == "HeapNumber":
+            record["value"] = values[0]
+        else:
+            record.update(length=length, elements=values)
 
     def _populate_class_boilerplate(self, record, obj):
         layout = self.parsed.profile.class_boilerplate_layout

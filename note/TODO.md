@@ -67,9 +67,8 @@ Taskboard 中派生构造器和箭头函数的 lexical this 已触发非法 `thi
 
 需要完成：
 
-- 已复现：用 Node 18.20.8 / V8 10.2.154.26 编译 `literal-effects.js`，嵌套数组
-  boilerplate 的 map 可落入 `external_map`，导致 `nested.empty` / `nested.rows` 成为
-  占位字符串。需从该版本真实 map 或 serializer cache 身份恢复类型，不能按大小猜；
+- 补全旧版 root/生成 map 的来源。已有 literal witness 时可以通过同一 map 恢复
+  嵌套 boilerplate，但不能把这种局部证明扩展为整个旧版 root 表已经准确；
 
 - 从每个精确 V8 tag 的官方源码生成 `InstanceType` 和 `ElementsKind` 名称；
 - 明确区分 map 名称、推导的对象类型和真实 instance type；
@@ -87,15 +86,19 @@ Taskboard 中派生构造器和箭头函数的 lexical this 已触发非法 `thi
 
 显示截断不能改变 decompiler 消费的结构化对象图。
 
-## P1：稀疏 double array 和模板对象
+## P1：模板对象与 BigInt 常量
 
-Taskboard 的 `codec` 场景在匹配 Electron snapshot 下仍留下未定义的
-`ArrayBoilerplate_5`。对象图已将其 constant_elements 标为 `FixedDoubleArray`，
-需要继续核对元素解析与源码 formatter 的边界，保留 hole、undefined、负零和 NaN
-的区别。不要用 `[undefined]` 代替数组空洞。
+Taskboard 的 `codec` 仍包含未实现的 `GetTemplateObject`，需恢复 tagged template 的
+raw/cooked 值、冻结/属性描述符和同一调用点的对象身份；不同调用点即使文本相同也
+不能合并。非法 escape 的 cooked undefined 也要覆盖，不能只拼接成普通字符串。
 
-同一场景还包含未实现的 `GetTemplateObject`，需恢复 tagged template 的 raw/cooked
-值及同一调用点的模板对象身份，不能仅拼接成普通字符串。
+该场景的 BigInt 字面量仍是 `<BigInt ...>` 占位符。下一步从源码生成其符号位和数字
+布局，使用真实 cache 验证大整数、负值、零和运算，不用 Number 中转而损失精度。
+
+## P1：实验性 undefined-double 构建形态
+
+当前识别到了专用 NaN 位模式会明确报错。需要可确认的编译开关与真实 cache 后再
+支持，不能仅因为版本源码包含该常量就推断目标构建启用了它。
 
 ## P2：核对 `TestUndetectable`
 

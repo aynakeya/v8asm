@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import struct
 from typing import Any
 
 from .objects import (
@@ -7,7 +9,10 @@ from .objects import (
     V8ArrayBoilerplateDescription,
     V8BytecodeArray,
     V8FixedArray,
+    V8FixedDoubleArray,
     V8HeapObject,
+    V8HeapNumber,
+    V8Hole,
     V8ObjectBoilerplateDescription,
     V8ClassBoilerplate,
     V8SharedFunctionInfo,
@@ -52,7 +57,18 @@ def _value(record: Any) -> Any:
     kind = record.get("kind")
     if kind == "smi":
         return V8Smi(_integer(record, "value"))
+    if kind == "float64":
+        bits = record.get("bits")
+        if not isinstance(bits, str) or not re.fullmatch(r"0x[0-9a-fA-F]{16}", bits):
+            raise StructuredDisassemblyError("float64.bits must be a 64-bit hexadecimal value")
+        return struct.unpack("<d", int(bits, 16).to_bytes(8, "little"))[0]
+    if kind == "hole":
+        return V8Hole()
     if kind == "reference":
+        if record.get("literal") == "HOLE":
+            return V8Hole()
+        if record.get("literal") in ("NaN", "Infinity", "-Infinity", "-0"):
+            return float(record["literal"])
         description = record.get("description", "")
         if not isinstance(description, str):
             raise StructuredDisassemblyError("reference description must be a string")
@@ -153,6 +169,11 @@ def _populate_object(
         if not isinstance(value, str):
             raise StructuredDisassemblyError("String.value must be a string")
         obj.value = value
+    elif isinstance(obj, V8HeapNumber):
+        if "value" in record:
+            obj.value = _value(record["value"])
+            if not isinstance(obj.value, float):
+                raise StructuredDisassemblyError("HeapNumber.value must be float64")
     elif isinstance(obj, V8BytecodeArray):
         _populate_bytecode(obj, record, records)
     elif isinstance(obj, V8SharedFunctionInfo):
@@ -185,11 +206,15 @@ def _populate_object(
                 "<ScopeInfo>",
             )
     elif isinstance(obj, V8FixedArray):
+        if isinstance(obj, V8FixedDoubleArray) and not {"length", "elements"} <= record.keys():
+            raise StructuredDisassemblyError("FixedDoubleArray has no numeric data; regenerate disassembly JSON")
         elements = record.get("elements", [])
         if not isinstance(elements, list):
             raise StructuredDisassemblyError("FixedArray.elements must be a list")
         obj.length = _integer(record, "length")
         obj.elements = [_value(element) for element in elements]
+        if isinstance(obj, V8FixedDoubleArray) and obj.length != len(obj.elements):
+            raise StructuredDisassemblyError("FixedDoubleArray length does not match its elements")
     elif isinstance(obj, V8ArrayBoilerplateDescription):
         elements_kind = record.get("elements_kind")
         obj.elements_kind = (

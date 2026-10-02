@@ -1,6 +1,6 @@
 from typing import List
 
-from .base import V8HeapObject, V8Address, V8Smi
+from .base import V8HeapObject, V8Address, V8Smi, V8Hole, V8HeapNumber
 from .boilerplate import (
     V8ArrayBoilerplateDescription,
     V8ObjectBoilerplateDescription,
@@ -8,7 +8,7 @@ from .boilerplate import (
     V8ScopeInfo,
 )
 from .bytecode import V8BytecodeArray,CodeLine
-from .fixed_array import V8TrustedFixedArray, V8FixedArray
+from .fixed_array import V8TrustedFixedArray, V8FixedArray, V8FixedDoubleArray
 from .string import V8String
 from .sfi import V8SharedFunctionInfo
 
@@ -22,6 +22,10 @@ def parse_object(address:int, i_type:str, lines:List[str]) -> V8HeapObject:
         obj = V8TrustedFixedArray(address, i_type, lines)
     elif i_type == "FixedArray":
         obj = V8FixedArray(address, i_type, lines)
+    elif i_type == "FixedDoubleArray":
+        obj = V8FixedDoubleArray(address, i_type, lines)
+    elif i_type == "HeapNumber":
+        obj = V8HeapNumber(address, i_type, lines)
     elif i_type == "ArrayBoilerplateDescription":
         obj = V8ArrayBoilerplateDescription(address, i_type, lines)
     elif i_type == "ObjectBoilerplateDescription":
