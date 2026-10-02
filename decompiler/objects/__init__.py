@@ -4,6 +4,7 @@ from .base import V8HeapObject, V8Address, V8Smi
 from .boilerplate import (
     V8ArrayBoilerplateDescription,
     V8ObjectBoilerplateDescription,
+    V8ClassBoilerplate,
     V8ScopeInfo,
 )
 from .bytecode import V8BytecodeArray,CodeLine
@@ -25,6 +26,8 @@ def parse_object(address:int, i_type:str, lines:List[str]) -> V8HeapObject:
         obj = V8ArrayBoilerplateDescription(address, i_type, lines)
     elif i_type == "ObjectBoilerplateDescription":
         obj = V8ObjectBoilerplateDescription(address, i_type, lines)
+    elif i_type == "ClassBoilerplate":
+        obj = V8ClassBoilerplate(address, i_type, lines)
     elif i_type == "ScopeInfo":
         obj = V8ScopeInfo(address, i_type, lines)
     elif i_type == "BytecodeArray":

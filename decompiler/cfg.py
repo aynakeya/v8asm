@@ -40,7 +40,7 @@ class LoopRegion:
     end: int
 
 
-def build_basic_blocks(instructions: List[Instruction]) -> List[BasicBlock]:
+def build_basic_blocks(instructions: List[Instruction], extra_leaders=()) -> List[BasicBlock]:
     if not instructions:
         return []
 
@@ -48,7 +48,7 @@ def build_basic_blocks(instructions: List[Instruction]) -> List[BasicBlock]:
         instr.offset: idx for idx, instr in enumerate(instructions) if instr.offset >= 0
     }
     sorted_offsets = sorted(offset_to_index.keys())
-    leaders: Set[int] = set(sorted_offsets[:1])
+    leaders: Set[int] = set(sorted_offsets[:1]) | set(extra_leaders)
 
     def next_offset(idx: int) -> Optional[int]:
         for nxt in instructions[idx + 1 :]:

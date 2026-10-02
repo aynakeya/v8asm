@@ -65,6 +65,7 @@ uv run python -m disassembler.generate_profiles \
 - bytecode opcode、operand 类型和宽度；
 - serializer tag；
 - `BytecodeArray`、`SharedFunctionInfo`、`ScopeInfo` 和 literal 对象布局；
+- handler table 的 offset/prediction 位域，以及 ClassBoilerplate、descriptor 和 accessor 布局；
 - runtime、intrinsic 和 root 名称；
 - static-root map、静态字符串及 snapshot space 信息；
 - header 是否包含 read-only snapshot checksum。
@@ -92,6 +93,13 @@ flags-hash 映射时必须保留对应 runtime、cache 和验证结果作为依�
 profile 存在只表示解析器掌握该 tag 的静态布局，不等于所有 Electron、Node 或 Chromium
 构建形态都已经有真实样本验证。
 
+Node 20.20.2 向 `11.3.244.8-node.38` 回移了新增 root，数字版本哈希仍不能区分它
+与标准 V8。此 runtime 应使用 `--version 11.3.244.8-node.38`，选择由该 Node 官方
+源码生成的 root 布局。只传 `11.3.244.8` 或自动按 hash 选择时仍使用标准布局，
+可能把 `next` 解成 `resolve`；不能据此认为解析成功就已经正确。
+该变体不改变 opcode、serializer 或其他对象布局。生成方法和源码溯源见
+[可复用的生成资产](generated-assets.md)。
+
 ## 运行时编号变体
 
 相同 numeric V8 版本可能因编译开关使用不同的 runtime-ID 表。解析器先根据
@@ -112,6 +120,7 @@ uv run python -m disassembler input.jsc \
 `--format json` 输出 `v8asm.disassembly` schema，当前版本为 1。主要特征：
 
 - `metadata.v8_version` 明确记录实际使用的 profile 版本；
+- `metadata.root_layout_version` 记录 root 布局，可包含精确 Node suffix；
 - `metadata.runtime_variant` 记录 runtime-ID 表；
 - `metadata.literal_flags` 保存源码生成的字面量 flag，供 decompiler 区分跨版本语义；
 - `ScopeInfo` / `SharedFunctionInfo.function_kind` 保存从源码布局解码的函数类型，区分普通函数、访问器与对象方法；

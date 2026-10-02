@@ -68,6 +68,8 @@ def _inline_single_use_registers(lines: List[str]) -> List[str]:
             can_cross_statement = _can_cross_statement(expr)
             for j in range(i + 1, use_index + 1):
                 stripped = out[j].strip()
+                if stripped.endswith("{") or stripped.startswith("}"):
+                    break
                 if _assigns_referenced_value(stripped, expr):
                     break
                 if re.search(rf"\b{re.escape(reg)}\b", out[j]):

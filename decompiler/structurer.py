@@ -4,7 +4,6 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from .cfg import (
     BasicBlock,
-    LoopRegion,
     build_basic_blocks,
     find_loop_regions,
     is_conditional,
@@ -69,8 +68,7 @@ class Structurer:
             self.active_loops.add(block.start)
             body, _ = self._emit_region(loop_region.start, loop_region.end)
             self.active_loops.remove(block.start)
-            condition = self._loop_condition(loop_region)
-            loop_stmt = LoopStatement(condition=condition, body=body)
+            loop_stmt = LoopStatement(condition="true", body=body, label=f"loop_{block.start}")
             next_idx = self.offset_to_index.get(loop_region.end, len(self.blocks))
             return [loop_stmt], next_idx
 
@@ -90,6 +88,12 @@ class Structurer:
 
         if is_conditional(term.mnemonic):
             target = parse_jump_target(term)
+            loop_jump = self._loop_transfer(target)
+            if loop_jump:
+                expression, branch_on_true = self.translator.branch_condition(term)
+                condition = expression if branch_on_true else f"!({expression})"
+                statements.append(IfStatement(condition, [SimpleStatement(loop_jump)]))
+                return statements, block_idx + 1
             if not self._is_pending_raw_dispatch_target(block.start, target):
                 built = self._build_if(block_idx, stop_offset)
                 if built:
@@ -102,12 +106,18 @@ class Structurer:
             return statements, block_idx + 1
 
         if is_loop_jump(term.mnemonic):
-            # Closing jump of a loop – skip explicit goto.
+            transfer = self._loop_transfer(parse_jump_target(term))
+            if transfer:
+                statements.append(SimpleStatement(transfer))
             return statements, block_idx + 1
 
         if is_unconditional_jump(term.mnemonic):
             target = parse_jump_target(term)
             if target is not None:
+                transfer = self._loop_transfer(target)
+                if transfer:
+                    statements.append(SimpleStatement(transfer))
+                    return statements, block_idx + 1
                 statements.append(SimpleStatement(f"goto offset_{target}"))
                 if self._has_pending_raw_target_between(block.start, target):
                     self.pending_raw_branch_targets.add(target)
@@ -128,21 +138,14 @@ class Structurer:
             statements.append(SimpleStatement(text))
         return statements, block_idx + 1
 
-    def _loop_condition(self, region: LoopRegion) -> str:
-        start_idx = self.offset_to_index.get(region.start, 0)
-        end_idx = self.offset_to_index.get(region.end, len(self.blocks))
-        for idx in range(start_idx, end_idx):
-            block = self.blocks[idx]
-            term = block.terminator
-            if not term:
-                continue
-            target = parse_jump_target(term)
-            if target == region.end and term.mnemonic.startswith("JumpIf"):
-                info = self.translator.branch_condition(term)
-                if info:
-                    expr, branch_on_true = info
-                    return f"!({expr})" if branch_on_true else expr
-        return "true"
+    def _loop_transfer(self, target: Optional[int]) -> Optional[str]:
+        for start in sorted(self.active_loops, reverse=True):
+            region = self.loop_regions[start]
+            if target == region.end:
+                return f"break loop_{start}"
+            if target == region.start:
+                return f"continue loop_{start}"
+        return None
 
     def _build_if(
         self, block_idx: int, stop_offset: Optional[int]

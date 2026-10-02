@@ -130,9 +130,75 @@ class StructuredObjectEncoder:
             )
         elif object_type == "ObjectBoilerplateDescription":
             self._populate_object_boilerplate(record, obj)
+        elif object_type == "ClassBoilerplate":
+            self._populate_class_boilerplate(record, obj)
         elif object_type == "ScopeInfo":
             self._populate_scope_info(record, obj)
         return record
+
+    def _populate_class_boilerplate(self, record, obj):
+        layout = self.parsed.profile.class_boilerplate_layout
+        size = self.parsed.tagged_size
+        slots = layout["slots"]
+        image, present = obj.image()
+        count = _read_smi(image, present, slots["arguments_count"] * size, size)
+        members = []
+        supported = count is not None
+        for prefix in ("static", "instance"):
+            for name, empty_name in (("elements_template", "emptyslowelementdictionary"),
+                                     ("computed_properties", "emptyfixedarray")):
+                ref = obj.references.get(slots[f"{prefix}_{name}"] * size)
+                encoded = self.encode_reference(ref)
+                description = (encoded or {}).get("description", "").replace("_", "").lower()
+                if empty_name == "emptyfixedarray":
+                    empty = ref is not None and ref.kind == "root" and self.parsed.profile.root_names[ref.values[0]].replace("_", "").lower() == empty_name
+                else:
+                    empty = empty_name in description
+                supported &= empty
+            ref = obj.references.get(slots[f"{prefix}_properties_template"] * size)
+            target = self.parsed.objects[ref.object_index] if ref and ref.object_index is not None else None
+            if target is None:
+                supported = False
+                continue
+            raw, available = target.image()
+            count_offset = size + layout["descriptor_count_offset"]
+            if not all(available[count_offset:count_offset + 2]):
+                supported = False
+                continue
+            length = int.from_bytes(raw[count_offset:count_offset + 2], "little")
+            capacity_offset = size + layout["descriptor_capacity_offset"]
+            capacity = int.from_bytes(raw[capacity_offset:capacity_offset + 2], "little")
+            start = layout["descriptor_header_slots"] * size + layout["descriptor_header_bytes"]
+            fields = layout["descriptor_fields"]
+            # The template may instead be a dictionary. Validate the source-derived
+            # descriptor layout without relying on embedder-specific root indices.
+            if not 0 < length <= capacity or start + capacity * len(fields) * size != target.size:
+                supported = False
+                continue
+            for index in range(length):
+                slot = start // size + index * len(fields)
+                key = self._tagged_value(target, slot + fields.index("key"))
+                value_slot = slot + fields.index("value")
+                value = self._tagged_value(target, value_slot)
+                details = self._tagged_value(target, slot + fields.index("details"))
+                values = {"method": value}
+                value_ref = target.references.get(value_slot * size)
+                pair = self.parsed.objects[value_ref.object_index] if value_ref and value_ref.object_index is not None else None
+                accessor = (details and details.get("kind") == "smi" and
+                            (details["value"] >> layout["property_kind_shift"]) & layout["property_kind_mask"] == layout["property_accessor_kind"])
+                if accessor and pair is not None and pair.size == (1 + len(layout["accessor_slots"])) * size:
+                    values = {kind: self._tagged_value(pair, pair_slot)
+                              for kind, pair_slot in layout["accessor_slots"].items()}
+                for kind, placeholder in values.items():
+                    if placeholder and placeholder.get("kind") == "smi":
+                        argument = placeholder["value"]
+                        if layout["arguments"]["first_dynamic"] <= argument < (count or 0):
+                            members.append({"key": key, "kind": kind,
+                                            "argument_index": argument, "static": prefix == "static"})
+        used = {member["argument_index"] for member in members}
+        supported &= used == set(range(layout["arguments"]["first_dynamic"], count or 0))
+        record.update(arguments_count=count, argument_indices=layout["arguments"],
+                      members=members, supported=supported)
 
     def _value(self, value: int | Reference) -> dict[str, Any]:
         if isinstance(value, int):

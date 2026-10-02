@@ -100,7 +100,38 @@ class StructuredGraphBuilder:
             "CreateObjectLiteral": "ObjectBoilerplateDescription",
         }
         for array in self.parsed.arrays:
+            registers = {}
+            accumulator = None
+            runtime_names = self.parsed.profile.runtime_names_for(
+                self.parsed.header.flags_hash, self.parsed.runtime_variant
+            )
+            define_class_id = runtime_names.index("DefineClass")
+            boundaries = {_jump_target(item, array) for item in array.instructions}
             for instruction in array.instructions:
+                if instruction.offset in boundaries:
+                    registers.clear()
+                    accumulator = None
+                name = instruction.name.split(".", 1)[0]
+                operands = instruction.operands
+                if name == "CallRuntime" and operands[0][1] == define_class_id:
+                    value = registers.get(operands[1][1])
+                    if isinstance(value, Reference) and value.object_index is not None:
+                        self.semantic_types[value.object_index] = "ClassBoilerplate"
+                if name == "LdaConstant":
+                    accumulator = array.constant_pool[operands[0][1]]
+                elif name.startswith("Star"):
+                    register = (operands[0][1] if name == "Star" else
+                                self.parsed.profile.register_file_start - int(name[4:]))
+                    registers[register] = accumulator
+                elif name == "Mov":
+                    registers[operands[1][1]] = registers.get(operands[0][1])
+                else:
+                    accumulator = None
+                    for kind, register in operands:
+                        if kind in {"RegOut", "RegInOut"}:
+                            registers.pop(register, None)
+                    if instruction.jump_mode or name.startswith("SwitchOn"):
+                        registers.clear()
                 object_type = literal_types.get(instruction.name.split(".", 1)[0])
                 if object_type is None or not instruction.operands:
                     continue
@@ -128,6 +159,7 @@ class StructuredGraphBuilder:
         snapshot = self.parsed.snapshot
         metadata: dict[str, Any] = {
             "v8_version": profile.version,
+            "root_layout_version": profile.root_layout_version or profile.version,
             "runtime_variant": runtime_variant,
             "literal_flags": profile.literal_flags,
             "tagged_size": self.parsed.tagged_size,

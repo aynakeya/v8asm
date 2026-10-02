@@ -1658,6 +1658,44 @@
       "operands": []
     }
   ],
+  "class_boilerplate_layout": {
+    "accessor_slots": {
+      "getter": 1,
+      "setter": 2
+    },
+    "arguments": {
+      "constructor": 1,
+      "first_dynamic": 3,
+      "prototype": 2
+    },
+    "descriptor_capacity_offset": 0,
+    "descriptor_count_offset": 2,
+    "descriptor_fields": [
+      "key",
+      "details",
+      "value"
+    ],
+    "descriptor_header_bytes": 8,
+    "descriptor_header_slots": 2,
+    "property_accessor_kind": 1,
+    "property_kind_mask": 1,
+    "property_kind_shift": 0,
+    "slots": {
+      "arguments_count": 2,
+      "instance_computed_properties": 8,
+      "instance_elements_template": 7,
+      "instance_properties_template": 6,
+      "static_computed_properties": 5,
+      "static_elements_template": 4,
+      "static_properties_template": 3
+    }
+  },
+  "handler_table_layout": {
+    "offset_mask": 536870911,
+    "offset_shift": 3,
+    "prediction_mask": 7,
+    "prediction_shift": 0
+  },
   "has_ro_snapshot_checksum": false,
   "intrinsic_names": [
     "AsyncFunctionAwaitCaught",

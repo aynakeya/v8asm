@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import re
 import subprocess
@@ -29,6 +30,14 @@ VERSIONS = (
     "13.6.233.8",
     "13.6.233.10",
 )
+
+ROOT_LAYOUT_SOURCES = {
+    "11.3.244.8-node.38": {
+        "repository": "https://github.com/nodejs/node",
+        "revision": "v20.20.2",
+        "v8_path": "deps/v8",
+    },
+}
 
 SCALABLE_SIGNED = {
     "Imm",
@@ -609,6 +618,75 @@ def parse_literal_flags(globals_source: str, ast_source: str) -> dict[str, int]:
     }
 
 
+def parse_handler_table_layout(source: str) -> dict[str, int]:
+    fields = {}
+    for name, base, arguments in re.findall(
+        r"using (Handler\w+Field)\s*=\s*([\w:]+)<([^>]+)>;", source
+    ):
+        parts = [part.strip() for part in arguments.split(",")]
+        if base == "base::BitField":
+            shift, width = map(int, parts[1:])
+        else:
+            previous_shift, previous_width = fields[base.removesuffix("::Next")]
+            shift, width = previous_shift + previous_width, int(parts[1])
+        fields[name] = shift, width
+    result = {}
+    for key, field in (("offset", "HandlerOffsetField"), ("prediction", "HandlerPredictionField")):
+        shift, width = fields[field]
+        result[f"{key}_shift"] = shift
+        result[f"{key}_mask"] = (1 << width) - 1
+    return result
+
+
+def parse_class_boilerplate_layout(source: str, descriptors: str, structs: str, properties: str) -> dict[str, object]:
+    body = source.split("class ClassBoilerplate :", 1)[1]
+    names = re.findall(r"V\(k(\w+)Offset,\s*kTaggedSize\)", body)
+    slots = {re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower(): index + 1
+             for index, name in enumerate(names)}
+    if body.startswith(" public FixedArray"):
+        enum = re.search(r"enum\s*\{([^}]+)kBoilerplateLength", body)[1]
+        names = re.findall(r"k(\w+)Index", enum)
+        slots = {}
+        for index, name in enumerate(names):
+            name = name.replace("Class", "Static").replace("Prototype", "Instance")
+            slots[re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()] = index + 2
+    arguments = {}
+    for name in ("Constructor", "Prototype", "FirstDynamic"):
+        match = re.search(rf"k{name}ArgumentIndex\s*=\s*(\d+)", body)
+        arguments[re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()] = int(match[1])
+    descriptor_body = descriptors.split("extern class DescriptorArray extends HeapObject {", 1)[1].split("}", 1)[0]
+    raw_size = 0
+    tagged_slots = 1
+    count_offset = None
+    capacity_offset = None
+    for name, field_type in re.findall(r"(\w+)\s*:\s*(\w+);", descriptor_body):
+        if name == "number_of_descriptors":
+            count_offset = raw_size
+        if name == "number_of_all_descriptors":
+            capacity_offset = raw_size
+        if field_type.startswith("uint"):
+            raw_size += int(field_type[4:]) // 8
+        else:
+            tagged_slots += 1
+    entry_body = descriptors.split("struct DescriptorEntry {", 1)[1].split("}", 1)[0]
+    entry_fields = re.findall(r"(\w+)\s*:", entry_body)
+    accessor_body = structs.split("extern class AccessorPair extends Struct {", 1)[1].split("}", 1)[0]
+    accessor_fields = re.findall(r"(\w+)\s*:", accessor_body)
+    if count_offset is None or not slots:
+        raise ValueError("class boilerplate layout not found")
+    kind = re.search(r"KindField\s*=\s*base::BitField<PropertyKind,\s*(\d+),\s*(\d+)>", properties)
+    accessor = re.search(r"enum class PropertyKind\s*\{[^}]*kAccessor\s*=\s*(\d+)", properties)
+    return {
+        "slots": slots, "arguments": arguments,
+        "descriptor_header_slots": tagged_slots, "descriptor_header_bytes": raw_size,
+        "descriptor_count_offset": count_offset, "descriptor_fields": entry_fields,
+        "descriptor_capacity_offset": capacity_offset,
+        "property_kind_shift": int(kind[1]), "property_kind_mask": (1 << int(kind[2])) - 1,
+        "property_accessor_kind": int(accessor[1]),
+        "accessor_slots": {name: index + 1 for index, name in enumerate(accessor_fields)},
+    }
+
+
 def build_profile(repo: Path, version: str) -> dict[str, object]:
     bytecodes_source = git_show(repo, version, "src/interpreter/bytecodes.h")
     serializer_source = git_show(repo, version, "src/snapshot/serializer-deserializer.h")
@@ -659,11 +737,20 @@ def build_profile(repo: Path, version: str) -> dict[str, object]:
         "snapshot_spaces": tags["Backref"],
         "literal_flags": parse_literal_flags(globals_source, ast_source),
         "bytecode_array_layout": parse_bytecode_array_layout(bytecode_array_source),
+        "handler_table_layout": parse_handler_table_layout(
+            git_show(repo, version, "src/codegen/handler-table.h")
+        ),
         "shared_function_info_layout": parse_shared_function_info_layout(
             shared_function_info_source
         ),
         "object_boilerplate_layout": parse_object_boilerplate_layout(
             literal_objects_source
+        ),
+        "class_boilerplate_layout": parse_class_boilerplate_layout(
+            literal_objects_source,
+            git_show(repo, version, "src/objects/descriptor-array.tq"),
+            git_show(repo, version, "src/objects/struct.tq"),
+            git_show(repo, version, "src/objects/property-details.h"),
         ),
         "scope_info_layout": parse_scope_info_layout(
             scope_info_source, globals_source, contexts_source, function_kind_source
@@ -686,9 +773,41 @@ def build_profile(repo: Path, version: str) -> dict[str, object]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--v8-repo", type=Path, required=True)
+    sources = parser.add_mutually_exclusive_group(required=True)
+    sources.add_argument("--v8-repo", type=Path)
+    sources.add_argument("--v8-source", type=Path, help="V8 source tree for a root layout variant")
+    parser.add_argument("--root-layout-version", help="Exact embedder V8 version, including suffix")
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
+
+    if args.root_layout_version:
+        base_version = args.root_layout_version.split("-", 1)[0]
+        if args.root_layout_version not in ROOT_LAYOUT_SOURCES or base_version not in VERSIONS:
+            parser.error("register the exact runtime in ROOT_LAYOUT_SOURCES before generating its root layout")
+        source = ROOT_LAYOUT_SOURCES[args.root_layout_version]
+        paths = (
+            "src/init/heap-symbols.h", "src/builtins/accessors.h",
+            "src/roots/roots.h", "src/roots/static-roots.h",
+        )
+        if args.v8_source is not None:
+            contents = [(args.v8_source / path).read_bytes() for path in paths]
+        else:
+            contents = [git_show(args.v8_repo, source["revision"], f"{source['v8_path']}/{path}").encode()
+                        for path in paths]
+        names = ("root_names", "root_strings", "read_only_strings", "static_root_maps", "static_root_area_start")
+        layout = dict(zip(names, parse_root_metadata(*(data.decode() for data in contents))))
+        layout.update(
+            version=args.root_layout_version,
+            base_version=base_version,
+            source=source,
+            source_sha256={path: hashlib.sha256(data).hexdigest() for path, data in zip(paths, contents)},
+        )
+        directory = args.output_dir / "root_layouts"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"{args.root_layout_version}.json").write_text(json.dumps(layout, indent=2, sort_keys=True) + "\n")
+        return 0
+    if args.v8_source is not None:
+        parser.error("--v8-source requires --root-layout-version")
 
     profiles = [build_profile(args.v8_repo, version) for version in VERSIONS]
     index = {

@@ -51,9 +51,7 @@ uv run python -m unittest discover -s tests -v
 语义 fixture 使用指定的 Node/V8 版本生成 cache：
 
 ```bash
-node --no-lazy tests/fixtures/generate_cached_data.cjs \
-  tests/semantic_fixtures/<name>.js \
-  tests/semantic_fixtures/<name>.jsc
+uv run python tests/generate_semantic_fixtures.py <name>
 ```
 
 测试分别在隔离的 Node `vm` 中执行源码和带轻量 runtime 的恢复结果，比较返回值或异常。
@@ -62,6 +60,42 @@ node --no-lazy tests/fixtures/generate_cached_data.cjs \
 fixture 的特性范围、生成版本和待补缺口见
 [语义 fixture 说明](semantic-fixtures.md)。普通源码 fixture 不依赖
 被忽略的本地 `bin_cache`；必须使用外部 snapshot 的测试应明确记录获取方式和版本。
+
+### 2026-10-01 小版本候选复检
+
+范围包括转换与 iterable 指令、逐指令作用域、同步异常控制流、基础 class 恢复，
+以及完整 Taskboard 样例发现的 catch、命名、switch 和临时值误删问题：
+
+- 完整 Python 测试：**235 项通过，无跳过**；
+- `conversion-boundaries`、`iterable-spread`、`context-lifetimes`、
+  `exception-completions`、`class-members` 的 V8 10.2、11.3、12.4、13.6 真实 cache
+  均通过源码与恢复结果的执行对照；
+- Node 20.20.2 的 root 回移由官方源码生成独立布局；完整版本选型已通过实际 cache
+  验证，不能改用数字版本 profile 来冒充兼容；
+- 本轮转换/iterable cache 使用固定生成器重新生成，记录实际 runtime 和 SHA-256，
+  执行测试同时检查源码/cache 是否过期；
+- 14 个 profile 的 handler/class 布局从各自精确 tag 生成，并检查新旧代表版本
+  的完整生成器输出与工作区 JSON 一致；
+- 前一轮 Atom 使用 `example2/atom.compiled.dist.jsc`、V8 `13.4.114.21` 和
+  `example2/v8_context_snapshot.bin` 重新解析，恢复代码通过 `node --check`；
+  WARNING 和 raw goto 为零，仍保留 8 处 goto 注释。
+
+Atom 只检查对象解析、生成诊断和 JavaScript 语法，没有执行目标应用。
+复杂异常或迭代器结构可能保留显式 dispatch；基础 class 测试不覆盖继承、私有字段
+等尚未支持的结构。本轮没有修改原生 patch，也没有重新构建或验证 Electron 二进制矩阵。
+
+### 完整应用样例
+
+应用诊断另用官方 Electron 35.7.5 / V8 13.4.114.21-electron.0 编译真实 cache，
+加载 checksum 匹配的 `v8_context_snapshot.bin`：11 个原源码场景成功，完整恢复文件
+仍有派生类语法错误；**7 个隔离子系统行为一致**，比修复 iterable 前增加任务流程和事务
+两个场景。完整应用仍为 **0/11**，诊断命令退出 1，不能记作整体验证通过。
+Node 24.7.0 无 snapshot 的结果与错误 snapshot 的拒绝结果另存为对照。
+
+本轮可作为已覆盖语言子集的增量版本候选，不是任意 JS 的完整可执行还原承诺。
+派生类/私有字段、generator/async 和稀疏 double array/tagged template 仍是明确缺口，
+详见 [Taskboard 报告](application-fixture.md)。没有创建 tag、修改版本号或发布产物。
+生成配方与可重复使用的入口统一记录在[生成资产](generated-assets.md)。
 
 ### 何时运行矩阵
 

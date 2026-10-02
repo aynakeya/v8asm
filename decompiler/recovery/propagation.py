@@ -75,6 +75,8 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
             or stripped.startswith(("// goto ", "// loop goto "))
             or stripped == "}"
             or stripped == "else {"
+            or stripped == "try {"
+            or stripped.startswith(("} catch (", "} finally {"))
         ):
             if stripped.startswith(("goto ", "loop goto ")):
                 simplified.append(f"{prefix}// {stripped}")

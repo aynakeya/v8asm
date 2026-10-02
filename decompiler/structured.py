@@ -9,6 +9,7 @@ from .objects import (
     V8FixedArray,
     V8HeapObject,
     V8ObjectBoilerplateDescription,
+    V8ClassBoilerplate,
     V8SharedFunctionInfo,
     V8ScopeInfo,
     V8Smi,
@@ -209,6 +210,24 @@ def _populate_object(
                 "ObjectBoilerplateDescription.entries must be a list"
             )
         obj.entries = [_value(entry) for entry in entries]
+    elif isinstance(obj, V8ClassBoilerplate):
+        obj.arguments_count = _integer(record, "arguments_count")
+        indices = record.get("argument_indices", {})
+        members = record.get("members", [])
+        if not isinstance(indices, dict) or not all(isinstance(value, int) for value in indices.values()):
+            raise StructuredDisassemblyError("ClassBoilerplate.argument_indices must contain integers")
+        if not isinstance(members, list):
+            raise StructuredDisassemblyError("ClassBoilerplate.members must be a list")
+        obj.argument_indices = indices
+        obj.supported = record.get("supported", False) is True
+        for member in members:
+            if (not isinstance(member, dict) or member.get("kind") not in {"method", "getter", "setter"}
+                or not isinstance(member.get("static"), bool)):
+                raise StructuredDisassemblyError("invalid class member")
+            index = _integer(member, "argument_index")
+            if not 0 <= index < obj.arguments_count:
+                raise StructuredDisassemblyError("class member argument index is out of range")
+            obj.members.append({**member, "key": _value(member["key"])})
     elif isinstance(obj, V8ScopeInfo):
         scope_type = record.get("scope_type")
         if scope_type is not None and not isinstance(scope_type, str):

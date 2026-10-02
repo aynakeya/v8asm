@@ -19,7 +19,7 @@ class SimpleStatement(Statement):
     def render(self, indent: int = 0) -> List[str]:
         if not self.text:
             return []
-        return [f"{INDENT * indent}{self.text}"]
+        return [f"{INDENT * indent}{line}" for line in self.text.splitlines()]
 
 
 @dataclass
@@ -45,9 +45,12 @@ class IfStatement(Statement):
 class LoopStatement(Statement):
     condition: str
     body: List[Statement] = field(default_factory=list)
+    label: Optional[str] = None
 
     def render(self, indent: int = 0) -> List[str]:
         lines = [f"{INDENT * indent}while ({self.condition}) {{"]
+        if self.label:
+            lines.insert(0, f"{INDENT * indent}{self.label}:")
         for stmt in self.body:
             lines.extend(stmt.render(indent + 1))
         lines.append(f"{INDENT * indent}}}")

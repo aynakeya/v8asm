@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Tuple
 
-from .common import _extract_indent, is_live_after
+from .common import _extract_indent, _find_block_end, is_live_after
 
 
 def _format_accu_binary(left: str, op: str, right: str) -> str:
@@ -275,6 +275,12 @@ def _compact_accu_compare_if(lines: List[str]) -> List[str]:
             m0 = re.match(r"^ACCU = ([-+]?\d+)$", s0)
             m1 = re.match(r"^ACCU = \((.+)\s*([><]=?|===|!==)\s*ACCU\)$", s1)
             if m0 and m1 and s2 in {"if (truthy(ACCU)) {", "if (!(truthy(ACCU))) {"}:
+                end = _find_block_end(lines, i + 2)
+                if (end is None or is_live_after(lines, i + 3, "ACCU")
+                    or is_live_after(lines, end + 1, "ACCU")):
+                    out.append(lines[i])
+                    i += 1
+                    continue
                 indent = _extract_indent(lines[i + 2])
                 lhs, op = m1.group(1).strip(), m1.group(2)
                 condition = f"{lhs} {op} {m0.group(1)}"

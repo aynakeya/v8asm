@@ -46,7 +46,12 @@ JavaScript 辅助运行时，便于尝试执行伪代码，但不保证输出等
 - 闭包、寄存器局部与脚本级绑定的 TDZ，显式初始化为 `undefined` 的区别；
 - `typeof` 未定义全局变量不抛错，但属性 getter 自己抛出的异常必须保留；
 - Number/BigInt 的前后置自增自减、数值转换顺序、负零和复合赋值结果；
+- 一元加与取负的转换、Symbol/BigInt 异常边界，以及 iterable 的数组物化与副作用顺序；
 - 严格与非严格 `delete`，包括计算键、Symbol、不可配置属性和 Proxy trap。
+- 块/循环/catch 环境的独立生命周期，以及默认参数函数的 body context；
+- 纯 finally、嵌套异常、循环 completion 和 IteratorClose 的 break/throw 路径；
+- 基类构造器、方法、访问器、类自身引用和属性描述符。
+- catch 解构的内部绑定名、方法与捕获变量同名、字符串 switch 的分支与 fallthrough。
 
 这些测试使用 Node `vm` 和 `--runtime` 辅助函数，只证明覆盖到的语言子集。新增 rewrite
 若可能移动调用、属性读取、异常边界或 context 访问，必须先增加能观察副作用的 fixture，
@@ -55,6 +60,9 @@ JavaScript 辅助运行时，便于尝试执行伪代码，但不保证输出等
 特性清单、fixture 生成方法和待补项目见
 [语义 fixture 说明](semantic-fixtures.md)。计算属性值同时存入寄存器与
 ACCU 时必须复用已读取的值，不能重复调用 key 表达式或 getter。
+`ToNumber`、`Negate` 和 `CreateArrayFromIterable` 分别输出原生一元加、取负和数组
+spread；不使用 `Number()` 接受 BigInt，也不把 iterable 原样返回。清理 ACCU 时必须
+把 `...ACCU` 视为真正读取，并保留短路分支之后仍要使用的比较结果。
 `CreateUnmappedArguments` 使用严格模式 helper 创建真正的独立 arguments 对象，
 不能简单替换为数组，也不能复用可能与形参联动的非严格模式 arguments。
 
@@ -82,7 +90,14 @@ ACCU 时必须复用已读取的值，不能重复调用 key 表达式或 getter
 - `common.py`：共享标识符识别和局部存活检查；分支、未恢复的 jump/switch 是传播边界；
 - `destructuring.py`：完整匹配 null 检查、逐项读取和 rest 排除列表；
 - `literals.py`：在单个父函数内恢复对象、getter/setter 和计算属性方法；
+- `classes.py`：消费 ClassBoilerplate 和 SFI，恢复已确认的基类定义；
 - `file.py`：文件级名称整理，不负责跨函数拼接对象方法。
+
+`context_flow.py` 按指令位置追踪 context 身份；`control_flow.py` 为尚不能可靠结构化的
+同步异常和 switch 提供显式基本块 dispatch。后者不会经过跨块文本别名折叠。
+源码恢复后仍残留未消费跳转时，也采用完整函数的 dispatch，而不是把跳转仅留为注释。
+未支持的派生类、generator/async 等仍可能输出不可执行代码，详见
+[完整应用 fixture 实测](application-fixture.md)，不能将这个 fallback 理解为任意 JS 都可执行。
 
 `core.py` 只编排对象读取、单函数恢复和函数树输出。恢复嵌套方法时传入该父函数实际的
 子函数与类型信息，不在整个输出文件中搜索同名函数。默认输出不重复打印整份常量池，
@@ -210,9 +225,10 @@ snapshot，仍需给 disassembler 传入 checksum 匹配的 snapshot。若应用
 利用 `CreateClosure` 的 constant-pool 引用建立词法函数树，并用 profile 中的
 ScopeInfo layout 解析已知 context local。
 
-当前 context 模型会按显式 depth 建立逐层 ScopeInfo 对应，记录 slot 的定义函数、
-bytecode offset 和捕获来源，并在函数头输出 `Captures`。同名 slot 由所属 scope 区分，
-来源不唯一时保留稳定的 synthetic 名称。
+当前 context 模型在 CFG 上追踪每条指令前的作用域链及 context 寄存器别名，处理
+Create/Push/PopContext、普通跳转、switch 和异常边。子函数从实际 CreateClosure
+位置继承环境，不再把函数内多个 scope 排成一条假定的固定链。
+同时记录 slot 的定义函数、bytecode offset 和捕获来源，并在函数头输出 `Captures`。
 
 仍无法保证恢复源码中的原始变量名：
 
@@ -240,11 +256,16 @@ bytecode offset 和捕获来源，并在函数头输出 `Captures`。同名 slot
 才合并。普通 jump、switch 常量表和 generator dispatch 都参与入口检查；不通过
 捕获 ReferenceError 模拟，因为这会误吞用户 getter 抛出的异常。
 
-目前的 context 模型仍不是逐指令的作用域状态机。多个 block/catch scope、循环每轮
-重新绑定和 `PushContext` / `PopContext` 分支合流尚需专门验证，不能把已有闭包 fixture
-的通过扩大解释成任意作用域结构都正确。
+block/catch/class 环境需要独立生命周期时输出显式 scope 对象；闭包创建保存当时的
+对象，避免后续循环或下一次 catch 改写旧闭包的捕获。已证明可提升到函数局部变量的
+默认参数 body context 仍使用简洁的局部声明。合流只保留一致的身份，未知来源不猜测。
+这不代表 `with`、动态作用域或所有特殊函数类型均已验证。
 
 ## 数值与删除
+
+`ToObject` 从 ACCU 读取并写入 operand 指定的寄存器，ACCU 本身不变；null/undefined
+必须抛出 TypeError。`ToString` 使用字符串转换语义，而不是允许直接转换 Symbol 的
+`String(value)`。零参数 Construct 的空 register range 不能扩展成虚假的实参。
 
 `ToNumeric` 不能替换为 `Number`：它保留 BigInt，并且只执行一次对象到原始值转换。
 当前 helper 按 number hint 处理 `Symbol.toPrimitive`，否则依次尝试 `valueOf` 和
@@ -270,6 +291,28 @@ handler table 是恢复异常语义的唯一入口，不能把 handler 区段当
 
 只有整套结构匹配时才输出 `try/catch/finally`。若外层在内层 try 前还有可能抛出的有效
 语句，则保留嵌套结构，避免把这些异常错误地交给 catch。
+
+无 catch 的单一 return 或正常完成路径也可恢复为原生 `try/finally`。多返回点、复杂
+循环、嵌套 handler 等尚不能完整结构化的情况，使用 `dispatch: while` 和 `switch`
+保留实际跳转；每个保护区段按 handler table 将异常路由到最内层 handler，保留原始
+completion token 的派发逻辑。输出会更长，但不会把跳转替换成没有执行效果的注释。
+因此部分过去看起来像原生 `for-of` 的输出，现在可能显示显式控制流。
+
+异常表的 offset/prediction 位布局从精确 tag 的 `handler-table.h` 生成，不能统一
+使用 `encoded >> 4`；当前支持的 10.2 至 12.4 profiles 使用 3 位偏移，12.9 及之后
+的已支持 profiles 使用 4 位。switch 目标同时计入 Wide/ExtraWide 前缀。
+
+## Class 恢复
+
+结构化输入中的 ClassBoilerplate 记录 DefineClass 参数索引及真实成员键。恢复器只在
+构造器、各成员函数及其类型完整对应时生成原生 class 表达式，不从函数名后缀推断。
+当前支持 descriptor template 中的具名基类、默认/显式构造器、实例/静态方法和访问器。
+原生 class 保留严格模式 this、不可直接调用的构造器、不可构造的方法及成员描述符。
+类自身引用和外层捕获仍通过已确认的作用域绑定保持身份。
+
+继承/super、计算键、数字键、字段、私有成员、匿名或 dictionary template 等暂不视为
+已支持。证据不足时保留 DefineClass 低层调用，不能把这个调用当作可执行恢复成功。
+文本反汇编没有这组完整 metadata，class 恢复应使用 JSON 输入。
 
 ## 控制流与安全边界
 

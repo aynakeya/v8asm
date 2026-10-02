@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 
@@ -77,8 +77,10 @@ class Profile:
     serializer_tags: dict[str, int]
     literal_flags: dict[str, int]
     bytecode_array_layout: BytecodeArrayLayout
+    handler_table_layout: dict[str, int]
     shared_function_info_layout: SharedFunctionInfoLayout
     object_boilerplate_layout: ObjectBoilerplateLayout
+    class_boilerplate_layout: dict[str, object]
     scope_info_layout: ScopeInfoLayout
     runtime_default_variant: str
     runtime_variants: dict[str, tuple[str, ...]]
@@ -90,6 +92,7 @@ class Profile:
     static_root_maps: dict[int, str]
     static_root_area_start: int | None
     opcodes: tuple[Opcode, ...]
+    root_layout_version: str | None = None
 
     @property
     def opcode_by_value(self) -> dict[int, Opcode]:
@@ -111,11 +114,14 @@ class Profile:
 @dataclass(frozen=True)
 class ProfileSet:
     profiles: tuple[Profile, ...]
+    root_layouts: dict[str, Profile]
     scalable_signed: frozenset[str]
     scalable_unsigned: frozenset[str]
     fixed_sizes: dict[str, int]
 
     def by_version(self, version: str) -> Profile:
+        if version in self.root_layouts:
+            return self.root_layouts[version]
         clean = version.removesuffix("-electron.0").split("-", 1)[0]
         for profile in self.profiles:
             if profile.version == clean:
@@ -147,6 +153,7 @@ def load_profiles() -> ProfileSet:
             serializer_tags=item["serializer_tags"],
             literal_flags=item["literal_flags"],
             bytecode_array_layout=BytecodeArrayLayout(**item["bytecode_array_layout"]),
+            handler_table_layout=item["handler_table_layout"],
             shared_function_info_layout=SharedFunctionInfoLayout(
                 function_data_slots=tuple(
                     item["shared_function_info_layout"]["function_data_slots"]
@@ -158,6 +165,7 @@ def load_profiles() -> ProfileSet:
             object_boilerplate_layout=ObjectBoilerplateLayout(
                 **item["object_boilerplate_layout"]
             ),
+            class_boilerplate_layout=item["class_boilerplate_layout"],
             scope_info_layout=ScopeInfoLayout(
                 **{
                     **item["scope_info_layout"],
@@ -207,8 +215,22 @@ def load_profiles() -> ProfileSet:
         for item in profile_data
     )
     encoding = raw["operand_encoding"]
+    root_layouts = {}
+    for path in sorted((directory / "root_layouts").glob("*.json")):
+        layout = json.loads(path.read_text())
+        base = next(profile for profile in profiles if profile.version == layout["base_version"])
+        root_layouts[layout["version"]] = replace(
+            base,
+            root_layout_version=layout["version"],
+            root_names=tuple(layout["root_names"]),
+            root_strings={int(key): value for key, value in layout["root_strings"].items()},
+            read_only_strings={int(key): value for key, value in layout["read_only_strings"].items()},
+            static_root_maps={int(key): value for key, value in layout["static_root_maps"].items()},
+            static_root_area_start=layout["static_root_area_start"],
+        )
     return ProfileSet(
         profiles=profiles,
+        root_layouts=root_layouts,
         scalable_signed=frozenset(encoding["scalable_signed"]),
         scalable_unsigned=frozenset(encoding["scalable_unsigned"]),
         fixed_sizes=encoding["fixed_sizes"],

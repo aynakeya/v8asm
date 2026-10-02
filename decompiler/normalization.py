@@ -160,7 +160,7 @@ def _context_load_name(
         return None
     if slot is None or depth is None:
         return None
-    binding = context.context_slot_binding(bytecode, slot, depth)
+    binding = context.context_slot_binding(bytecode, slot, depth, offset=instruction.offset)
     if binding is None or binding.name not in context.prologue_initialized_names(
         binding.defining_bytecode_address
     ):
@@ -527,6 +527,20 @@ def prologue_initialized_names(
     )
 
 
+def lifted_body_scopes(context: DecompilerContext, bytecode: V8BytecodeArray) -> set[int]:
+    parameters = context.parameter_initializers(bytecode)
+    if not parameters:
+        return set()
+    original = [Instruction.from_codeline(raw) for raw in bytecode.instructions]
+    rewritten = _rewrite_default_parameter_initializers(original, parameters)
+    rewritten, _ = _remove_function_context_prologue(context, bytecode, rewritten)
+    normalized, _ = _remove_parameter_body_context(context, bytecode, rewritten, parameters)
+    retained = {item.offset for item in normalized}
+    return {scope.address for item in rewritten
+            if item.mnemonic == "CreateBlockContext" and item.offset not in retained
+            and (scope := context.scope_for_instruction(bytecode, item)) is not None}
+
+
 def normalize_source_instructions(
     context: DecompilerContext,
     bytecode: V8BytecodeArray,
@@ -576,7 +590,7 @@ def _recover_global_typeof(
             for entry in pool[start:start + count]:
                 if not isinstance(entry.raw, V8Smi):
                     raise ValueError("global typeof has an unresolved switch target")
-                boundaries.add(item.offset + entry.raw.value)
+                boundaries.add(item.offset + item.prefix_size + entry.raw.value)
     output: List[Instruction] = []
     index = 0
     while index < len(instructions):

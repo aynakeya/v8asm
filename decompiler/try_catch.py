@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import List, Optional
 
-from .context import DecompilerContext
+from .context import DecompilerContext, RESERVED_WORDS
 from .instruction import Instruction
 from .objects import V8Address
 from .objects.bytecode import V8BytecodeArray
-from .recovery.propagation import simplify_lines
 from .structurer import decompile_to_statements
 from .translator import InstructionTranslator
 from .utils import parse_jump_target
@@ -17,6 +17,15 @@ IDENT_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 INDENT = "  "
 
 
+def _catch_cell(context, translator, instruction, name):
+    scope = context.scope_for_instruction(translator.bytecode, instruction)
+    if scope is None or not context.uses_scope_cell(scope.address):
+        return []
+    fields = ", ".join(f"[{json.dumps(context.scope_slot_name(scope, slot))}]: {name}"
+                       for slot in scope.context_slot_names)
+    return [f"{INDENT * 2}{context.scope_variable(scope.address)} = {{ {fields} }}"]
+
+
 def _render_fragment(
     translator: InstructionTranslator, instructions: List[Instruction]
 ) -> List[str]:
@@ -24,7 +33,7 @@ def _render_fragment(
     lines: List[str] = []
     for statement in statements:
         lines.extend(statement.render(1))
-    return simplify_lines(lines, recover_structures=True)
+    return lines
 
 
 def _indent_lines(lines: List[str]) -> List[str]:
@@ -158,13 +167,14 @@ def _catch_binding_name(
     if not entry or not isinstance(entry.raw, V8Address):
         return "e"
     name = context.scope_context_name(entry.raw)
-    if name and IDENT_RE.match(name):
+    if name and IDENT_RE.match(name) and name not in RESERVED_WORDS:
         return name
     if name:
         match = re.search(r"#([^>]+)", name)
-        if match and IDENT_RE.match(match.group(1)):
+        if match and IDENT_RE.match(match.group(1)) and match.group(1) not in RESERVED_WORDS:
             return match.group(1)
-    return name or "e"
+    # Destructured catch parameters have internal names such as `.catch`.
+    return f"{context.scope_variable(entry.raw.address)}_exception"
 
 
 def _star_target(instruction: Instruction) -> Optional[str]:
@@ -228,8 +238,9 @@ def _match_finally_dispatch(
     result_register: str,
     completion_register: str,
     pending_register: str,
+    *, require_return: bool = True,
 ) -> Optional[tuple[int, int]]:
-    for index in range(start_index, len(instructions) - 8):
+    for index in range(start_index, len(instructions) - 6):
         branch = instructions[index + 2]
         if (
             _smi_value(instructions[index]) != 0
@@ -249,9 +260,12 @@ def _match_finally_dispatch(
             if return_offset is not None
             else None
         )
+        if not require_return and return_index == index + 7:
+            return index, return_index
         if (
             return_index is None
             or return_index != index + 7
+            or return_index + 1 >= len(instructions)
             or _load_source(instructions[return_index]) != result_register
             or instructions[return_index + 1].mnemonic != "Return"
         ):
@@ -267,6 +281,13 @@ def _match_return_completion(
     result_register: str,
     finalizer_offset: int,
 ) -> Optional[tuple[List[Instruction], str]]:
+    if len(instructions) >= 3:
+        token, store, jump = instructions[-3:]
+        if ((_smi_value(token) or 0) > 0
+            and _star_target(store) == completion_register
+            and jump.mnemonic in {"Jump", "JumpConstant"}
+            and parse_jump_target(jump) == finalizer_offset):
+            return instructions[:-3], result_register
     if len(instructions) < 4:
         return None
     token, save_token, save_result, jump = instructions[-4:]
@@ -287,6 +308,56 @@ def _match_return_completion(
     if assignment is None:
         return None
     return instructions[:-4], assignment.group(1).strip()
+
+
+def _render_try_finally(context, bytecode, translator, instructions):
+    if len(bytecode.handler_entries) != 1:
+        return None
+    entry = bytecode.handler_entries[0]
+    start = _instruction_index_at_or_after(instructions, entry.start)
+    handler_index = _instruction_index_at_or_after(instructions, entry.handler)
+    if start is None or handler_index is None:
+        return None
+    handler = _match_finally_handler(instructions, handler_index)
+    if handler is None:
+        return None
+    result, completion, pending, finalizer = handler
+    dispatch = _match_finally_dispatch(instructions, finalizer, result, completion, pending, require_return=False)
+    if dispatch is None:
+        return None
+    dispatch_start, suffix = dispatch
+    body = instructions[start:handler_index]
+    finalizer_offset = instructions[finalizer].offset
+    returned = _match_return_completion(translator, body, completion, result, finalizer_offset)
+    if returned is not None:
+        body, expression = returned
+        if (suffix + 1 >= len(instructions) or _load_source(instructions[suffix]) != result
+            or instructions[suffix + 1].mnemonic != "Return"):
+            return None
+        suffix += 2
+    elif (len(body) >= 4 and _smi_value(body[-4]) == -1
+          and _star_target(body[-3]) == result and _star_target(body[-2]) == completion
+          and parse_jump_target(body[-1]) == finalizer_offset):
+        body = body[:-4]
+    else:
+        return None
+    # Only combine closed regions; cross-region branches need the CFG fallback.
+    regions = (instructions[:start], body, instructions[finalizer:dispatch_start])
+    for region in regions:
+        offsets = {item.offset for item in region}
+        if any((target := parse_jump_target(item)) is not None and target not in offsets for item in region):
+            return None
+    prefix = _strip_exception_scaffolding(instructions[:start], {f"r{entry.data}"}, pending)
+    output = _render_fragment(translator, prefix)
+    output.append(f"{INDENT}try {{")
+    output.extend(_indent_lines(_render_fragment(translator, body)))
+    if returned is not None:
+        output.append(f"{INDENT * 2}return {expression}")
+    output.append(f"{INDENT}}} finally {{")
+    output.extend(_indent_lines(_render_fragment(translator, instructions[finalizer:dispatch_start])))
+    output.append(f"{INDENT}}}")
+    output.extend(_render_fragment(translator, instructions[suffix:]))
+    return output
 
 
 def _strip_exception_scaffolding(
@@ -445,6 +516,7 @@ def _render_try_catch_finally(
             output.extend(_indent_lines(_render_fragment(translator, try_body)))
             output.append(f"{INDENT * 2}return {try_result}")
             output.append(f"{INDENT}}} catch ({catch_name}) {{")
+            output.extend(_catch_cell(context, translator, catch_context, catch_name))
             output.extend(
                 _indent_lines(_render_fragment(translator, catch_body))
             )
@@ -456,6 +528,7 @@ def _render_try_catch_finally(
             )
             inner_lines.append(f"{INDENT * 2}return {try_result}")
             inner_lines.append(f"{INDENT}}} catch ({catch_name}) {{")
+            inner_lines.extend(_catch_cell(context, translator, catch_context, catch_name))
             inner_lines.extend(
                 _indent_lines(_render_fragment(translator, catch_body))
             )
@@ -631,6 +704,7 @@ def _render_single_try_catch(
     try_catch_lines = [f"{INDENT}try {{"]
     try_catch_lines.extend(_indent_lines(try_lines))
     try_catch_lines.append(f"{INDENT}}} catch ({catch_name}) {{")
+    try_catch_lines.extend(_catch_cell(context, translator, catch_context, catch_name))
     try_catch_lines.extend(_indent_lines(catch_lines))
     try_catch_lines.append(f"{INDENT}}}")
 
@@ -679,11 +753,18 @@ def render_simple_try_catch(
     translator: InstructionTranslator,
     instructions: List[Instruction],
 ) -> Optional[List[str]]:
+    rendered = _render_try_finally(context, bytecode, translator, instructions)
+    if rendered is not None:
+        return rendered
     rendered = _render_try_catch_finally(
         context, bytecode, translator, instructions
     )
     if rendered is not None:
         return rendered
+    if len(bytecode.handler_entries) != 1 or any(
+        item.mnemonic.startswith("JumpLoop") for item in instructions
+    ):
+        return None
     for entry in bytecode.handler_entries:
         rendered = _render_single_try_catch(
             context, translator, instructions, entry

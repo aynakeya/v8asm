@@ -14,7 +14,12 @@ def uses_identifier(text: str, name: str) -> bool:
     # Templates are not emitted by the translator; leave hand-authored ones alone.
     if "`" in text:
         return True
-    return re.search(rf"(?<![\w$.]){re.escape(name)}(?![\w$])", code_tokens(text)) is not None
+    tokens = code_tokens(text)
+    for match in re.finditer(rf"(?<![\w$]){re.escape(name)}(?![\w$])", tokens):
+        prefix = tokens[:match.start()].rstrip()
+        if not prefix.endswith(".") or prefix.endswith("..."):
+            return True
+    return False
 
 
 def expression_statement(value: str) -> str:

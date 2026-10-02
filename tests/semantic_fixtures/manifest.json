@@ -1,0 +1,168 @@
+{
+  "artifacts": {
+    "conversion-boundaries-10.2.154.26.jsc": {
+      "arch": "x64",
+      "cache_sha256": "1b0404c4362a16ef60fbc75b23187abfafc6429d7ae6e3bbe4320036b9ca091b",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "18.20.8",
+      "platform": "linux",
+      "runtime": "node18",
+      "source": "conversion-boundaries.js",
+      "source_sha256": "ac39bab78141fae62996d62affe61e1661af10d1befba674d4e609f8687a3dfd",
+      "v8_version": "10.2.154.26-node.39"
+    },
+    "conversion-boundaries-11.3.244.8.jsc": {
+      "arch": "x64",
+      "cache_sha256": "1251c36f12d54ad4ab88e884fe88a048a4b1e8289795eceacdeec9aaf40bc992",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "20.20.2",
+      "platform": "linux",
+      "runtime": "node20",
+      "source": "conversion-boundaries.js",
+      "source_sha256": "ac39bab78141fae62996d62affe61e1661af10d1befba674d4e609f8687a3dfd",
+      "v8_version": "11.3.244.8-node.38"
+    },
+    "conversion-boundaries-12.4.254.21.jsc": {
+      "arch": "x64",
+      "cache_sha256": "5f38a26622e8947364d80fd913960e589625431d7c1a0b2e5645112d8d681de3",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "22.17.0",
+      "platform": "linux",
+      "runtime": "node22",
+      "source": "conversion-boundaries.js",
+      "source_sha256": "ac39bab78141fae62996d62affe61e1661af10d1befba674d4e609f8687a3dfd",
+      "v8_version": "12.4.254.21-node.26"
+    },
+    "conversion-boundaries.jsc": {
+      "arch": "x64",
+      "cache_sha256": "28e25d849dc05b958a2e8e82acfccae9965602af12bb1957e88cec1cba8d38ad",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "24.7.0",
+      "platform": "linux",
+      "runtime": "node24",
+      "source": "conversion-boundaries.js",
+      "source_sha256": "ac39bab78141fae62996d62affe61e1661af10d1befba674d4e609f8687a3dfd",
+      "v8_version": "13.6.233.10-node.26"
+    },
+    "iterable-spread-10.2.154.26.jsc": {
+      "arch": "x64",
+      "cache_sha256": "106d16291e2e17b6621c657c7931f7a83a00dd29ed5a408f2b8eb75154bcb709",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "18.20.8",
+      "platform": "linux",
+      "runtime": "node18",
+      "source": "iterable-spread.js",
+      "source_sha256": "e8dbd6be4da41ca264667f84028d303fdc0bf39b8384a4ef87e3d13705a0a3f2",
+      "v8_version": "10.2.154.26-node.39"
+    },
+    "iterable-spread-11.3.244.8.jsc": {
+      "arch": "x64",
+      "cache_sha256": "08b8a53be0abf65d7b69fa91b2248602d9ff4bf103d92ad6de754a55bc23fca0",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "20.20.2",
+      "platform": "linux",
+      "runtime": "node20",
+      "source": "iterable-spread.js",
+      "source_sha256": "e8dbd6be4da41ca264667f84028d303fdc0bf39b8384a4ef87e3d13705a0a3f2",
+      "v8_version": "11.3.244.8-node.38"
+    },
+    "iterable-spread-12.4.254.21.jsc": {
+      "arch": "x64",
+      "cache_sha256": "e2eb42fdf93a0d1b8b91f81b51b069c70efefd3eb9a379f3cc62213652003522",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "22.17.0",
+      "platform": "linux",
+      "runtime": "node22",
+      "source": "iterable-spread.js",
+      "source_sha256": "e8dbd6be4da41ca264667f84028d303fdc0bf39b8384a4ef87e3d13705a0a3f2",
+      "v8_version": "12.4.254.21-node.26"
+    },
+    "iterable-spread.jsc": {
+      "arch": "x64",
+      "cache_sha256": "4a7b7ab6eb0565e3ed22bcd27aaca8d72008d2bb8a3ad2434f3594763dc73295",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "24.7.0",
+      "platform": "linux",
+      "runtime": "node24",
+      "source": "iterable-spread.js",
+      "source_sha256": "e8dbd6be4da41ca264667f84028d303fdc0bf39b8384a4ef87e3d13705a0a3f2",
+      "v8_version": "13.6.233.10-node.26"
+    }
+  },
+  "compile_flags": [
+    "--no-lazy"
+  ],
+  "runtimes": {
+    "node18": {
+      "cache_suffix": "-10.2.154.26",
+      "fixtures": [
+        "class-members",
+        "context-lifetimes",
+        "conversion-boundaries",
+        "delete-property",
+        "exception-completions",
+        "expression-statements",
+        "iterable-spread",
+        "lexical-initialization",
+        "numeric-conversion",
+        "object-members",
+        "object-rest-spread",
+        "switch-routing"
+      ],
+      "node_version": "18.20.8",
+      "v8_version": "10.2.154.26-node.39"
+    },
+    "node20": {
+      "cache_suffix": "-11.3.244.8",
+      "fixtures": [
+        "class-members",
+        "context-lifetimes",
+        "conversion-boundaries",
+        "exception-completions",
+        "iterable-spread",
+        "lexical-initialization",
+        "object-rest-spread"
+      ],
+      "node_version": "20.20.2",
+      "v8_version": "11.3.244.8-node.38"
+    },
+    "node22": {
+      "cache_suffix": "-12.4.254.21",
+      "fixtures": [
+        "class-members",
+        "context-lifetimes",
+        "conversion-boundaries",
+        "exception-completions",
+        "iterable-spread",
+        "lexical-initialization",
+        "object-rest-spread"
+      ],
+      "node_version": "22.17.0",
+      "v8_version": "12.4.254.21-node.26"
+    },
+    "node24": {
+      "cache_suffix": "",
+      "fixtures": [
+        "*"
+      ],
+      "node_version": "24.7.0",
+      "v8_version": "13.6.233.10-node.26"
+    }
+  }
+}

@@ -21,6 +21,8 @@
 | [development.md](development.md) | 轻量工作流程、代码与文档维护约定 |
 | [environment-and-build.md](environment-and-build.md) | uv、官方 V8 checkout、依赖同步、`-j10` 与缓存 |
 | [semantic-fixtures.md](semantic-fixtures.md) | 可执行 JS 行为覆盖与 fixture 生成 |
+| [generated-assets.md](generated-assets.md) | 固定生成入口、runtime 清单、profile 源码来源和产物溯源 |
+| [application-fixture.md](application-fixture.md) | 完整 CLI 组合样例、执行对照与已发现的能力缺口 |
 | [validation.md](validation.md) | 按改动选择测试和 Node/Electron matrix |
 | [TODO.md](TODO.md) | 尚未完成的特性与正确性工作 |
 

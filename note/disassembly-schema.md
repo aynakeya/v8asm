@@ -11,6 +11,7 @@ decompiler 直接消费它，不重新解析人类可读的反汇编文本。字
   "schema_version": 1,
   "metadata": {
     "v8_version": "13.6.233.10",
+    "root_layout_version": "13.6.233.10",
     "runtime_variant": "leaptiering",
     "literal_flags": {
       "define_keyed_set_function_name": 1,
@@ -39,6 +40,10 @@ decompiler 直接消费它，不重新解析人类可读的反汇编文本。字
 
 已有字段含义发生不兼容变更时递增 `schema_version`；新增可选字段不要求升级。
 消费者必须拒绝未知 schema 或不支持的版本。
+
+`metadata.v8_version` 是基础 profile 的数字版本，`metadata.root_layout_version` 是
+实际选择的 root 元数据版本；后者可能为 `11.3.244.8-node.38` 等完整 embedder
+版本。该字段描述解析器使用的布局，不是从 cache 自动识别出的 runtime 身份。
 
 `metadata.literal_flags` 从所选 V8 tag 源码生成，描述计算属性命名、枚举属性和对象
 字面量 prototype 的 flag 掩码。值可能跨版本变化，不得在 decompiler 中写死。
@@ -101,3 +106,21 @@ context slot。`CreateClosure` 引用的 SFI 构成 decompiler 使用的词法�
 有明确外层作用域时，`ScopeInfo.outer_scope_info` 保存标准 reference 记录。
 尾部可选 PositionInfo、函数变量、推导函数名等字段共同决定外层引用的位置，不能使用
 跨版本固定偏移。字段缺失或引用未解析不代表已经初始化，也不代表不存在外层作用域。
+
+## Class 元数据
+
+可识别的 `ClassBoilerplate` 包含：
+
+- `arguments_count`：DefineClass 的参数数量；
+- `argument_indices`：constructor、prototype、first_dynamic 的源码定义索引；
+- `members`：真实 `key` 引用、`kind`（method/getter/setter）、`argument_index` 和 `static`；
+- `supported`：当前 decoder 是否完整消费受支持 template 的动态参数。
+
+字段布局来自对应 tag 的 `literal-objects.h`、`descriptor-array.tq`、`struct.tq` 和
+`property-details.h`。旧版 ClassBoilerplate 继承 FixedArray，新版继承 Struct，不能
+使用相同偏移；旧版依靠 DefineClass 操作数的常量来源确认 boilerplate 身份。
+descriptor 的容量、有效条目数、属性 kind 和参数范围共同参与验证，不扫描任意对象
+猜测成员。`supported=false` 不代表没有成员，只表示不能完整恢复为原生 class。
+
+handler table 的位域从各 tag 的 `handler-table.h` 生成；JSON 中的 `handler` 已是
+解码后的 bytecode offset，消费者无需再次移位。

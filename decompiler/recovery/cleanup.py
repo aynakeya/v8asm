@@ -412,6 +412,9 @@ def _async_reject_uses_reg(lines: List[str], start: int, reg: str) -> bool:
 
 
 def _drop_unused_pure_reg_assignments(lines: List[str]) -> List[str]:
+    if any(line.strip().startswith(("while ", "for ", "try {")) for line in lines):
+        # Linear liveness does not model backedges or exception edges.
+        return lines
     live: set[str] = set()
     keep = [True] * len(lines)
 

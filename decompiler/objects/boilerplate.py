@@ -72,6 +72,15 @@ class V8ObjectBoilerplateDescription(V8HeapObject):
         )
 
 
+class V8ClassBoilerplate(V8HeapObject):
+    def __init__(self, address, i_type, lines):
+        super().__init__(address, i_type, lines)
+        self.arguments_count = 0
+        self.argument_indices = {}
+        self.members = []
+        self.supported = False
+
+
 class V8ScopeInfo(V8HeapObject):
     def __init__(self, address: int, i_type: str, lines: list[str]):
         super().__init__(address, i_type, lines)

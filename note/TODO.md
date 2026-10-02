@@ -11,47 +11,19 @@
 - 新规则必须先有失败 fixture，并同时验证成功模式和拒绝误匹配模式。
 - profile、snapshot 或对象 layout 缺少证据时保持 `unresolved`。
 
-## P0：逐指令确认 context 身份
-
-已有 fixture 覆盖普通闭包、脚本绑定、同名变量和初始化检查，但当前 context chain
-仍按函数关联的 scope 列表建立，并非 CFG 上每个程序点的活跃作用域。
-不能用这部分测试证明任意 block/catch/循环作用域都正确。
-
-下一步先用真实 cache 复现多个 block/catch 的 slot 复用、循环内 `let` 捕获和
-`PushContext` / `PopContext` 分支合流；再把 scope 身份绑定到指令位置。
-TDZ 检查的删除也必须依赖同一个 binding 的初始化证明，而不是名字相同。
-来源不明确时保留显式低层形式，不通过文件级文本替换猜变量。
-
-## P0：继续核对转换指令与表达式读写
-
-本轮复查发现、尚未完成语义 fixture 的两处转换问题：
-
-- `ToObject` 的 operand 是目标寄存器，输入来自 ACCU；当前 translator 把它当输入，
-  还需要验证 null/undefined 的异常，以及转换后 ACCU 不变的契约。
-- `ToString` 不能直接等同于 `String(value)`：后者允许直接传入 Symbol，字节码转换
-  则应抛错；需要覆盖对象转换的 string hint 与异常顺序。
-
-先针对这些行为生成 fixture 再修复，不以没有 WARNING 代替语义验证。
+## P0：继续核对表达式读写
 
 后处理仍有较多文本规则。继续优化前，优先审查跨语句移动属性读取、二元运算求值顺序、
 分支中的临时值存活，以及变量名与字符串/属性键的区分。新规则应消费可证明的读写信息；
 不能把已有局部规则扩大为全局变量替换。必要时只为这些表达式引入小范围的结构化表示，
 不一次重写整个 decompiler。
 
-## P1：扩展异常 completion 覆盖
+## P1：异常控制流的结构化与可读性
 
-当前实现已覆盖普通 `try/catch`，以及 return/throw 通过同一 finalizer dispatch 的
-catch + finally 结构。尚未覆盖的 V8 lowering 需要由真实 fixture 驱动：
-
-- 没有 catch 的 `try/finally`；
-- try 或 catch 中的 `break`、`continue` 和多返回点；
-- 多层 finally 和多个相邻 handler region；
-- finalizer 自身包含分支、return 或 throw；
-- 不同 V8 大版本使用的其他 completion token dispatch。
-
-不要继续堆叠仅针对 offset 序列的局部正则。出现第二种实际 lowering 后，应先把 handler
-table 建模成嵌套 region，再从 completion token、result register 和 dispatch target
-恢复控制流。
+复杂 handler 当前保留显式基本块 dispatch。后续应把可证明的子图逐步恢复为嵌套
+`try/finally`、循环和原生 `for-of`，不能只为了缩短输出删除 completion 状态。
+尤其需要保留 IteratorClose、finalizer 覆盖返回/异常，以及穿过多层 finally 的跳转。
+未识别的 generator/async 状态转换不在同步异常测试的保证范围内。
 
 验收条件：
 
@@ -64,20 +36,28 @@ table 建模成嵌套 region，再从 completion token、result register 和 dis
 当前语义门禁覆盖算术、短路、receiver/参数顺序、getter 副作用、闭包/context
 shadowing、普通 catch 和 catch + finally。后续高风险改动应补充：
 
-- for-of 的 iterator close、break 和抛出路径；
-- switch fallthrough；
+- for-of 的 iterator getter/return 抛错、continue 与嵌套迭代器关闭顺序；
 - nullish assignment 的单次求值；
-- array spread 与 iterator 协议，对象复制的 Proxy、不可枚举/继承属性及 getter 抛错；
+- 对象复制的 Proxy、不可枚举/继承属性及 getter 抛错；
 - generator、async resume 和 reject 路径。
 
-只在准备修改对应恢复规则时添加 fixture，不追求无目标的语法覆盖率。
+小型语义门禁随对应恢复规则补充；完整应用的探索性覆盖由 Taskboard 按需诊断，
+不把尚未实现的功能加入 expectedFailure 来制造全绿结果。
 
-## P1：基于元数据恢复 class
+## P1：扩展 class 元数据恢复
 
-先补构造器、实例/静态方法、访问器、继承与 super 的可观察行为 fixture，再消费
-ClassBoilerplate、SFI、词法作用域和实际属性键恢复源码。随后扩展字段与私有成员。
+继续补继承与 `super`、计算键与数字键、匿名 class、字段、私有成员和静态初始化块。
+大型 class 使用的 dictionary template、重复定义留下的未消费参数，也需要单独解析，
+不能把当前 descriptor template 的支持扩大到这些布局。
+Taskboard 中派生构造器和箭头函数的 lexical this 已触发非法 `this = ...` 输出，
+完整文件因此无法执行。不能通过删掉赋值来掩盖尚未恢复的 receiver 初始化。
 不合入外部 fork 的文本 class rewrite：不能删除真实方法名的数字后缀，也不能把
 `super.value` 无条件转换为绑定方法。无法证明的 class 构造保留低层形式。
+
+## P1：扩展作用域边界
+
+继续验证 `with`、未解析外部 context、动态作用域及特殊函数类型的捕获行为。
+合流后无法唯一确认的 context 必须保留低层表达；不得退回按 scope 列表顺序猜槽位。
 
 ## P1：从 V8 源码生成更完整的对象类型元数据
 
@@ -107,13 +87,15 @@ ClassBoilerplate、SFI、词法作用域和实际属性键恢复源码。随后�
 
 显示截断不能改变 decompiler 消费的结构化对象图。
 
-## P2：处理残留控制流诊断
+## P1：稀疏 double array 和模板对象
 
-部分已恢复循环后仍保留 `// goto offset_N`。这些注释
-没有可执行语义，却可能提示仍未结构化的异常边或 dispatch。
+Taskboard 的 `codec` 场景在匹配 Electron snapshot 下仍留下未定义的
+`ArrayBoilerplate_5`。对象图已将其 constant_elements 标为 `FixedDoubleArray`，
+需要继续核对元素解析与源码 formatter 的边界，保留 hole、undefined、负零和 NaN
+的区别。不要用 `[undefined]` 代替数组空洞。
 
-后续只能在 CFG 已证明输出下一节点就是 jump target、且不存在未消费 predecessor 时
-删除。不能在字符串后处理阶段全局移除 `goto_comments`，否则会隐藏控制流缺口。
+同一场景还包含未实现的 `GetTemplateObject`，需恢复 tagged template 的 raw/cooked
+值及同一调用点的模板对象身份，不能仅拼接成普通字符串。
 
 ## P2：核对 `TestUndetectable`
 

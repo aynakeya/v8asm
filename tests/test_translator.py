@@ -6,9 +6,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 from decompiler.context import ConstantPoolEntry, DecompilerContext
+from decompiler.control_flow import render_dispatch
+from decompiler.objects import V8Smi
 from decompiler.instruction import Instruction
 from decompiler.objects.bytecode import CodeLine, V8BytecodeArray
 from decompiler.translator import InstructionTranslator
+from decompiler.runtime import runtime_prelude
+from tests.test_semantic_equivalence import observe_javascript
 
 
 class TranslatorOpcodeTests(unittest.TestCase):
@@ -30,11 +34,47 @@ class TranslatorOpcodeTests(unittest.TestCase):
             'ACCU = new RegExp("^(\\\\w+):(\\\\d+)$", "u")',
         )
 
+    def test_to_object_preserves_accumulator_and_rejects_nullish_values(self) -> None:
+        instruction = self.translate("ToObject", ["r0"])
+        for value in ('"abc"', '17', 'true', '{}', 'null', 'undefined'):
+            with self.subTest(value=value):
+                source = runtime_prelude() + f'''
+const input = {value};
+let ACCU = input, r0 = "old";
+try {{
+  {instruction};
+  globalThis.__semantic_result = [ACCU === input, typeof r0, r0.valueOf() === input];
+}} catch (error) {{
+  globalThis.__semantic_result = [error.name, ACCU === input, r0 === "old"];
+}}
+'''
+                expected = ["TypeError", True, True] if value in ('null', 'undefined') else [True, "object", True]
+                self.assertEqual(observe_javascript(source), {"status": "ok", "value": expected})
+
     def test_define_named_own_property(self) -> None:
         self.assertEqual(
             self.translate("DefineNamedOwnProperty", ["r2", "[1]", "[3]"]),
             'define_literal_property(r2, "value", ACCU, false, true)',
         )
+
+    def test_switch_dispatch_handles_holes_and_operand_prefixes(self) -> None:
+        for suffix in ("", ".Wide", ".ExtraWide"):
+            with self.subTest(scale=suffix):
+                switch = Instruction(2, "SwitchOnSmiNoFeedback" + suffix, ["[0]", "[3]", "[0]"], "")
+                base = 2 + bool(suffix)
+                self.translator.constants = {
+                    0: ConstantPoolEntry(0, V8Smi(20 - base), ""),
+                    1: ConstantPoolEntry(1, None, "HOLE"),
+                    2: ConstantPoolEntry(2, V8Smi(30 - base), ""),
+                }
+                instructions = [Instruction(0, "Ldar", ["a0"], ""), switch]
+                for offset, value in ((10, -1), (20, 10), (30, 30)):
+                    instructions.extend([Instruction(offset, "LdaSmi", [f"[{value}]"], ""),
+                                         Instruction(offset + 2, "Return", [], "")])
+                body = "\n".join(render_dispatch(self.translator, instructions))
+                source = f"function test(arg0) {{ let ACCU;\n{body}\n}}\n" + \
+                         "globalThis.__semantic_result = [test(0), test(1), test(2), test(3)];"
+                self.assertEqual(observe_javascript(source), {"status": "ok", "value": [10, -1, 30, -1]})
 
     def test_operand_scale_suffix_reuses_base_opcode_translation(self) -> None:
         wide = Instruction(0, "LdaSmi.Wide", ["[248]"], "raw")

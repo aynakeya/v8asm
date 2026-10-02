@@ -6,6 +6,7 @@ import re
 from typing import Iterable, List, Optional
 
 from .context import DecompilerContext
+from .control_flow import render_dispatch
 from .instruction import Instruction
 from .normalization import normalize_source_instructions
 from .objects import V8HeapObject
@@ -15,6 +16,7 @@ from .recovery.propagation import simplify_lines
 from .recovery.file import postprocess_source_file
 from .recovery.destructuring import recover_object_rest
 from .recovery.literals import recover_object_literals
+from .recovery.classes import recover_classes
 from .runtime import runtime_prelude
 from .structured import load_structured_objects
 from .structurer import decompile_to_statements
@@ -120,14 +122,6 @@ def _render_structured(
     return lines
 
 
-def _render_source_fragment(
-    translator: InstructionTranslator, instructions: List[Instruction]
-) -> List[str]:
-    return simplify_lines(
-        _render_structured(translator, instructions), recover_structures=True
-    )
-
-
 def _indent_lines(lines: List[str]) -> List[str]:
     return [f"{INDENT}{line}" if line else line for line in lines]
 
@@ -141,9 +135,16 @@ def _render_source(
     recovered = render_simple_try_catch(
         context, bytecode, translator, instructions
     )
-    if recovered is not None:
-        return recovered
-    return _render_source_fragment(translator, instructions)
+    if recovered is None:
+        if bytecode.handler_entries or any(item.mnemonic == "SwitchOnSmiNoFeedback" for item in instructions):
+            return render_dispatch(translator, instructions)
+        recovered = _render_structured(translator, instructions)
+    lines = simplify_lines(recovered, recover_structures=True)
+    # A remaining jump is executable control flow, not a removable comment.
+    if any(re.match(r"^\s*(?://\s*)?(?:(?:if \(.+\)|loop) )?goto (?:offset_|\?)", line)
+           for line in lines):
+        return render_dispatch(translator, instructions)
+    return lines
 
 
 def decompile_bytecode(
@@ -177,6 +178,9 @@ def decompile_bytecode(
 
     notes: List[str] = []
     lexical_declarations = []
+    class_expansions = {}
+    nested_functions = list(nested_functions or ())
+    original_nested_functions = nested_functions
     try:
         if linear:
             body_lines = _render_linear(translator, instructions)
@@ -188,6 +192,9 @@ def decompile_bytecode(
             lexical_declarations = list(
                 normalization.lexical_declarations
             )
+            nested_functions, class_expansions = recover_classes(
+                context, bytecode, translator, instructions, nested_functions
+            )
             body_lines = _render_source(
                 context, bytecode, translator, instructions
             )
@@ -196,15 +203,20 @@ def decompile_bytecode(
             "  // WARNING: structurer recursion overflow, "
             "fallback to linear output"
         )
+        translator.overrides.clear()
+        class_expansions = {}
+        nested_functions = original_nested_functions
         body_lines = _render_linear(translator, original_instructions)
     except Exception as exc:
         notes.append(
             f"  // WARNING: decompile error ({type(exc).__name__}), "
             "fallback to linear output"
         )
+        translator.overrides.clear()
+        class_expansions = {}
+        nested_functions = original_nested_functions
         body_lines = _render_linear(translator, original_instructions)
 
-    nested_functions = list(nested_functions or ())
     nested_owners = {
         context.get_function_name(function): function
         for child in context.child_functions(bytecode)
@@ -220,6 +232,11 @@ def decompile_bytecode(
     if as_script:
         lexical_declarations = context.script_context_declarations(bytecode) + lexical_declarations
     body.extend(_format_register_locals(bytecode, body_lines))
+    block_variables = [context.scope_variable(scope.address)
+                       for scope in context.bytecode_scopes.get(bytecode.address, ())
+                       if context.uses_scope_cell(scope.address)]
+    if block_variables:
+        body.append(f"  let {', '.join(block_variables)};")
     if lexical_declarations:
         declarations = ", ".join(
             (
@@ -236,7 +253,11 @@ def decompile_bytecode(
     for nested in nested_functions or ():
         declaration = re.match(r"function ([\w$]+)\((.*)\) \{", nested)
         function = nested_owners.get(declaration[1]) if declaration else None
-        if not linear and function and function.func_kind in {
+        child = context.get_object(function.trusted_function_data.address) if function and function.trusted_function_data else None
+        scopes = context.closure_scope_variables(child) if child and not linear else []
+        if scopes:
+            nested = _closure_factory(context, function, nested, scopes)
+        elif not linear and function and function.func_kind in {
             "ConciseMethod", "GetterFunction", "SetterFunction"
         }:
             # An unmerged method is still not a constructor. Keep its callable
@@ -255,6 +276,15 @@ def decompile_bytecode(
         body.append("")
         body.extend(_indent_lines(nested.splitlines()))
     body.extend(body_lines)
+    if class_expansions:
+        expanded = []
+        for line in body:
+            for marker, expression in class_expansions.items():
+                if marker in line:
+                    indent = line[:len(line) - len(line.lstrip())]
+                    line = line.replace(marker, expression.replace("\n", "\n" + indent))
+            expanded.extend(line.splitlines())
+        body = expanded
     if as_script:
         while body and not body[-1]:
             body.pop()
@@ -283,13 +313,33 @@ def _decompile_function_tree(
         _decompile_function_tree(context, child, linear, next_ancestors)
         for child in context.child_functions(bytecode)
     ]
-    return decompile_bytecode(
+    rendered = decompile_bytecode(
         context,
         bytecode,
         nested_functions=nested,
         linear=linear,
         as_script=not linear and context.is_script(bytecode),
     )
+    return rendered
+
+
+def _closure_factory(context, owner, rendered, scopes):
+    name = context.get_function_name(owner)
+    parts = rendered.splitlines()
+    declaration = re.match(r"function ([\w$]+)\((.*)\) \{", parts[0])
+    if owner.func_kind in {"ConciseMethod", "GetterFunction", "SetterFunction"}:
+        key = json.dumps(owner.name_value or "")
+        parts = ["return {", f"  [{key}]({declaration[2]}) {{",
+                 *_indent_lines(parts[1:-1]), "  }", f"}}[{key}];"]
+    elif owner.func_kind == "ArrowFunction":
+        key = json.dumps(owner.name_value or "")
+        parts = [f"return {{ [{key}]: ({declaration[2]}) => {{",
+                 *_indent_lines(parts[1:-1]), f"}} }}[{key}];"]
+    else:
+        parts[0] = "return " + parts[0]
+        parts[-1] += ";"
+    return "\n".join([f"function make_{name}({', '.join(scopes)}) {{",
+                      *_indent_lines(parts), "}"])
 
 
 def _read_disassembly_objects(path: Path):

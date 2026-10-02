@@ -12,6 +12,13 @@ function isJSReceiver(v) {
   const t = typeof v;
   return (t === "object" && v !== null) || t === "function";
 }
+function to_object(value) {
+  if (value === null || value === undefined) {
+    throw new TypeError("Cannot convert undefined or null to object");
+  }
+  return Object(value);
+}
+function to_string(value) { return `${value}`; }
 function to_numeric(value) {
   if (isJSReceiver(value)) {
     const exotic = value[Symbol.toPrimitive];

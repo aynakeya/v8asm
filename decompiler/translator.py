@@ -12,7 +12,7 @@ from .instruction import Instruction
 from .utils import parse_jump_target
 
 CONST_INDEX_RE = re.compile(r"^\[(\-?\d+)\]$")
-RANGE_RE = re.compile(r"^([ra])(\d+)-([ra])(\d+)$")
+RANGE_RE = re.compile(r"^([ra])(\d+)-([ra])(-?\d+)$")
 IDENT_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 TYPEOF_LITERAL_FLAGS = {
     0: "number",
@@ -73,11 +73,15 @@ class InstructionTranslator:
     def __init__(self, context: DecompilerContext, bytecode: V8BytecodeArray):
         self.context = context
         self.bytecode = bytecode
+        self.overrides: Dict[int, str] = {}
         self.constants: Dict[int, ConstantPoolEntry] = {
             entry.index: entry for entry in context.constant_pool_entries(bytecode)
         }
 
     def translate(self, instr: Instruction) -> str:
+        self.instruction_offset = instr.offset
+        if instr.offset in self.overrides:
+            return self.overrides[instr.offset]
         handler = getattr(self, f"_op_{instr.mnemonic}", None)
         if handler:
             return handler(instr)
@@ -216,6 +220,8 @@ class InstructionTranslator:
                 self.bytecode,
                 slot_index,
                 depth_index or 0,
+                offset=self.instruction_offset,
+                context_register=context,
             )
             if name:
                 return name
@@ -230,6 +236,8 @@ class InstructionTranslator:
         if prefix != prefix2:
             return [self._reg_name(token)]
         start_idx, end_idx = int(start), int(end)
+        if end_idx == start_idx - 1:
+            return []
         step = 1 if end_idx >= start_idx else -1
         result = []
         for i in range(start_idx, end_idx + step, step):
@@ -278,6 +286,9 @@ class InstructionTranslator:
     def _op_CreateEmptyArrayLiteral(self, instr: Instruction) -> str:
         return "ACCU = []"
 
+    def _op_CreateArrayFromIterable(self, instr: Instruction) -> str:
+        return "ACCU = [...ACCU]"
+
     def _op_CreateObjectLiteral(self, instr: Instruction) -> str:
         if len(instr.args) < 1:
             return "ACCU = create_object_literal({})"
@@ -321,7 +332,13 @@ class InstructionTranslator:
         return "ACCU = create_unmapped_arguments(...arguments)"
 
     def _op_CreateBlockContext(self, instr: Instruction) -> str:
-        return f"ACCU = create_block_context({self._scope_expr(instr)})"
+        scope = self.context.scope_for_instruction(self.bytecode, instr)
+        if scope is None or not self.context.uses_scope_cell(scope.address):
+            return f"ACCU = create_block_context({self._scope_expr(instr)})"
+        fields = [f"[{json.dumps(self.context.scope_slot_name(scope, slot))}]: " +
+                  ("HOLE" if scope.context_slot_initialization.get(slot) else "undefined")
+                  for slot in scope.context_slot_names]
+        return f"ACCU = ({self.context.scope_variable(scope.address)} = {{ {', '.join(fields)} }})"
 
     def _op_LdaGlobal(self, instr: Instruction) -> str:
         if not instr.args:
@@ -340,7 +357,7 @@ class InstructionTranslator:
         idx = _parse_bracket_number(instr.args[0])
         if idx is None:
             return "ACCU = context_slot[?]"
-        name = self.context.context_slot_name(self.bytecode, idx)
+        name = self.context.context_slot_name(self.bytecode, idx, offset=instr.offset)
         return f"ACCU = {name or f'context_slot[{idx}]'}"
 
     def _op_LdaCurrentContextSlot(self, instr: Instruction) -> str:
@@ -360,7 +377,7 @@ class InstructionTranslator:
         idx = _parse_bracket_number(instr.args[0])
         if idx is None:
             return "ACCU = script_context[?]"
-        name = self.context.context_slot_name(self.bytecode, idx)
+        name = self.context.context_slot_name(self.bytecode, idx, offset=instr.offset)
         return f"ACCU = {name or f'script_context[{idx}]'}"
 
     def _op_LdaZero(self, instr: Instruction) -> str:
@@ -398,7 +415,7 @@ class InstructionTranslator:
         idx = _parse_bracket_number(instr.args[0])
         if idx is None:
             return "script_context[?] = ACCU"
-        name = self.context.context_slot_name(self.bytecode, idx)
+        name = self.context.context_slot_name(self.bytecode, idx, offset=instr.offset)
         return f"{name or f'script_context[{idx}]'} = ACCU"
 
     def _op_StaCurrentContextSlot(self, instr: Instruction) -> str:
@@ -407,7 +424,7 @@ class InstructionTranslator:
         idx = _parse_bracket_number(instr.args[0])
         if idx is None:
             return "context_slot[?] = ACCU"
-        name = self.context.context_slot_name(self.bytecode, idx)
+        name = self.context.context_slot_name(self.bytecode, idx, offset=instr.offset)
         return f"{name or f'context_slot[{idx}]'} = ACCU"
 
     def _op_StaContextSlot(self, instr: Instruction) -> str:
@@ -682,6 +699,9 @@ class InstructionTranslator:
     def _op_BitwiseNot(self, instr: Instruction) -> str:
         return "ACCU = ~ACCU"
 
+    def _op_Negate(self, instr: Instruction) -> str:
+        return "ACCU = -ACCU"
+
     def _op_ShiftLeft(self, instr: Instruction) -> str:
         args = self._drop_feedback(instr.args, 1)
         if not args:
@@ -866,6 +886,10 @@ class InstructionTranslator:
         if entry and isinstance(entry.raw, V8Address):
             target = self.context.get_object(entry.raw.address)
             if isinstance(target, V8SharedFunctionInfo):
+                child = self.context.get_object(target.trusted_function_data.address) if target.trusted_function_data else None
+                scopes = self.context.closure_scope_variables(child) if child else []
+                if scopes:
+                    return f"ACCU = make_{self.context.get_function_name(target)}({', '.join(scopes)})"
                 return f"ACCU = {self.context.get_function_name(target)}"
         callee = self._const_token(instr.args[0])
         return f"ACCU = create_closure({callee})"
@@ -886,6 +910,11 @@ class InstructionTranslator:
         if not instr.args:
             return 'ACCU = create_catch_context(ACCU, "UNKNOWN_SCOPE")'
         exc = self._reg_name(instr.args[0])
+        scope = self.context.scope_for_instruction(self.bytecode, instr)
+        if scope is not None and self.context.uses_scope_cell(scope.address):
+            fields = [f"[{json.dumps(self.context.scope_slot_name(scope, slot))}]: {exc}"
+                      for slot in scope.context_slot_names]
+            return f"ACCU = ({self.context.scope_variable(scope.address)} = {{ {', '.join(fields)} }})"
         return f"ACCU = create_catch_context({exc}, {self._scope_expr(instr)})"
 
     def _op_TestReferenceEqual(self, instr: Instruction) -> str:
@@ -995,12 +1024,15 @@ class InstructionTranslator:
     def _op_ToNumeric(self, instr: Instruction) -> str:
         return "ACCU = to_numeric(ACCU)"
 
+    def _op_ToNumber(self, instr: Instruction) -> str:
+        return "ACCU = +ACCU"
+
     def _op_ToObject(self, instr: Instruction) -> str:
-        source = self._reg_name(instr.args[0]) if instr.args else "ACCU"
-        return f"ACCU = Object({source})"
+        target = self._reg_name(instr.args[0])
+        return f"{target} = to_object(ACCU)"
 
     def _op_ToString(self, instr: Instruction) -> str:
-        return "ACCU = String(ACCU)"
+        return "ACCU = to_string(ACCU)"
 
     def _op_DeletePropertySloppy(self, instr: Instruction) -> str:
         receiver = self._reg_name(instr.args[0])

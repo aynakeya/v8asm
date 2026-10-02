@@ -7,6 +7,11 @@ function canConstruct(fn) {
   }
 }
 
+function counter() {
+  let next = 0;
+  return { next() { return ++next; }, current() { return next; } };
+}
+
 function runObjectMembers() {
   const events = [];
   let index = 0;
@@ -53,7 +58,9 @@ function runObjectMembers() {
   const descriptor = Object.getOwnPropertyDescriptor(pair, "value");
   const symbolDescriptor = Object.getOwnPropertyDescriptor(pair, symbol);
   const calledDescriptor = Object.getOwnPropertyDescriptor(calledKey, "computed");
+  const iterator = counter();
   return {
+    counter: [iterator.next(), iterator.next(), iterator.current(), iterator.next.name],
     quoted: methods["some-key"](),
     numeric: methods[17](),
     quotedName: methods["some-key"].name,

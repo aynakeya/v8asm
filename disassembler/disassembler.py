@@ -163,7 +163,7 @@ def _byte_array_data(
     return image[start : start + length]
 
 
-def _handler_entries(data: bytes) -> tuple[tuple[int, int, int, int, int], ...]:
+def _handler_entries(data: bytes, profile: Profile) -> tuple[tuple[int, int, int, int, int], ...]:
     if len(data) % 16:
         return ()
     entries: list[tuple[int, int, int, int, int]] = []
@@ -172,8 +172,9 @@ def _handler_entries(data: bytes) -> tuple[tuple[int, int, int, int, int], ...]:
             int.from_bytes(data[index : index + 4], "little", signed=True)
             for index in range(offset, offset + 16, 4)
         )
-        prediction = encoded & 0x7
-        handler = (encoded & 0xFFFFFFFF) >> 4
+        layout = profile.handler_table_layout
+        prediction = (encoded >> layout["prediction_shift"]) & layout["prediction_mask"]
+        handler = (encoded >> layout["offset_shift"]) & layout["offset_mask"]
         entries.append((start, end, handler, prediction, context))
     return tuple(entries)
 
@@ -317,7 +318,7 @@ def find_bytecode_arrays(
                         frame_size=frame_size,
                         constant_pool=constant_pool,
                         handler_table_size=len(handler_data),
-                        handler_entries=_handler_entries(handler_data),
+                        handler_entries=_handler_entries(handler_data, profile),
                         source_position_table_size=len(source_position_data),
                     )
                 )

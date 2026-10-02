@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -15,6 +16,8 @@ from disassembler.structured import disassembly_to_dict
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "semantic_fixtures"
 NODE = shutil.which("node")
+FEATURE_CACHE_SUFFIXES = ("", "-10.2.154.26", "-11.3.244.8", "-12.4.254.21")
+FIXTURE_MANIFEST = json.loads((FIXTURES / "manifest.json").read_text())
 
 OBSERVE_SCRIPT = r"""
 const vm = require("node:vm");
@@ -58,7 +61,14 @@ def observe_javascript(source: str) -> dict[str, object]:
 
 
 def decompile_fixture(name: str) -> str:
-    parsed = parse_disassembly_file(FIXTURES / f"{name}.jsc")
+    path = FIXTURES / f"{name}.jsc"
+    record = FIXTURE_MANIFEST["artifacts"].get(path.name)
+    if record:
+        for file, expected in ((path, record["cache_sha256"]),
+                               (FIXTURES / record["source"], record["source_sha256"])):
+            if hashlib.sha256(file.read_bytes()).hexdigest() != expected:
+                raise AssertionError(f"stale fixture: {file.name}; regenerate with tests/generate_semantic_fixtures.py")
+    parsed = parse_disassembly_file(path, version=record["v8_version"] if record else None)
     document = disassembly_to_dict(parsed)
     return decompile_objects(
         load_structured_objects(document),
@@ -80,6 +90,11 @@ class SemanticEquivalenceTests(unittest.TestCase):
     def test_call_receiver_and_evaluation_order(self) -> None:
         self.assert_fixture_equivalent("call-order")
 
+    def test_string_switch_routing_and_fallthrough(self) -> None:
+        for suffix in ("", "-10.2.154.26"):
+            with self.subTest(version=suffix):
+                self.assert_fixture_equivalent("switch-routing", "switch-routing" + suffix)
+
     def test_property_reads_preserve_getters_and_order(self) -> None:
         self.assert_fixture_equivalent("property-effects")
 
@@ -90,6 +105,31 @@ class SemanticEquivalenceTests(unittest.TestCase):
         for cache in ("numeric-conversion", "numeric-conversion-10.2.154.26"):
             with self.subTest(cache=cache):
                 self.assert_fixture_equivalent("numeric-conversion", cache)
+
+    def test_conversion_and_empty_constructor_boundaries(self) -> None:
+        for suffix in FEATURE_CACHE_SUFFIXES:
+            with self.subTest(version=suffix):
+                self.assert_fixture_equivalent("conversion-boundaries", "conversion-boundaries" + suffix)
+
+    def test_iterable_spread_protocol_and_copy_identity(self) -> None:
+        for suffix in FEATURE_CACHE_SUFFIXES:
+            with self.subTest(version=suffix):
+                self.assert_fixture_equivalent("iterable-spread", "iterable-spread" + suffix)
+
+    def test_context_activation_and_closure_lifetimes(self) -> None:
+        for suffix in FEATURE_CACHE_SUFFIXES:
+            with self.subTest(version=suffix):
+                self.assert_fixture_equivalent("context-lifetimes", "context-lifetimes" + suffix)
+
+    def test_exception_completions_and_nested_handlers(self) -> None:
+        for suffix in FEATURE_CACHE_SUFFIXES:
+            with self.subTest(version=suffix):
+                self.assert_fixture_equivalent("exception-completions", "exception-completions" + suffix)
+
+    def test_class_constructor_methods_and_accessors(self) -> None:
+        for suffix in FEATURE_CACHE_SUFFIXES:
+            with self.subTest(version=suffix):
+                self.assert_fixture_equivalent("class-members", "class-members" + suffix)
 
     def test_delete_property_modes_and_keys(self) -> None:
         for cache in ("delete-property", "delete-property-10.2.154.26"):

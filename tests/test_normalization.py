@@ -40,7 +40,7 @@ class FakeContext:
     def context_slot_name(self, _bytecode, slot, depth=0):
         return "value" if (slot, depth) == (2, 0) else None
 
-    def context_slot_binding(self, _bytecode, slot, depth=0):
+    def context_slot_binding(self, _bytecode, slot, depth=0, *, offset=None):
         if (slot, depth) == (2, 0):
             return SimpleNamespace(name="value", defining_bytecode_address=0x1000)
         return None

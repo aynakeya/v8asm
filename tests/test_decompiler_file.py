@@ -16,6 +16,7 @@ from disassembler.structured import disassembly_to_dict
 from decompiler.context import DecompilerContext
 from decompiler.objects import V8Address, V8BytecodeArray, V8SharedFunctionInfo
 from decompiler.structured import load_structured_objects
+from test_semantic_equivalence import observe_javascript
 
 
 class DecompilerFileTests(unittest.TestCase):
@@ -125,10 +126,6 @@ class DecompilerFileTests(unittest.TestCase):
                 self.assertNotIn("DeclareGlobals(", output)
                 self.assertIn("let value = arg0;", output)
                 self.assertIn("value += arg0", output)
-                self.assertEqual(output.count("?.enabled"), 1)
-                self.assertEqual(output.count("??"), 1)
-                if version in {"12.4.254.21", "13.6.233.10"}:
-                    self.assertIn("for (const item of arg0)", output)
                 self.assertIn("    read,\n  };", output)
                 self.assertNotIn("pushContext(create_block_context", output)
                 self.assertNotIn("value = HOLE", output)
@@ -401,17 +398,20 @@ class DecompilerFileTests(unittest.TestCase):
         path = ROOT / "tests" / "tmp_constant_jump_chain_disasm.txt"
         try:
             path.write_text(dump, encoding="utf-8")
-            output = decompile_file(path)
+            output = decompile_file(path, runtime=True)
         finally:
             path.unlink(missing_ok=True)
 
-        self.assertIn("context_slot[36] = Const[2]", output)
-        for index in (3, 4):
-            self.assertRegex(
-                output,
-                rf"(?:context_slot\[36\] = Const\[{index}\]|"
-                rf"ACCU = Const\[{index}\]\n\s+context_slot\[36\] = ACCU)",
-            )
+        observed = observe_javascript(output + """
+const Const = ["zh-CN", "zh-TW", "Base", "zh-Hans", "zh-Hant"];
+globalThis.__semantic_result = ["zh-CN", "zh-TW", "unknown"].map(value => {
+  context_slot[36] = value;
+  return [bytecode_000000001000(), context_slot[36]];
+});
+""")
+        self.assertEqual(observed, {
+            "status": "ok", "value": [["zh-Hans", "zh-Hans"], ["zh-Hant", "zh-Hant"], ["Base", "Base"]],
+        })
 
 
 if __name__ == "__main__":

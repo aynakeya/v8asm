@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 from typing import List, Optional
 
@@ -57,10 +57,12 @@ class Instruction:
     args: List[str]
     raw_line: str
     jump_target: Optional[int] = None
+    prefix_size: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
         for suffix in OPERAND_SCALE_SUFFIXES:
             if self.mnemonic.endswith(suffix):
+                self.prefix_size = 1
                 self.mnemonic = self.mnemonic[: -len(suffix)]
                 break
 
