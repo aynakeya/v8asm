@@ -96,7 +96,14 @@ class SemanticEquivalenceTests(unittest.TestCase):
                 self.assert_fixture_equivalent("switch-routing", "switch-routing" + suffix)
 
     def test_property_reads_preserve_getters_and_order(self) -> None:
-        self.assert_fixture_equivalent("property-effects")
+        for suffix in FEATURE_CACHE_SUFFIXES:
+            with self.subTest(version=suffix):
+                self.assert_fixture_equivalent("property-effects", "property-effects" + suffix)
+
+    def test_literal_content_is_not_register_traffic(self) -> None:
+        for suffix in FEATURE_CACHE_SUFFIXES:
+            with self.subTest(version=suffix):
+                self.assert_fixture_equivalent("literal-content", "literal-content" + suffix)
 
     def test_arithmetic_baseline(self) -> None:
         self.assert_fixture_equivalent("arithmetic")

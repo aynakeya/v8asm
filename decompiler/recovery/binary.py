@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Tuple
 
-from .common import _extract_indent, _find_block_end, is_live_after
+from .common import _extract_indent, _find_block_end, is_live_after, is_stable_assignment_target
 
 
 def _format_accu_binary(left: str, op: str, right: str) -> str:
@@ -83,6 +83,7 @@ def _compact_accu_binary_exprs(lines: List[str]) -> List[str]:
                     and "ACCU" not in left
                     and "ACCU" not in right
                     and not re.fullmatch(r"r\d+", target)
+                    and is_stable_assignment_target(target)
                     and not is_live_after(lines, i + 5, "ACCU")
                     and not is_live_after(lines, i + 5, saved_reg)
                 ):
@@ -123,7 +124,11 @@ def _compact_accu_binary_exprs(lines: List[str]) -> List[str]:
                     m_target_store = re.match(r"^(.+?)\s*=\s*ACCU$", s2)
                     if m_target_store:
                         target = m_target_store.group(1).strip()
-                        if not re.fullmatch(r"r\d+", target) and not is_live_after(lines, i + 3, "ACCU"):
+                        if (
+                            not re.fullmatch(r"r\d+", target)
+                            and is_stable_assignment_target(target)
+                            and not is_live_after(lines, i + 3, "ACCU")
+                        ):
                             store_indent = _extract_indent(lines[i + 2])
                             out.append(f"{store_indent}{target} = {expr}")
                             i += 3
@@ -164,7 +169,7 @@ def _compact_self_binary_assignments(lines: List[str]) -> List[str]:
             r"\s*=\s*\(\1\s*([+*\-/%])\s*(.+)\)$",
             stripped,
         )
-        if match:
+        if match and is_stable_assignment_target(match.group(1)):
             target, op, expr = match.groups()
             indent = _extract_indent(line)
             out.append(f"{indent}{target} {op}= {expr.strip()}")
@@ -216,6 +221,7 @@ def _compact_adjacent_binary_temp_registers(lines: List[str]) -> List[str]:
                 if (
                     stored_temp == temp
                     and target == left
+                    and is_stable_assignment_target(target)
                     and temp not in right
                     and not is_live_after(lines, i + 2, temp)
                 ):
@@ -251,6 +257,7 @@ def _compact_adjacent_binary_temp_registers(lines: List[str]) -> List[str]:
                 if (
                     temp_reg == left_reg
                     and target == expr
+                    and is_stable_assignment_target(target)
                     and "ACCU" not in expr
                     and temp_reg not in rhs
                     and not is_live_after(lines, i + 2, temp_reg)

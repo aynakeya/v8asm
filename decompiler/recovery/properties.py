@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import List
 
-from .common import _extract_indent, is_live_after
+from .common import _extract_indent, is_live_after, is_stable_assignment_target
 
 def _compact_keyed_property_reads(lines: List[str]) -> List[str]:
     out: List[str] = []
@@ -87,6 +87,7 @@ def _compact_accu_property_stores(lines: List[str]) -> List[str]:
                 value = m_value.group(1).strip()
                 if (
                     not re.fullmatch(r"r\d+|ACCU", target)
+                    and is_stable_assignment_target(target)
                     and "ACCU" not in value
                     and not is_live_after(lines, i + 2, "ACCU")
                 ):
@@ -109,6 +110,7 @@ def _compact_accu_property_stores(lines: List[str]) -> List[str]:
                 rhs = rhs.strip()
                 if (
                     not re.fullmatch(r"r\d+|ACCU", target)
+                    and is_stable_assignment_target(target)
                     and "ACCU" not in base + rhs
                     and not is_live_after(lines, i + 3, "ACCU")
                 ):

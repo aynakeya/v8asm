@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import List
 
-from .common import _extract_indent, _find_block_end, code_tokens, expression_statement, is_live_after, uses_identifier
+from .common import _extract_indent, _find_block_end, code_tokens, expression_statement, is_live_after, replace_identifier_reads, uses_identifier
 
 
 def _coalesce_accu_store_aliases(lines: List[str]) -> List[str]:
@@ -45,10 +45,10 @@ def _coalesce_accu_store_aliases(lines: List[str]) -> List[str]:
             if accu_assignment:
                 rhs = accu_assignment.group(1)
                 if re.search(r"\bACCU\b", rhs):
-                    line = re.sub(r"\bACCU\b", active_alias, line)
+                    line = replace_identifier_reads(line, {"ACCU": active_alias})
                 active_alias = None
             elif re.search(r"\bACCU\b", stripped):
-                line = re.sub(r"\bACCU\b", active_alias, line)
+                line = replace_identifier_reads(line, {"ACCU": active_alias})
 
             if active_alias is not None and re.match(
                 rf"^{re.escape(active_alias)}\s*=",
@@ -85,11 +85,17 @@ def _accu_alias_is_safe(lines: List[str], start: int, alias: str) -> bool:
             return False
         accu_assignment = re.match(r"^ACCU\s*=\s*(.+)$", stripped)
         if accu_assignment:
-            if re.search(r"\bACCU\b", accu_assignment.group(1)):
-                return not alias_reassigned
+            rhs = accu_assignment.group(1)
+            if uses_identifier(rhs, "ACCU"):
+                return not alias_reassigned and not uses_identifier(
+                    replace_identifier_reads(rhs, {"ACCU": alias}), "ACCU"
+                )
             return True
-        if re.search(r"\bACCU\b", stripped) and alias_reassigned:
-            return False
+        if uses_identifier(stripped, "ACCU"):
+            if alias_reassigned or uses_identifier(
+                replace_identifier_reads(stripped, {"ACCU": alias}), "ACCU"
+            ):
+                return False
         if re.match(rf"^{re.escape(alias)}\s*=", stripped):
             alias_reassigned = True
     return True

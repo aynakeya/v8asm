@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import List
 
+from .common import code_tokens, is_stable_assignment_target, replace_identifier_reads, uses_identifier
+
 REG_TOKEN_RE = re.compile(r"\br\d+\b")
 
 
@@ -72,12 +74,17 @@ def _inline_single_use_registers(lines: List[str]) -> List[str]:
                     break
                 if _assigns_referenced_value(stripped, expr):
                     break
-                if re.search(rf"\b{re.escape(reg)}\b", out[j]):
-                    out[j] = re.sub(
-                        rf"\b{re.escape(reg)}\b",
-                        lambda _match: expr,
-                        out[j],
-                    )
+                assignment = re.match(r"^(.+?)\s*[+\-*/%&|^]?=(?!=)\s*(.+)$", stripped)
+                if (
+                    assignment and uses_identifier(assignment.group(2), reg)
+                    and not is_stable_assignment_target(assignment.group(1).strip())
+                ):
+                    break
+                if uses_identifier(out[j], reg):
+                    replacement = replace_identifier_reads(out[j], {reg: expr})
+                    if replacement == out[j]:
+                        break
+                    out[j] = replacement
                     out.pop(i)
                     changed = True
                     break
@@ -125,7 +132,7 @@ def _single_use_before_reassignment(
         stripped = lines[index].strip()
         assignment = re.match(rf"^{re.escape(register)}\s*=(?!=)\s*(.*)$", stripped)
         searched = assignment.group(1) if assignment else stripped
-        uses = len(re.findall(rf"\b{re.escape(register)}\b", searched))
+        uses = len(re.findall(rf"(?<![\w$]){re.escape(register)}(?![\w$])", code_tokens(searched)))
         if assignment and uses:
             return None
         if uses:

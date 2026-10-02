@@ -22,11 +22,43 @@ def uses_identifier(text: str, name: str) -> bool:
     return False
 
 
+def replace_identifier_reads(text: str, replacements: Dict[str, str]) -> str:
+    tokens = code_tokens(text)
+    # Templates need their own structural recovery.
+    if "`" in text:
+        return text
+    matches = list(re.finditer(r"[A-Za-z_$][\w$]*", tokens))
+    for match in reversed(matches):
+        value = replacements.get(match.group())
+        if value is None:
+            continue
+        prefix = tokens[:match.start()].rstrip()
+        suffix = tokens[match.end():].lstrip()
+        # Leave object keys, shorthand and function bodies to structural recovery.
+        if prefix.count("{") != prefix.count("}"):
+            continue
+        if prefix.endswith(".") and not prefix.endswith("..."):
+            continue
+        if prefix.endswith(("++", "--")) or re.match(r"(?:[+\-*/%&|^]?=(?!=)|\+\+|--)", suffix):
+            continue
+        text = text[:match.start()] + value + text[match.end():]
+    return text
+
+
 def expression_statement(value: str) -> str:
     if value.startswith("{"):
         value = f"({value})"
     # These tokens can continue the preceding expression across a newline.
     return f";{value};" if value.startswith(("(", "[", "/", "+", "-", "`")) else value
+
+
+def is_stable_assignment_target(target: str) -> bool:
+    # Nested receivers and dynamic keys can run code while evaluating the reference.
+    return re.fullmatch(
+        r"[A-Za-z_$][\w$]*|(?:context_slot|script_context)\[\d+\]|(?:this|(?:r|arg)\d+)"
+        r"(?:\.[A-Za-z_$][\w$]*|\[(?:-?\d+|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')\])",
+        target,
+    ) is not None
 
 
 def is_live_after(lines: list[str], start: int, name: str) -> bool:

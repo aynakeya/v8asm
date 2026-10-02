@@ -22,13 +22,14 @@ JSON 自动保留这些信息。未知 opcode 的 WARNING 会直接使语义测�
 | `iterable-spread` | 独立数组复制、稀疏数组物化、Set、Unicode 迭代、iterator/next/done/value getter 顺序与异常、无额外 IteratorClose |
 | `delete-property` | 严格/非严格删除，计算键与 Symbol、不可配置属性、原始值、null、Proxy 拒绝删除 |
 | `call-order` | 方法 receiver 与参数求值顺序 |
-| `property-effects` | getter 的执行次数和顺序 |
+| `property-effects` | getter 次数与顺序；解构默认值及抛错路径；嵌套属性的普通/复合赋值、临时值写回、计算期间更换接收对象 |
 | `short-circuit` | 逻辑表达式与空值合并 |
 | `control-flow` | 混合 &&/|| 的全部 16 组真值路径、嵌套条件表达式、外层 else 归属、分支合流、赋值表达式与逻辑赋值的结果值、提前返回、for/while/do-while 的 continue/break 与嵌套循环、条件及更新段副作用次数 |
 | `optional-nullish` | 可选计算属性、getter、可选方法调用；空值跳过参数，0/false/空字符串不走 fallback |
 | `default-rest-spread` | 默认值只对 undefined 生效；rest/spread、receiver、实参数量；unmapped arguments 不与形参联动 |
 | `object-rest-spread` | 计算键转换、getter 次数/顺序、Symbol 保留与排除、函数命名、`__proto__` 自有属性、null prototype、null/undefined/字符串 spread |
 | `literal-effects` | 对象复制和计算键的顺序、绕过原型 setter 的自有属性定义、getter/setter 名称与描述符、方法与普通函数的可构造性区别、嵌套空数组的独立身份、空/非空及嵌套对象的 null prototype |
+| `literal-content` | 与寄存器同名的字符串、转义引号、美元符号和标识符前后缀；属性键、数组元素、返回值和调用参数保持原始内容 |
 | `expression-statements` | 未使用的对象 spread、连续表达式和算术表达式仍执行副作用，语句边界不变成连续调用 |
 | `object-members` | 字符串/数字方法名、普通函数与方法的构造行为、计算键和 Symbol getter/setter、调用型键的辅助实现、重复成员与数据属性覆盖、方法与捕获变量同名 |
 | `closures`、`context-depth` | 闭包状态、同名绑定、context 层级 |
@@ -52,7 +53,7 @@ uv run python -m unittest discover -s tests -p test_semantic_equivalence.py
 ```
 
 `object-rest-spread`、`lexical-initialization` 以及上述新增的
-`conversion-boundaries`、`numeric-literals`、`iterable-spread`、`context-lifetimes`、`control-flow`、`exception-completions`、`class-members`
+`conversion-boundaries`、`numeric-literals`、`iterable-spread`、`context-lifetimes`、`control-flow`、`property-effects`、`literal-content`、`exception-completions`、`class-members`
 各有三份跨大版本 cache，均来自各自同一个 `.js` 文件：
 
 | Node | 实际 V8 | cache 文件后缀 |
@@ -84,6 +85,14 @@ decompiler 的跨版本语义回归，不是 Electron snapshot 兼容性证明�
 `object-rest-spread` 另有不加载辅助 runtime 的执行断言，保证完整匹配时确实恢复为
 原生对象语法。`tests/test_source_recovery.py` 对不能合并的边界做执行对照：对象逃逸、
 仍被使用的属性键、普通函数身份、null 检查先于键转换、分支中仍需保留的 ACCU 值。
+其中条件内联与默认值恢复同时比较 getter 事件、返回值和保存顺序，并区分复用首次
+读取与字节码明确要求再次读取的情况；纯文本变短不作为优化成功的依据。
+属性更新另对照动态键调用、嵌套 getter 返回不同对象，以及计算期间重绑定接收对象，
+比较实际写入的对象和事件顺序。真实 cache 的寄存器可能已避开某条危险文本规则，
+因此局部规则执行对照与完整 cache 回归均保留，不能互相冒充。
+`literal-content` 不固定寄存器分配或生成文本，而是比较原始源码与四个版本 cache
+恢复结果的完整返回值。局部测试另覆盖对象简写、同名字段以及 ACCU 别名读写，
+防止把“字面内容不变”和“真实变量引用仍能优化”混为一谈。
 
 本组主要覆盖无需外部 snapshot 的缓存。Node 的某些内置字符串位于 read-only heap，
 离线输入没有对应 snapshot 时仍可能显示占位符；不能为使测试通过而猜测这些字符串。

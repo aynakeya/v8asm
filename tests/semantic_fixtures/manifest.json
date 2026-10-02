@@ -156,6 +156,58 @@
       "source_sha256": "e8dbd6be4da41ca264667f84028d303fdc0bf39b8384a4ef87e3d13705a0a3f2",
       "v8_version": "13.6.233.10-node.26"
     },
+    "literal-content-10.2.154.26.jsc": {
+      "arch": "x64",
+      "cache_sha256": "9006cb8c83ae7be39fa12757bf8fa7991c3339c2364436896d8f1286525d40ce",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "18.20.8",
+      "platform": "linux",
+      "runtime": "node18",
+      "source": "literal-content.js",
+      "source_sha256": "9e66ae750b474e11c1742c51d2a618746077b6d45f18ed6b494f540c8f9ae793",
+      "v8_version": "10.2.154.26-node.39"
+    },
+    "literal-content-11.3.244.8.jsc": {
+      "arch": "x64",
+      "cache_sha256": "aad9da53a369d3dc25f59ed1691320d839c442c41eaddcf3974ebdf2ddafcc4f",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "20.20.2",
+      "platform": "linux",
+      "runtime": "node20",
+      "source": "literal-content.js",
+      "source_sha256": "9e66ae750b474e11c1742c51d2a618746077b6d45f18ed6b494f540c8f9ae793",
+      "v8_version": "11.3.244.8-node.38"
+    },
+    "literal-content-12.4.254.21.jsc": {
+      "arch": "x64",
+      "cache_sha256": "54d24aa574dd4c992e6a635835635c78fcf2a40c83a23c4a9ddc0ea68ce31412",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "22.17.0",
+      "platform": "linux",
+      "runtime": "node22",
+      "source": "literal-content.js",
+      "source_sha256": "9e66ae750b474e11c1742c51d2a618746077b6d45f18ed6b494f540c8f9ae793",
+      "v8_version": "12.4.254.21-node.26"
+    },
+    "literal-content.jsc": {
+      "arch": "x64",
+      "cache_sha256": "eb1589d9513e4a3f04ac929a0f943e01cf632095eae53622d36f721b3cbe2db0",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "24.7.0",
+      "platform": "linux",
+      "runtime": "node24",
+      "source": "literal-content.js",
+      "source_sha256": "9e66ae750b474e11c1742c51d2a618746077b6d45f18ed6b494f540c8f9ae793",
+      "v8_version": "13.6.233.10-node.26"
+    },
     "numeric-literals-10.2.154.26.jsc": {
       "arch": "x64",
       "cache_sha256": "77524c5c0741d687cf2516869cf974440a41927c1129f5f8629d630b0c0f35db",
@@ -207,6 +259,58 @@
       "source": "numeric-literals.js",
       "source_sha256": "c890f7658b52727b60e94e000d555a1eb91007237246b462a8c891d931db74c8",
       "v8_version": "13.6.233.10-node.26"
+    },
+    "property-effects-10.2.154.26.jsc": {
+      "arch": "x64",
+      "cache_sha256": "159c46ba649211409b584a7d8a20b565fa403674a07465e7556823c7e1e863bf",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "18.20.8",
+      "platform": "linux",
+      "runtime": "node18",
+      "source": "property-effects.js",
+      "source_sha256": "e3456f8808355901062b695f09bba7bbbbc064d767b03b49d1d231eb0ec0522c",
+      "v8_version": "10.2.154.26-node.39"
+    },
+    "property-effects-11.3.244.8.jsc": {
+      "arch": "x64",
+      "cache_sha256": "eb8927569ab13a6fd25c7dc8c50ef9148ec43d36585d41783185ffc749eefe83",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "20.20.2",
+      "platform": "linux",
+      "runtime": "node20",
+      "source": "property-effects.js",
+      "source_sha256": "e3456f8808355901062b695f09bba7bbbbc064d767b03b49d1d231eb0ec0522c",
+      "v8_version": "11.3.244.8-node.38"
+    },
+    "property-effects-12.4.254.21.jsc": {
+      "arch": "x64",
+      "cache_sha256": "063254e3e983b1e01d22e6844343803e1c72e6a0e991838fb46f79dddf1e01ef",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "22.17.0",
+      "platform": "linux",
+      "runtime": "node22",
+      "source": "property-effects.js",
+      "source_sha256": "e3456f8808355901062b695f09bba7bbbbc064d767b03b49d1d231eb0ec0522c",
+      "v8_version": "12.4.254.21-node.26"
+    },
+    "property-effects.jsc": {
+      "arch": "x64",
+      "cache_sha256": "69692654fda1372e7ffcae3647e49c9e5ba678f10575a4e2a0fc5133967eb975",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "24.7.0",
+      "platform": "linux",
+      "runtime": "node24",
+      "source": "property-effects.js",
+      "source_sha256": "e3456f8808355901062b695f09bba7bbbbc064d767b03b49d1d231eb0ec0522c",
+      "v8_version": "13.6.233.10-node.26"
     }
   },
   "compile_flags": [
@@ -225,10 +329,12 @@
         "expression-statements",
         "iterable-spread",
         "lexical-initialization",
+        "literal-content",
         "numeric-conversion",
         "numeric-literals",
         "object-members",
         "object-rest-spread",
+        "property-effects",
         "switch-routing"
       ],
       "node_version": "18.20.8",
@@ -244,8 +350,10 @@
         "exception-completions",
         "iterable-spread",
         "lexical-initialization",
+        "literal-content",
         "numeric-literals",
-        "object-rest-spread"
+        "object-rest-spread",
+        "property-effects"
       ],
       "node_version": "20.20.2",
       "v8_version": "11.3.244.8-node.38"
@@ -260,8 +368,10 @@
         "exception-completions",
         "iterable-spread",
         "lexical-initialization",
+        "literal-content",
         "numeric-literals",
-        "object-rest-spread"
+        "object-rest-spread",
+        "property-effects"
       ],
       "node_version": "22.17.0",
       "v8_version": "12.4.254.21-node.26"

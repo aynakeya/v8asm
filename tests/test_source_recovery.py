@@ -104,7 +104,11 @@ const arg1 = { toString() { events.push("key"); return "selected"; } };
         self.assertEqual(recover_object_rest(live_key), live_key)
 
     def test_accumulator_cleanup_preserves_getters_and_branch_values(self):
-        setup = 'const events = []; const source = { get value() { events.push("get"); return 7; } };'
+        setup = '''const events = [];
+const source = {
+  get value() { events.push("get"); return 7; },
+  get other() { events.push("other"); return 11; }
+};'''
         cases = [
             ["ACCU = source.value", "return events"],
             ["ACCU = source.value", "r0 = ACCU", "return [ACCU, r0, events]"],
@@ -128,10 +132,60 @@ const arg1 = { toString() { events.push("key"); return "selected"; } };
             ["if (true) {", "  r0 = 7", "}", "else {", "  r0 = 9", "}", "return r0"],
             ["ACCU = 2", "if (true) {", "  ACCU = null", "  if (truthy(ACCU)) {",
              "    ACCU = 7", "  }", "}", "return ACCU"],
+            ["ACCU = source.value", "if (ACCU === 7) {", "  return [ACCU, events]", "}",
+             "return events"],
+            ["ACCU = source.value", "if (!(ACCU !== undefined)) {", "  ACCU = 9", "}",
+             "r0 = ACCU", "return [ACCU, r0, events]"],
+            ["ACCU = source.value", "r1 = source.other", "if (!(ACCU !== undefined)) {",
+             "  ACCU = 9", "}", "r0 = ACCU", "return [ACCU, r0, r1, events]"],
+            ["ACCU = source.value", "if (!(ACCU !== undefined)) {", "  ACCU = 9", "}",
+             "else {", "  ACCU = source.other", "}", "r0 = ACCU", "return [ACCU, r0, events]"],
+            ["ACCU = source.value", "if (ACCU !== 7) {", "  return events", "}",
+             "else {", "  return [ACCU, events]", "}"],
+            ["ACCU = source.value", "if (ACCU === 7) {", '  return { ACCU, label: "ACCU", events }',
+             "}", "return events"],
+            ["r0 = 7", 'ACCU = "r0"', "return ACCU"],
+            ['r0 = "prefix"', 'r1 = "r0 r1"', "return [r0, r1]"],
+            ["r0 = 7", "r1 = { r0: r0 }", 'return [r1.r0, "r0"]'],
+            ["r0 = 7", "r1 = { r0 }", "return r1"],
+            ["r0 = 7", "r1 = { r0: 11 }", "ACCU = r1.r0", "return [r0, ACCU]"],
+            ["ACCU = source.value", "r0 = ACCU", 'ACCU = "ACCU"', "return [r0, ACCU]"],
+            ["ACCU = source.value", "r0 = ACCU", 'return [r0, "ACCU"]'],
+            ["ACCU = source.value", "r0 = ACCU", "ACCU = ToName(ACCU)", "return [r0, ACCU]"],
+            ["ACCU = source.value", "r0 = ACCU", "return { ACCU, saved: r0 }"],
         ]
         for lines in cases:
             with self.subTest(lines=lines):
                 self.assert_equivalent(lines, compact_accumulator_expressions(lines), setup)
+                self.assert_equivalent(lines, simplify_lines(lines, recover_structures=True), setup)
+
+    def test_property_updates_preserve_reference_evaluation(self):
+        setup = '''
+const events = [];
+const items = [{ amount: 1 }, { amount: 2 }];
+let reads = 0;
+const source = {
+  get child() { events.push("child"); return items[reads++ % 2]; }
+};
+let holder = items[0];
+function swap() { events.push("swap"); holder = items[1]; return 3; }
+let index = 0;
+function nextKey() { events.push("key"); return index++; }
+function report() { return [items, reads, index, events]; }
+'''
+        cases = [
+            ["source.child.amount = (source.child.amount + 3)"],
+            ["r0 = (source.child.amount + 3)", "source.child.amount = r0"],
+            ["r0 = source.child.amount", "source.child.amount = (r0 + 3)"],
+            ["ACCU = (source.child.amount + 3)", "source.child.amount = ACCU"],
+            ["ACCU = source.child.amount", "ACCU = (ACCU + 3)", "source.child.amount = ACCU"],
+            ["r0 = (holder.amount + swap())", "holder.amount = r0"],
+            ["ACCU = (holder.amount + swap())", "holder.amount = ACCU"],
+            ["items[nextKey()] = (items[nextKey()] + 3)"],
+        ]
+        for lines in cases:
+            with self.subTest(lines=lines):
+                lines = [*lines, "return report()"]
                 self.assert_equivalent(lines, simplify_lines(lines, recover_structures=True), setup)
 
 

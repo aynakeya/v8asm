@@ -3,9 +3,9 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional
 
+from .common import replace_identifier_reads
 from .pipeline import recover_js_structures
 
-REG_TOKEN_RE = re.compile(r"\br(\d+)\b")
 IDENT_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 
 
@@ -26,11 +26,7 @@ def simplify_lines(lines: List[str], recover_structures: bool = False) -> List[s
     simplified: List[str] = []
 
     def replace_tokens(text: str) -> str:
-        def repl(match: re.Match[str]) -> str:
-            reg = f"r{match.group(1)}"
-            return reg_values.get(reg, reg)
-
-        return REG_TOKEN_RE.sub(repl, text)
+        return replace_identifier_reads(text, reg_values)
 
     def replace_assignment_target(text: str) -> str:
         text = text.strip()

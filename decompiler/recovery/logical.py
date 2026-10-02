@@ -141,16 +141,11 @@ def inline_accu_equality_condition_loads(lines: List[str]) -> List[str]:
             m_value = re.match(r"^ACCU\s*=\s*(.+)$", s0)
             condition = _replace_accu_equality_condition(s1, m_value.group(1).strip() if m_value else "")
             if m_value and condition is not None:
-                end = _find_block_end(lines, i + 1)
                 value = m_value.group(1).strip()
-                if end is not None and "ACCU" not in value:
-                    replacement_body = _replace_accu_reads_until_store(lines[i + 2 : end], value)
-                    if replacement_body is not None and not is_live_after(lines, end + 1, "ACCU"):
-                        out.append(f"{_extract_indent(lines[i + 1])}{condition}")
-                        out.extend(replacement_body)
-                        out.append(lines[end])
-                        i = end + 1
-                        continue
+                if "ACCU" not in value and not _accu_live_through_if(lines, i + 1):
+                    out.append(f"{_extract_indent(lines[i + 1])}{condition}")
+                    i += 2
+                    continue
         out.append(lines[i])
         i += 1
     return out
@@ -168,16 +163,6 @@ def _replace_accu_equality_condition(stripped: str, value: str) -> str | None:
         op, rhs = negated.groups()
         return f"if (!({value} {op} {rhs.strip()})) {{"
     return None
-
-
-def _replace_accu_reads_until_store(lines: List[str], value: str) -> List[str] | None:
-    out: List[str] = []
-    for line in lines:
-        stripped = line.strip()
-        if re.match(r"^ACCU\s*=", stripped):
-            return None
-        out.append(re.sub(r"\bACCU\b", lambda _match: value, line))
-    return out
 
 
 def rewrite_accu_condition_after_reg_store(lines: List[str]) -> List[str]:

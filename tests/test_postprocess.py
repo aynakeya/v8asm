@@ -323,7 +323,7 @@ class SimplifyLinesTests(unittest.TestCase):
 
         self.assertIn("ACCU = arg0", simplified)
 
-    def test_inlines_accu_equality_condition_load(self) -> None:
+    def test_equality_condition_reuses_the_loaded_method(self) -> None:
         lines = [
             'ACCU = closure["brand"]',
             "if (!(ACCU === undefined)) {",
@@ -335,14 +335,11 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
+        self.assertEqual(simplified, lines)
+        only_condition = lines[:2] + ["  return 1", "}", "return undefined"]
         self.assertEqual(
-            simplified,
-            [
-                'if (!(closure["brand"] === undefined)) {',
-                '  closure["brand"].call(this)',
-                "}",
-                "return undefined",
-            ],
+            simplify_lines(only_condition, recover_structures=True),
+            ['if (!(closure["brand"] === undefined)) {', "  return 1", "}", "return undefined"],
         )
 
     def test_keeps_shared_bound_method_value_for_multiple_calls(self) -> None:
@@ -919,7 +916,7 @@ class SimplifyLinesTests(unittest.TestCase):
 
         self.assertEqual(simplified, ["value += arg0", "return value"])
 
-    def test_compacts_adjacent_binary_temp_property_store(self) -> None:
+    def test_keeps_property_temp_before_dynamic_key_evaluation(self) -> None:
         lines = [
             "r3 = this[context_slot[2]]",
             "this[context_slot[2]] = (r3 + r0)",
@@ -927,7 +924,7 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertEqual(simplified, ["this[context_slot[2]] = (this[context_slot[2]] + r0)"])
+        self.assertEqual(simplified, lines)
 
     def test_compacts_accu_binary_return(self) -> None:
         lines = [
@@ -1179,7 +1176,8 @@ class SimplifyLinesTests(unittest.TestCase):
         self.assertEqual(
             simplified,
             [
-                "target.saved = source.value",
+                "ACCU = source.value",
+                "target.saved = ACCU",
                 "return target",
             ],
         )
@@ -1735,7 +1733,7 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertEqual(simplified, ["r0 = (arg0.a === undefined ? 1 : arg0.a)"])
+        self.assertEqual(simplified, ["ACCU = arg0.a", "r0 = (ACCU === undefined ? 1 : ACCU)"])
 
     def test_recovers_undefined_default_with_interleaved_receiver_save(self) -> None:
         lines = [
@@ -1753,7 +1751,8 @@ class SimplifyLinesTests(unittest.TestCase):
         self.assertEqual(
             simplified,
             [
-                "r0 = (arg0.a === undefined ? 1 : arg0.a)",
+                "ACCU = arg0.a",
+                "r0 = (ACCU === undefined ? 1 : ACCU)",
                 "return arg0.b",
             ],
         )
