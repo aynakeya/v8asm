@@ -24,6 +24,7 @@ JSON 自动保留这些信息。未知 opcode 的 WARNING 会直接使语义测�
 | `call-order` | 方法 receiver 与参数求值顺序 |
 | `property-effects` | getter 的执行次数和顺序 |
 | `short-circuit` | 逻辑表达式与空值合并 |
+| `control-flow` | 混合 &&/|| 的全部 16 组真值路径、嵌套条件表达式、外层 else 归属、分支合流、赋值表达式与逻辑赋值的结果值、提前返回、for/while/do-while 的 continue/break 与嵌套循环、条件及更新段副作用次数 |
 | `optional-nullish` | 可选计算属性、getter、可选方法调用；空值跳过参数，0/false/空字符串不走 fallback |
 | `default-rest-spread` | 默认值只对 undefined 生效；rest/spread、receiver、实参数量；unmapped arguments 不与形参联动 |
 | `object-rest-spread` | 计算键转换、getter 次数/顺序、Symbol 保留与排除、函数命名、`__proto__` 自有属性、null prototype、null/undefined/字符串 spread |
@@ -51,7 +52,7 @@ uv run python -m unittest discover -s tests -p test_semantic_equivalence.py
 ```
 
 `object-rest-spread`、`lexical-initialization` 以及上述新增的
-`conversion-boundaries`、`numeric-literals`、`iterable-spread`、`context-lifetimes`、`exception-completions`、`class-members`
+`conversion-boundaries`、`numeric-literals`、`iterable-spread`、`context-lifetimes`、`control-flow`、`exception-completions`、`class-members`
 各有三份跨大版本 cache，均来自各自同一个 `.js` 文件：
 
 | Node | 实际 V8 | cache 文件后缀 |
@@ -92,6 +93,11 @@ decompiler 的跨版本语义回归，不是 Electron snapshot 兼容性证明�
 数值转换 fixture 使用非内置数字字符串，避免把无法读取 RO 常量与转换指令语义混为一谈。
 `numeric-literals` 的空洞观察标记使用非内置字符串；判断依据是索引是否存在，
 不是标记文本。JSON 观察前先记录类型、数值字符串和负零标志，避免 JSON 把这些差异吞掉。
+`control-flow` 用数组索引写入事件，不依赖 snapshot 中的内置方法名；比较短路调用的
+顺序、分支赋值、迭代次数和提前退出结果，不要求输出恢复成与源码相同的循环语法。
+同时观察 `?:`、`&&`、`||`、`??` 内赋值的表达式结果与赋值目标，覆盖局部变量的
+`??=`、`||=`、`&&=`，区分 0、false、null、undefined 和真值路径。调用事件另行
+比较，不能仅凭赋值目标正确就认为表达式结果和副作用也正确。
 
 `test_disassembler.py` 另验证 IEEE-754 位模式的无损 JSON 表示、截断数值数据与长度越界
 拒绝，以及新旧 serializer 的固定/变长重复引用。构建开关未确认的实验性
@@ -104,11 +110,12 @@ null/undefined 异常；还覆盖普通、Wide、ExtraWide switch 表中的空�
 
 按实现顺序补齐行为 fixture，不一次铺满只有源码、没有正确性断言的样本：
 
-1. class：继承与 super、计算键、字段、私有成员及大型 dictionary template。
+1. 随常用控制流规则改进，扩展分支合流、循环条件/更新段、提前返回及常见异常路径。
 2. 数组解构、嵌套/default 解构；对象复制继续覆盖 Proxy、不可枚举/继承属性及 getter 抛错。
-3. 迭代器和 generator：next/return/throw、提前 break 时的 IteratorClose、yield*。
-4. async/await：Promise 完成和拒绝、异常/finally 顺序；需先让观察器等待异步完成。
-5. 带标签的多层 break/continue、动态及外部作用域。
+3. class：继承与 super、计算键、字段、私有成员及大型 dictionary template。
+4. 迭代器和 generator：next/return/throw、提前 break 时的 IteratorClose、yield*。
+5. async/await：Promise 完成和拒绝、异常/finally 顺序；需先让观察器等待异步完成。
+6. 带标签的多层 break/continue、动态及外部作用域。
 
 `tests/decomp_rounds/cases` 已有其中一些语法样本，但编译成功或输出无未知指令不等于
 语义等价。关键行为稳定后再加入对应大版本的缓存验证，不因每次小改动重建完整矩阵。

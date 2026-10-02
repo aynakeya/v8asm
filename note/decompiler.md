@@ -35,6 +35,9 @@ JavaScript 辅助运行时，便于尝试执行伪代码，但不保证输出等
 反编译结果，并比较正常返回值或异常结果。当前覆盖：
 
 - 算术和短路求值；
+- 混合布尔条件的调用顺序与分支合流、外层 else 归属、提前返回，以及普通循环的
+  continue/break、更新段和条件求值次数；
+- 条件与短路表达式内赋值的结果、局部变量的 `??=`/`||=`/`&&=` 返回值及目标值；
 - 方法 receiver、参数和 getter 的求值次数与顺序；
 - 闭包状态、slot shadowing 和多层 context depth；
 - 普通 `try/catch`；
@@ -66,6 +69,12 @@ spread；不使用 `Number()` 接受 BigInt，也不把 iterable 原样返回。
 把 `...ACCU` 视为真正读取，并保留短路分支之后仍要使用的比较结果。
 不能把紧邻分支的任意寄存器赋值当作 ACCU 的别名，也不能因为两次调用的文本相同就
 删除其中一次。nullish 折叠后，后续仍使用 ACCU 时要保留其结果值。
+嵌套分支恢复按实际已覆盖的区域选择后继，不能重新进入共享分支体；循环跳转不作为
+普通 if/else 的合流点。条件分支中的赋值不能杀掉其他路径上的活跃值；闭合花括号
+也不意味着 ACCU 不再使用。外层带 else 时不能直接把双层 if 合并成 &&。
+局部别名也不能越过合流处替代其他路径的结果；清理 `ACCU = expr; rN = ACCU` 时，
+除了保留目标寄存器的赋值，还要确认后续不再读取表达式结果。遇到无法证明的控制流
+保留 ACCU，不把分支中的第一次赋值当成所有路径都会执行的覆盖。
 `CreateUnmappedArguments` 使用严格模式 helper 创建真正的独立 arguments 对象，
 不能简单替换为数组，也不能复用可能与形参联动的非严格模式 arguments。
 
@@ -98,6 +107,10 @@ spread；不使用 `Number()` 接受 BigInt，也不把 iterable 原样返回。
 
 `context_flow.py` 按指令位置追踪 context 身份；`control_flow.py` 为尚不能可靠结构化的
 同步异常和 switch 提供显式基本块 dispatch。后者不会经过跨块文本别名折叠。
+普通分支、循环跳转、异常恢复和 dispatch 的条件方向统一由
+`InstructionTranslator.branch_expression(..., taken=...)` 生成，不再各自维护取反规则。
+`logical.py` 把 if 两条路径的 ACCU 活跃性检查与条件改写分开；保留既有匹配范围和
+规则执行顺序，不因代码整理扩大折叠条件。
 源码恢复后仍残留未消费跳转时，也采用完整函数的 dispatch，而不是把跳转仅留为注释。
 未支持的派生类、generator/async 等仍可能输出不可执行代码，详见
 [完整应用 fixture 实测](application-fixture.md)，不能将这个 fallback 理解为任意 JS 都可执行。

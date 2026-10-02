@@ -144,6 +144,11 @@ class SemanticEquivalenceTests(unittest.TestCase):
     def test_short_circuit_evaluation(self) -> None:
         self.assert_fixture_equivalent("short-circuit")
 
+    def test_branches_and_loop_transfers(self) -> None:
+        for suffix in FEATURE_CACHE_SUFFIXES:
+            with self.subTest(version=suffix):
+                self.assert_fixture_equivalent("control-flow", "control-flow" + suffix)
+
     def test_optional_chain_and_nullish_evaluation(self) -> None:
         self.assert_fixture_equivalent("optional-nullish")
 

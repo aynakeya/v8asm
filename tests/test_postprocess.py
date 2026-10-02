@@ -1291,7 +1291,8 @@ class SimplifyLinesTests(unittest.TestCase):
             simplified,
             [
                 "for (const item of arg0) {",
-                "  if (truthy(item)) {",
+                "  ACCU = item",
+                "  if (truthy(ACCU)) {",
                 "    r0 += item",
                 "  }",
                 "}",
@@ -1523,8 +1524,8 @@ class SimplifyLinesTests(unittest.TestCase):
 
         simplified = simplify_lines(lines, recover_structures=True)
 
-        self.assertIn("  return r0.value", simplified)
-        self.assertIn("if (truthy(r0) && truthy(arg1)) {", simplified)
+        self.assertIn("return r0.value", [line.strip() for line in simplified])
+        self.assertIn("if (truthy(r0)) {", simplified)
         self.assertNotIn("ACCU = ACCU.value", simplified)
 
     def test_recovers_nullish_assignment_to_register(self) -> None:

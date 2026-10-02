@@ -10,6 +10,8 @@
 - 不为了减少寄存器、`ACCU` 或 `goto_comments` 而移动属性读取、调用或异常边界。
 - 新规则必须先有失败 fixture，并同时验证成功模式和拒绝误匹配模式。
 - profile、snapshot 或对象 layout 缺少证据时保持 `unresolved`。
+- 优先保证常用控制流与调用的准确性、可读性；较少使用的语法和实验性构建特性后排。
+  不把边缘情况穷举当作每轮工作的目标。
 
 ## P0：继续核对表达式读写
 
@@ -17,6 +19,30 @@
 分支中的临时值存活，以及变量名与字符串/属性键的区分。新规则应消费可证明的读写信息；
 不能把已有局部规则扩大为全局变量替换。必要时只为这些表达式引入小范围的结构化表示，
 不一次重写整个 decompiler。
+
+2026-10-02 扫描中还有两类局部恢复规则风险，按以下顺序继续处理：
+
+1. 等值条件内联可能重复读取 getter：`ACCU = source.value; if (ACCU === 1)`
+   的分支继续使用 ACCU 时，不能把该使用替换为再次读取 `source.value`。
+2. 嵌套属性的复合赋值折叠可能改变 getter 次数：
+   `source.child.value = source.child.value + 3` 不能直接缩成 `source.child.value += 3`，
+   前者读取两次 `child`，后者只读取一次。
+
+两者已在局部后处理输入的执行对照中复现；对应的真实 cache 探针目前因保留了寄存器
+而通过，尚不能断言普通源码或 Atom 已受影响。修复时应保留安全的普通变量折叠，
+同时检查真实字节码在哪些路径会产生这些输入，不扩大成全局禁止优化。
+
+## P1：常用控制流的可读性
+
+在已验证语义的前提下，继续简化普通 if/else、短路条件、提前返回与 for/while/do-while：
+
+- 减少复杂布尔条件恢复后的重复分支文本，但不能重复执行共享分支或改变 else 归属；
+- 恢复能证明的循环条件与更新段，保留 continue 的目标及条件求值次数；
+- 整理空分支时统一后续识别规则，不能破坏对象解构和 nullish 等现有恢复；
+- 保守保留合流处仍使用的寄存器和 ACCU，不能按源码行顺序判断它们已被覆盖。
+
+以 `control-flow` 的真实 cache 和执行事件为基线。无法证明的情况保留显式控制流，
+本项优先于下面的高级语言特性扩展。
 
 ## P1：异常控制流的结构化与可读性
 
@@ -37,14 +63,14 @@
 shadowing、普通 catch 和 catch + finally。后续高风险改动应补充：
 
 - for-of 的 iterator getter/return 抛错、continue 与嵌套迭代器关闭顺序；
-- nullish assignment 的单次求值；
+- 属性目标的逻辑赋值（`??=`、`||=`、`&&=`）对 getter、计算键的单次求值；
 - 对象复制的 Proxy、不可枚举/继承属性及 getter 抛错；
 - generator、async resume 和 reject 路径。
 
 小型语义门禁随对应恢复规则补充；完整应用的探索性覆盖由 Taskboard 按需诊断，
 不把尚未实现的功能加入 expectedFailure 来制造全绿结果。
 
-## P1：扩展 class 元数据恢复
+## P2：扩展 class 元数据恢复
 
 继续补继承与 `super`、计算键与数字键、匿名 class、字段、私有成员和静态初始化块。
 大型 class 使用的 dictionary template、重复定义留下的未消费参数，也需要单独解析，
@@ -54,7 +80,7 @@ Taskboard 中派生构造器和箭头函数的 lexical this 已触发非法 `thi
 不合入外部 fork 的文本 class rewrite：不能删除真实方法名的数字后缀，也不能把
 `super.value` 无条件转换为绑定方法。无法证明的 class 构造保留低层形式。
 
-## P1：扩展作用域边界
+## P2：扩展作用域边界
 
 继续验证 `with`、未解析外部 context、动态作用域及特殊函数类型的捕获行为。
 合流后无法唯一确认的 context 必须保留低层表达；不得退回按 scope 列表顺序猜槽位。
@@ -86,16 +112,16 @@ Taskboard 中派生构造器和箭头函数的 lexical this 已触发非法 `thi
 
 显示截断不能改变 decompiler 消费的结构化对象图。
 
-## P1：模板对象与 BigInt 常量
+## P2：模板对象与 BigInt 常量
 
 Taskboard 的 `codec` 仍包含未实现的 `GetTemplateObject`，需恢复 tagged template 的
 raw/cooked 值、冻结/属性描述符和同一调用点的对象身份；不同调用点即使文本相同也
 不能合并。非法 escape 的 cooked undefined 也要覆盖，不能只拼接成普通字符串。
 
-该场景的 BigInt 字面量仍是 `<BigInt ...>` 占位符。下一步从源码生成其符号位和数字
+该场景的 BigInt 字面量仍是 `<BigInt ...>` 占位符。后续从源码生成其符号位和数字
 布局，使用真实 cache 验证大整数、负值、零和运算，不用 Number 中转而损失精度。
 
-## P1：实验性 undefined-double 构建形态
+## P2：实验性 undefined-double 构建形态
 
 当前识别到了专用 NaN 位模式会明确报错。需要可确认的编译开关与真实 cache 后再
 支持，不能仅因为版本源码包含该常量就推断目标构建启用了它。

@@ -105,19 +105,14 @@ class InstructionTranslator:
             index = self._reg_name(instr.args[1]) if len(instr.args) > 1 else "index"
             cache = self._reg_name(instr.args[2]) if len(instr.args) > 2 else "cache"
             return (f"ForInDone({index}, {cache})", True)
-        info = CONDITION_MAP.get(instr.mnemonic)
-        if not info:
-            return None
-        return info
+        return CONDITION_MAP.get(instr.mnemonic)
 
-    def fallthrough_condition(self, instr: Instruction) -> Optional[str]:
+    def branch_expression(self, instr: Instruction, *, taken: bool) -> Optional[str]:
         info = self.branch_condition(instr)
-        if not info:
+        if info is None:
             return None
         expr, branch_on_true = info
-        if branch_on_true:
-            return f"!({expr})"
-        return expr
+        return expr if taken == branch_on_true else f"!({expr})"
 
     def _const(self, idx: int) -> str:
         entry = self.constants.get(idx)

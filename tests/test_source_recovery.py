@@ -125,6 +125,9 @@ const arg1 = { toString() { events.push("key"); return "selected"; } };
              "if (!(truthy(ACCU))) {", "  return [ACCU, r1, r0.length]", "}", "return 9"],
             ["ACCU = undefined", "if (!(isNullish(ACCU))) {", "}", "else {",
              "  ACCU = 7", "}", "r0 = ACCU", "return [r0, ACCU]"],
+            ["if (true) {", "  r0 = 7", "}", "else {", "  r0 = 9", "}", "return r0"],
+            ["ACCU = 2", "if (true) {", "  ACCU = null", "  if (truthy(ACCU)) {",
+             "    ACCU = 7", "  }", "}", "return ACCU"],
         ]
         for lines in cases:
             with self.subTest(lines=lines):

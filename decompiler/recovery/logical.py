@@ -6,19 +6,6 @@ from typing import List
 from .common import _extract_indent, _find_block_end, is_live_after
 
 
-def _body_reads_accu_before_reassign(lines: List[str], start: int, end: int) -> bool:
-    for idx in range(start, min(end, len(lines))):
-        stripped = lines[idx].strip()
-        reassignment = re.match(r"^ACCU\s*=\s*(.+)$", stripped)
-        if reassignment:
-            if re.search(r"\bACCU\b", reassignment.group(1)):
-                return True
-            return False
-        if re.search(r"\bACCU\b", stripped):
-            return True
-    return False
-
-
 def recover_nullish_assignments(lines: List[str]) -> List[str]:
     out: List[str] = []
     i = 0
@@ -117,19 +104,31 @@ def inline_accu_condition_loads(lines: List[str]) -> List[str]:
             m_value = re.match(r"^ACCU\s*=\s*(.+)$", s0)
             m_if = _match_accu_truthy_if(s1, allow_wrapped_negation=True)
             if m_value and m_if is not None:
-                end = _find_block_end(lines, i + 1)
                 value = m_value.group(1).strip()
-                if end is not None and "ACCU" not in value:
-                    if not _body_reads_accu_before_reassign(
-                        lines, i + 2, end
-                    ) and not _reads_accu_before_reassign(lines, end + 1):
-                        indent = _extract_indent(lines[i + 1])
-                        out.append(_format_truthy_if(indent, m_if, value))
-                        i += 2
-                        continue
+                if "ACCU" not in value and not _accu_live_through_if(lines, i + 1):
+                    indent = _extract_indent(lines[i + 1])
+                    out.append(_format_truthy_if(indent, m_if, value))
+                    i += 2
+                    continue
         out.append(lines[i])
         i += 1
     return out
+
+
+def _accu_live_through_if(lines: List[str], start: int) -> bool:
+    end = _find_block_end(lines, start)
+    if end is None:
+        return True
+    branches = [lines[start + 1:end], []]
+    join = end + 1
+    if join < len(lines) and lines[join].strip() == "else {":
+        else_end = _find_block_end(lines, join)
+        if else_end is None:
+            return True
+        branches[1] = lines[join + 1:else_end]
+        join = else_end + 1
+    # A missing else is also a path through the merge.
+    return any(is_live_after(branch + lines[join:], 0, "ACCU") for branch in branches)
 
 
 def inline_accu_equality_condition_loads(lines: List[str]) -> List[str]:
@@ -146,7 +145,7 @@ def inline_accu_equality_condition_loads(lines: List[str]) -> List[str]:
                 value = m_value.group(1).strip()
                 if end is not None and "ACCU" not in value:
                     replacement_body = _replace_accu_reads_until_store(lines[i + 2 : end], value)
-                    if replacement_body is not None and not _reads_accu_before_reassign(lines, end + 1):
+                    if replacement_body is not None and not is_live_after(lines, end + 1, "ACCU"):
                         out.append(f"{_extract_indent(lines[i + 1])}{condition}")
                         out.extend(replacement_body)
                         out.append(lines[end])
@@ -179,21 +178,6 @@ def _replace_accu_reads_until_store(lines: List[str], value: str) -> List[str] |
             return None
         out.append(re.sub(r"\bACCU\b", lambda _match: value, line))
     return out
-
-
-def _reads_accu_before_reassign(lines: List[str], start: int) -> bool:
-    for idx in range(start, len(lines)):
-        stripped = lines[idx].strip()
-        reassignment = re.match(r"^ACCU\s*=\s*(.+)$", stripped)
-        if reassignment:
-            if re.search(r"\bACCU\b", reassignment.group(1)):
-                return True
-            return False
-        if re.search(r"\bACCU\b", stripped):
-            return True
-        if stripped in {"}", "else {"} or stripped.startswith(("return ", "throw ")):
-            return False
-    return False
 
 
 def rewrite_accu_condition_after_reg_store(lines: List[str]) -> List[str]:
@@ -291,7 +275,10 @@ def combine_nested_truthy_ifs(lines: List[str]) -> List[str]:
             continue
 
         outer_end = _find_block_end(lines, i)
-        if outer_end is None or i + 2 >= outer_end:
+        if (
+            outer_end is None or i + 2 >= outer_end
+            or (outer_end + 1 < len(lines) and lines[outer_end + 1].strip() == "else {")
+        ):
             out.append(lines[i])
             i += 1
             continue

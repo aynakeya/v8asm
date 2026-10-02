@@ -62,21 +62,6 @@ def _accu_load_expr(
     return expression
 
 
-def _branch_path_condition(
-    translator: InstructionTranslator,
-    branch: Instruction,
-    *,
-    branch_taken: bool,
-) -> Optional[str]:
-    info = translator.branch_condition(branch)
-    if not info:
-        return None
-    expression, branch_on_true = info
-    if branch_taken == branch_on_true:
-        return expression
-    return f"!({expression})"
-
-
 def _condition_with_load(condition: str, expression: str) -> Optional[str]:
     if not condition or not expression or "ACCU" in expression:
         return None
@@ -124,12 +109,8 @@ def _match_short_circuit_alternate(
 
     first_expression = _accu_load_expr(translator, first_load)
     second_expression = _accu_load_expr(translator, second_load)
-    first_condition = _branch_path_condition(
-        translator, first_jump, branch_taken=True
-    )
-    second_condition = _branch_path_condition(
-        translator, second_jump, branch_taken=False
-    )
+    first_condition = translator.branch_expression(first_jump, taken=True)
+    second_condition = translator.branch_expression(second_jump, taken=False)
     if (
         first_expression is None
         or second_expression is None
@@ -665,7 +646,7 @@ def _render_single_try_catch(
             and guard.mnemonic.startswith("JumpIf")
             and parse_jump_target(guard) == resume_offset
         ):
-            guard_condition = translator.fallthrough_condition(guard)
+            guard_condition = translator.branch_expression(guard, taken=False)
             if guard_condition:
                 prefix = prefix[:-1]
                 if "ACCU" in guard_condition and prefix:

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List
+from typing import List
 
-from .common import _extract_indent, _find_block_end, code_tokens, expression_statement, is_live_after
+from .common import _extract_indent, _find_block_end, code_tokens, expression_statement, is_live_after, uses_identifier
 
 
 def _coalesce_accu_store_aliases(lines: List[str]) -> List[str]:
@@ -72,8 +72,17 @@ def _is_self_keyed_accu_load(expr: str, alias: str) -> bool:
 
 def _accu_alias_is_safe(lines: List[str], start: int, alias: str) -> bool:
     alias_reassigned = False
-    for line in lines[start:]:
+    for index in range(start, len(lines)):
+        line = lines[index]
         stripped = line.strip()
+        # A local alias is not proof of the value arriving from every branch.
+        if stripped.startswith("if (") and stripped.endswith("{"):
+            end = _find_block_end(lines, index)
+            if end is None or is_live_after(lines, end + 1, "ACCU"):
+                return False
+        elif (stripped.endswith("{") or stripped.startswith("}")
+                or stripped.startswith(("goto ", "// goto ", "// loop goto "))):
+            return False
         accu_assignment = re.match(r"^ACCU\s*=\s*(.+)$", stripped)
         if accu_assignment:
             if re.search(r"\bACCU\b", accu_assignment.group(1)):
@@ -237,6 +246,10 @@ def _is_property_read_expr(expr: str) -> bool:
 
 def _drop_duplicate_expr_before_assignment(lines: List[str]) -> List[str]:
     out: List[str] = []
+    accu_unused = not any(
+        uses_identifier(re.sub(r"^\s*ACCU\s*=(?!=)", "", line), "ACCU")
+        for line in lines
+    )
     i = 0
     while i < len(lines):
         if i + 1 < len(lines):
@@ -249,7 +262,7 @@ def _drop_duplicate_expr_before_assignment(lines: List[str]) -> List[str]:
                 and m_reg_dup
                 and _is_pure_expression(m_accu.group(1).strip())
                 and m_accu.group(1).strip() == m_reg_dup.group(1).strip()
-                and not _reads_accu_before_reassign(lines, i + 2)
+                and (accu_unused or not is_live_after(lines, i + 2, "ACCU"))
             ):
                 i += 1
                 continue
@@ -296,7 +309,7 @@ def _collapse_accu_store(lines: List[str]) -> List[str]:
             m_reg = re.match(r"^(r\d+)\s*=\s*ACCU$", s1)
             if m_accu and m_reg:
                 expr = m_accu.group(1).strip()
-                if "ACCU" not in expr and not _reads_accu_before_reassign(lines, i + 2):
+                if "ACCU" not in expr and not is_live_after(lines, i + 2, "ACCU"):
                     indent = _extract_indent(lines[i + 1])
                     out.append(f"{indent}{m_reg.group(1)} = {expr}")
                     i += 2
@@ -323,21 +336,6 @@ def _collapse_accu_push_context(lines: List[str]) -> List[str]:
         out.append(lines[i])
         i += 1
     return out
-
-
-def _reads_accu_before_reassign(lines: List[str], start: int) -> bool:
-    for idx in range(start, len(lines)):
-        stripped = lines[idx].strip()
-        reassignment = re.match(r"^ACCU\s*=\s*(.+)$", stripped)
-        if reassignment:
-            if re.search(r"\bACCU\b", reassignment.group(1)):
-                return True
-            return False
-        if re.search(r"\bACCU\b", stripped):
-            return True
-        if stripped in {"}", "else {"} or stripped.startswith(("return ", "throw ")):
-            return False
-    return False
 
 
 def _drop_unused_pure_accu_loads(lines: List[str]) -> List[str]:
@@ -416,11 +414,16 @@ def _drop_unused_pure_reg_assignments(lines: List[str]) -> List[str]:
         # Linear liveness does not model backedges or exception edges.
         return lines
     live: set[str] = set()
+    branch_depth = 0
     keep = [True] * len(lines)
 
     for idx in range(len(lines) - 1, -1, -1):
         line = lines[idx]
         stripped = line.strip()
+        if stripped == "}":
+            branch_depth += 1
+        elif stripped.endswith("{"):
+            branch_depth -= 1
         match = re.match(r"^(r\d+)\s*=\s*(.+)$", stripped)
         if match:
             reg, expr = match.groups()
@@ -432,7 +435,9 @@ def _drop_unused_pure_reg_assignments(lines: List[str]) -> List[str]:
             ):
                 keep[idx] = False
                 continue
-            live.discard(reg)
+            # A conditional assignment does not kill the value on other paths.
+            if branch_depth == 0:
+                live.discard(reg)
             live.update(rhs_regs)
             continue
 
@@ -448,19 +453,6 @@ def _has_following_executable_line(lines: List[str], start: int) -> bool:
             continue
         return True
     return False
-
-
-def _count_reg_uses(lines: List[str]) -> Dict[str, int]:
-    usage: Dict[str, int] = {}
-    for line in lines:
-        stripped = line.strip()
-        assign = re.match(r"^(r\d+)\s*=", stripped)
-        lhs = assign.group(1) if assign else None
-        for reg in re.findall(r"\br\d+\b", stripped):
-            if reg == lhs and stripped.startswith(f"{reg} ="):
-                continue
-            usage[reg] = usage.get(reg, 0) + 1
-    return usage
 
 
 def _is_pure_reg_rhs(expr: str) -> bool:

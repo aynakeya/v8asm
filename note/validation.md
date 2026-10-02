@@ -126,6 +126,55 @@ UV_PROJECT_ENVIRONMENT=/tmp/v8asm-venv-314 \
 损失精度的文本 printer 不作为新数值功能的输入依据；需要重新生成 `--format json`。
 JavaScript 运行时对 NaN 的表示允许规范化，不宣称任意 NaN payload 经执行仍逐位相同。
 
+### 常用控制流与代码整理的增量验证
+
+数值与稀疏数组修复已提交为 `fca7265`。后续控制流改动使用以下聚焦回归：
+
+```bash
+uv run python -m unittest tests.test_translator tests.test_semantic_equivalence tests.test_source_recovery tests.test_postprocess
+uv run python -m unittest discover -s tests -p test_decompiler_file.py
+```
+
+合计 **179 项通过，无跳过**。`control-flow` 用同一源码在 Node 18.20.8、20.20.2、
+22.17.0、24.7.0 生成四份真实 cache，版本和 SHA-256 记录于 manifest。
+覆盖混合短路条件的全部 16 组真值路径、嵌套条件表达式、外层 else、分支赋值、提前返回，
+以及 for/while/do-while 的条件、更新段、continue/break 和嵌套循环。
+
+修复嵌套分支重复执行共享分支体、跨分支误删赋值、合流后 ACCU 值丢失，以及嵌套 if
+合并后改变外层 else 归属的问题。循环更新段不再重复展开，末尾冗余 continue 已移除。
+不强求输出与源码外形一致；部分循环和分支仍保留寄存器、空分支与 `while (true)`。
+
+随后整理分支条件生成、结构化器参数和逻辑恢复的活跃性检查，并删除未使用的重复
+寄存器统计函数。相对控制流修复完成时的基线，现有 **57 份语义 cache** 的恢复输出
+SHA-256 全部相同。结合上述行为测试，覆盖范围内未发现功能回退；没有为重构另建
+一套长期 golden 文件，也没有修改已有测试断言来适配这次整理。
+
+只运行相关 Python/缓存回归，没有重建原生 V8，也没有将本轮结果表述为新的
+Electron 或完整 Taskboard 兼容性证明。
+
+### 条件表达式结果值修复
+
+代码整理后继续扫描，优先修复真实 cache 已复现的结果丢失：例如
+`const result = flag ? (left = 7) : (right = 9)`，原恢复结果中赋值目标正确，
+但 `result` 变成 undefined；短路默认值和逻辑赋值也可能留下旧值。
+根因是清理规则把块结束当作 ACCU 生命周期结束，或把单条分支中的寄存器别名
+错误传播到合流处。现在使用已有活跃性检查，不能证明安全时保留结果值。
+
+- 扩展已有 `control-flow` fixture，重新生成 Node 18.20.8、20.20.2、22.17.0、
+  24.7.0 的真实 cache；继续由现有生成器和 manifest 校验来源，不另建生成流程；
+- `test_semantic_equivalence`、`test_source_recovery`、`test_postprocess` 共 **153 项通过**，
+  `test_decompiler_file.py` **12 项通过**，合计 **165 项，无跳过**；
+- 四个版本均比较源码与恢复结果，验证赋值目标、表达式结果和短路调用顺序。
+  本次语义修复会改变输出，不沿用上节纯重构的“57 份输出相同”结论；
+- Atom 再次使用 `example2/atom.compiled.dist.jsc`、V8 `13.4.114.21` 与匹配的
+  `example2/v8_context_snapshot.bin`，解析 797 个 BytecodeArray；恢复输出 42059 行，
+  通过 `node --check`，未知指令诊断、裸 goto、goto 注释及 segmentfault fallback 均为零。
+
+本地生成结果位于 `tests/decomp_rounds/out/branch-values/atom.disasm.json` 和
+`tests/decomp_rounds/out/branch-values/atom.decompiled.js`，不纳入版本控制。
+Atom 未执行，语法与诊断检查不能证明整个应用行为等价。没有重建 V8 或重跑
+Electron 矩阵；局部规则扫描发现但尚未影响真实 cache 探针的 getter 风险记录在 TODO。
+
 ### 何时运行矩阵
 
 - 普通表达式和 opcode 修复：相关单元测试与语义 fixture。

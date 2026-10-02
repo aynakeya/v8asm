@@ -56,8 +56,9 @@ def render_dispatch(translator, instructions):
         target = parse_jump_target(term)
         next_offset = blocks[index + 1].start if index + 1 < len(blocks) else None
         if term.mnemonic.startswith("JumpIf"):
-            expression, on_true = translator.branch_condition(term)
-            condition = expression if on_true else f"!({expression})"
+            condition = translator.branch_expression(term, taken=True)
+            if condition is None:
+                raise ValueError(f"unsupported branch condition {term.mnemonic}")
             if target not in offsets or next_offset not in offsets:
                 raise ValueError("unresolved branch target")
             lines.extend([f"      {pc} = {condition} ? {target} : {next_offset};", "      continue dispatch;"])

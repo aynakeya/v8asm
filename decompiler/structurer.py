@@ -10,6 +10,7 @@ from .cfg import (
     is_loop_jump,
     is_unconditional_jump,
 )
+from .instruction import Instruction
 from .statements import IfStatement, LoopStatement, SimpleStatement, Statement
 from .translator import InstructionTranslator
 from .utils import parse_jump_target, strip_trailing_goto
@@ -47,55 +48,52 @@ class Structurer:
             block = self.blocks[idx]
             if stop_offset is not None and block.start >= stop_offset:
                 break
-            produced, idx = self._emit_block(idx, stop_offset)
+            produced, idx = self._emit_block(idx)
             if idx in seen_indices:
                 idx += 1
             statements.extend(produced)
         return statements, idx
 
-    def _emit_block(
-        self, block_idx: int, stop_offset: Optional[int]
-    ) -> Tuple[List[Statement], int]:
+    def _emit_block(self, block_idx: int) -> Tuple[List[Statement], int]:
         block = self.blocks[block_idx]
         statements: List[Statement] = []
         self.pending_raw_branch_targets.discard(block.start)
-
-        if stop_offset is not None and block.start >= stop_offset:
-            return statements, block_idx
 
         loop_region = self.loop_regions.get(block.start)
         if loop_region and block.start not in self.active_loops:
             self.active_loops.add(block.start)
             body, _ = self._emit_region(loop_region.start, loop_region.end)
             self.active_loops.remove(block.start)
+            if (
+                body and isinstance(body[-1], SimpleStatement)
+                and body[-1].text == f"continue loop_{block.start}"
+            ):
+                body.pop()
             loop_stmt = LoopStatement(condition="true", body=body, label=f"loop_{block.start}")
             next_idx = self.offset_to_index.get(loop_region.end, len(self.blocks))
             return [loop_stmt], next_idx
 
-        instructions = block.instructions[:]
+        instructions = block.instructions
         if not instructions:
             return statements, block_idx + 1
 
         term = instructions[-1]
-        body_instrs = instructions[:-1] if len(instructions) > 1 else []
-        for instr in body_instrs:
+        for instr in instructions[:-1]:
             text = self.translator.translate(instr)
             if text:
                 statements.append(SimpleStatement(text))
-
-        if term is None:
-            return statements, block_idx + 1
 
         if is_conditional(term.mnemonic):
             target = parse_jump_target(term)
             loop_jump = self._loop_transfer(target)
             if loop_jump:
-                expression, branch_on_true = self.translator.branch_condition(term)
-                condition = expression if branch_on_true else f"!({expression})"
+                condition = self.translator.branch_expression(term, taken=True)
+                if condition is None:
+                    raise ValueError(f"unsupported branch condition {term.mnemonic}")
                 statements.append(IfStatement(condition, [SimpleStatement(loop_jump)]))
                 return statements, block_idx + 1
             if not self._is_pending_raw_dispatch_target(block.start, target):
-                built = self._build_if(block_idx, stop_offset)
+                built = self._build_if(block_idx)
                 if built:
                     stmt, next_idx = built
                     statements.append(stmt)
@@ -147,21 +145,16 @@ class Structurer:
                 return f"continue loop_{start}"
         return None
 
-    def _build_if(
-        self, block_idx: int, stop_offset: Optional[int]
-    ) -> Optional[Tuple[Statement, int]]:
-        guard_key = block_idx
-        if guard_key in self.active_if_builds:
+    def _build_if(self, block_idx: int) -> Optional[Tuple[Statement, int]]:
+        if block_idx in self.active_if_builds:
             return None
-        self.active_if_builds.add(guard_key)
+        self.active_if_builds.add(block_idx)
         try:
-            return self._build_if_inner(block_idx, stop_offset)
+            return self._build_if_inner(block_idx)
         finally:
-            self.active_if_builds.remove(guard_key)
+            self.active_if_builds.remove(block_idx)
 
-    def _build_if_inner(
-        self, block_idx: int, stop_offset: Optional[int]
-    ) -> Optional[Tuple[Statement, int]]:
+    def _build_if_inner(self, block_idx: int) -> Optional[Tuple[Statement, int]]:
         block = self.blocks[block_idx]
         term = block.terminator
         if term is None:
@@ -170,7 +163,7 @@ class Structurer:
         if target is None or target <= block.start:
             return None
 
-        condition = self.translator.fallthrough_condition(term)
+        condition = self.translator.branch_expression(term, taken=False)
         if not condition:
             return None
 
@@ -179,10 +172,14 @@ class Structurer:
             return None
         fallthrough_start = self.blocks[fallthrough_idx].start
 
-        then_statements, _ = self._emit_region(fallthrough_start, target)
-        strip_trailing_goto(then_statements, target)
+        then_statements, then_end_idx = self._emit_region(fallthrough_start, target)
         else_statements: Optional[List[Statement]] = None
         join_offset = target
+
+        # A nested branch may already cover the original target and its merge.
+        # Resume after that whole region, not inside its shared branch body.
+        if then_end_idx < len(self.blocks):
+            join_offset = max(join_offset, self.blocks[then_end_idx].start)
 
         last_idx = self._block_index_before(target)
         if last_idx is not None:
@@ -190,12 +187,17 @@ class Structurer:
             last_term = last_block.terminator
             if last_term and is_unconditional_jump(last_term.mnemonic):
                 join_candidate = parse_jump_target(last_term)
-                if join_candidate and join_candidate > target:
-                    join_offset = join_candidate
-                    else_statements, _ = self._emit_region(target, join_offset)
-                    strip_trailing_goto(then_statements, join_offset)
-                    if else_statements:
-                        strip_trailing_goto(else_statements, join_offset)
+                if (
+                    join_candidate and join_candidate > target
+                    and not self._loop_transfer(join_candidate)
+                ):
+                    join_offset = max(join_offset, join_candidate)
+
+        if join_offset > target:
+            else_statements, _ = self._emit_region(target, join_offset)
+        strip_trailing_goto(then_statements, join_offset)
+        if else_statements:
+            strip_trailing_goto(else_statements, join_offset)
 
         next_idx = self.offset_to_index.get(join_offset, len(self.blocks))
         stmt = IfStatement(

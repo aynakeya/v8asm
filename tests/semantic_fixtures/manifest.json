@@ -1,5 +1,57 @@
 {
   "artifacts": {
+    "control-flow-10.2.154.26.jsc": {
+      "arch": "x64",
+      "cache_sha256": "90be9ce7fe3486718e05bda0159be98de8cad296f0aa7ef1585aac33a6950950",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "18.20.8",
+      "platform": "linux",
+      "runtime": "node18",
+      "source": "control-flow.js",
+      "source_sha256": "010300cda5d5e2e3e8371b041f120afeeee7a0733d8c3f86bc2122437a57ab3a",
+      "v8_version": "10.2.154.26-node.39"
+    },
+    "control-flow-11.3.244.8.jsc": {
+      "arch": "x64",
+      "cache_sha256": "b4713f073c1679f1d5d7f3b44fea9cbd1cdfb7beeda3bb7b1aba23001ca4ce7f",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "20.20.2",
+      "platform": "linux",
+      "runtime": "node20",
+      "source": "control-flow.js",
+      "source_sha256": "010300cda5d5e2e3e8371b041f120afeeee7a0733d8c3f86bc2122437a57ab3a",
+      "v8_version": "11.3.244.8-node.38"
+    },
+    "control-flow-12.4.254.21.jsc": {
+      "arch": "x64",
+      "cache_sha256": "7cabdb660ea8bd793e675af72246dd0545a3295a36310dbdd6c4243e40e4ff4b",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "22.17.0",
+      "platform": "linux",
+      "runtime": "node22",
+      "source": "control-flow.js",
+      "source_sha256": "010300cda5d5e2e3e8371b041f120afeeee7a0733d8c3f86bc2122437a57ab3a",
+      "v8_version": "12.4.254.21-node.26"
+    },
+    "control-flow.jsc": {
+      "arch": "x64",
+      "cache_sha256": "2ee96c5c0f90813f43b00e6f4b200f2a823d37ef788dba0c18abac989061a7d0",
+      "compile_flags": [
+        "--no-lazy"
+      ],
+      "node_version": "24.7.0",
+      "platform": "linux",
+      "runtime": "node24",
+      "source": "control-flow.js",
+      "source_sha256": "010300cda5d5e2e3e8371b041f120afeeee7a0733d8c3f86bc2122437a57ab3a",
+      "v8_version": "13.6.233.10-node.26"
+    },
     "conversion-boundaries-10.2.154.26.jsc": {
       "arch": "x64",
       "cache_sha256": "1b0404c4362a16ef60fbc75b23187abfafc6429d7ae6e3bbe4320036b9ca091b",
@@ -166,6 +218,7 @@
       "fixtures": [
         "class-members",
         "context-lifetimes",
+        "control-flow",
         "conversion-boundaries",
         "delete-property",
         "exception-completions",
@@ -186,6 +239,7 @@
       "fixtures": [
         "class-members",
         "context-lifetimes",
+        "control-flow",
         "conversion-boundaries",
         "exception-completions",
         "iterable-spread",
@@ -201,6 +255,7 @@
       "fixtures": [
         "class-members",
         "context-lifetimes",
+        "control-flow",
         "conversion-boundaries",
         "exception-completions",
         "iterable-spread",
